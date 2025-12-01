@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agile-retro.fullname" . }}
+  labels:
+    {{- include "agile-retro.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "agile-retro.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "agile-retro.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "agile-retro.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          {{- if .Values.envFromSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.envFromSecret }}
+          {{- end }}
+          env:
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- if or .Values.auth.secret .Values.auth.existingSecret }}
+            - name: AUTH_SECRET
+              {{- if .Values.auth.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret }}
+                  key: {{ .Values.auth.existingSecretKey | default "auth-secret" }}
+              {{- else }}
+              value: {{ .Values.auth.secret | quote }}
+              {{- end }}
+            {{- end }}
+            {{- if .Values.auth.google.enabled }}
+            - name: AUTH_GOOGLE_ID
+              value: {{ .Values.auth.google.clientId | quote }}
+            - name: AUTH_GOOGLE_SECRET
+              {{- if .Values.auth.google.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.google.existingSecret }}
+                  key: {{ .Values.auth.google.existingSecretKey | default "google-client-secret" }}
+              {{- else }}
+              value: {{ .Values.auth.google.clientSecret | quote }}
+              {{- end }}
+            {{- end }}
+            {{- if .Values.auth.keycloak.enabled }}
+            - name: AUTH_KEYCLOAK_ID
+              value: {{ .Values.auth.keycloak.clientId | quote }}
+            - name: AUTH_KEYCLOAK_SECRET
+              {{- if .Values.auth.keycloak.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.keycloak.existingSecret }}
+                  key: {{ .Values.auth.keycloak.existingSecretKey | default "keycloak-client-secret" }}
+              {{- else }}
+              value: {{ .Values.auth.keycloak.clientSecret | quote }}
+              {{- end }}
+            - name: AUTH_KEYCLOAK_ISSUER
+              value: {{ .Values.auth.keycloak.issuer | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

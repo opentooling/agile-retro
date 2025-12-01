@@ -1,0 +1,78 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Retrospective {
+  id        String   @id @default(uuid())
+  title     String
+  status    String   @default("INPUT") // INPUT, VOTING, REVIEW, ACTIONS, CLOSED
+  tags      String   @default("")
+  creator   String   @default("Anonymous")
+  createdAt DateTime @default(now())
+  isAnonymous Boolean @default(false)
+  
+  // Timers (in minutes)
+  inputDuration  Int?
+  votingDuration Int?
+  reviewDuration Int?
+  phaseStartTime DateTime?
+
+  columns   Column[]
+  actions   ActionItem[]
+}
+
+model Column {
+  id              String        @id @default(uuid())
+  title           String
+  type            String        // START, STOP, CONTINUE
+  retrospectiveId String
+  retrospective   Retrospective @relation(fields: [retrospectiveId], references: [id])
+  items           Item[]
+}
+
+model Item {
+  id        String   @id @default(uuid())
+  content   String
+  summary   String?
+  userId    String   @default("anonymous")
+  username  String   @default("Anonymous")
+  columnId  String
+  column    Column   @relation(fields: [columnId], references: [id])
+  order     Int      @default(0)
+  votes     Vote[]
+  reactions Reaction[]
+  createdAt DateTime @default(now())
+}
+
+model Reaction {
+  id        String   @id @default(uuid())
+  emoji     String
+  userId    String
+  itemId    String
+  item      Item     @relation(fields: [itemId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Vote {
+  id     String @id @default(uuid())
+  itemId String
+  item   Item   @relation(fields: [itemId], references: [id])
+  userId String
+  count  Int
+}
+
+model ActionItem {
+  id              String        @id @default(uuid())
+  content         String
+  completed       Boolean       @default(false)
+  retrospectiveId String
+  retrospective   Retrospective @relation(fields: [retrospectiveId], references: [id])
+}
