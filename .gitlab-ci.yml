@@ -3,13 +3,6 @@ image: docker:24.0.5
 services:
   - docker:24.0.5-dind
 
-variables:
-  # GitLab Registry credentials (automatically set by GitLab)
-  DOCKER_REGISTRY: $CI_REGISTRY
-  DOCKER_USER: $CI_REGISTRY_USER
-  DOCKER_PASSWORD: $CI_REGISTRY_PASSWORD
-  IMAGE_NAME: $CI_PROJECT_PATH
-  
   # Secret Detection
   SECRET_DETECTION_ENABLED: 'true'
 
@@ -27,8 +20,8 @@ include:
 build-multiarch-image:
   stage: build-image
   before_script:
-    - echo "Logging into registry..."
-    - echo "$DOCKER_PASSWORD" | docker login "$DOCKER_REGISTRY" -u "$DOCKER_USER" --password-stdin
+    - echo "Logging into GitLab Registry..."
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     # Install QEMU emulators for multi-arch build
     - docker run --privileged --rm tonistiigi/binfmt --install all
     # Create a new builder instance
@@ -36,10 +29,11 @@ build-multiarch-image:
     - docker buildx use mybuilder
   script:
     - |
-      echo "Building and pushing image for linux/amd64 and linux/arm64..."
+      echo "Building and pushing image to GitLab Registry..."
+      # Uses CI_REGISTRY_IMAGE which maps to registry.example.com/group/project
       docker buildx build --platform linux/amd64,linux/arm64 \
-        --tag "$DOCKER_REGISTRY/$IMAGE_NAME:latest" \
-        --tag "$DOCKER_REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHORT_SHA" \
+        --tag "$CI_REGISTRY_IMAGE:latest" \
+        --tag "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" \
         --push .
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
@@ -50,13 +44,13 @@ publish-helm-chart:
   stage: publish-chart
   image: alpine/helm:3.12.3
   before_script:
-    - echo "Logging into Helm registry..."
-    - echo "$DOCKER_PASSWORD" | helm registry login "$DOCKER_REGISTRY" --username "$DOCKER_USER" --password-stdin
+    - echo "Logging into GitLab Registry (Helm)..."
+    - echo "$CI_REGISTRY_PASSWORD" | helm registry login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
   script:
     - echo "Packaging Helm chart..."
     - helm package charts/agile-retro
     - echo "Pushing Helm chart to OCI registry..."
-    - helm push agile-retro-*.tgz oci://$DOCKER_REGISTRY/$IMAGE_NAME/charts
+    - helm push agile-retro-*.tgz oci://$CI_REGISTRY_IMAGE/charts
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_TAG
