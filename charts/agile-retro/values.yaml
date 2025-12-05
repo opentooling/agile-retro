@@ -12,8 +12,7 @@ fullnameOverride: ""
 
 serviceAccount:
   # Specifies whether a service account should be created
-  create: true
-  # Annotations to add to the service account
+  create: true# Annotations to add to the service account
   annotations: {}
   # The name of the service account to use.
   # If not set and create is true, a name is generated using the fullname template
@@ -75,8 +74,10 @@ affinity: {}
 
 env:
   # Define environment variables here
-  # - name: DATABASE_URL
-  #   value: "file:./dev.db"
+  - name: DATABASE_URL
+    value: "file:/app/dev.db"
+  - name: AUTH_TRUST_HOST
+    value: "true"
 
 envFromSecret: ""
 # envFromSecret: "my-app-secret"
@@ -100,3 +101,9 @@ auth:
     issuer: ""
     existingSecret: "" # Optional: Name of existing secret for clientSecret
     existingSecretKey: "keycloak-client-secret" # Key in the existing secret
+
+openshift:
+  route:
+    enabled: true
+    host: "" # Leave empty to auto-generate if supported, or specify host
+

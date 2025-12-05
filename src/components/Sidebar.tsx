@@ -5,11 +5,11 @@ import { ModeToggle } from "@/components/mode-toggle"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { LayoutDashboard, History, Filter, Tag, LogOut, LogIn, ChevronLeft, ChevronRight } from "lucide-react"
+import { LayoutDashboard, History, Filter, Tag, LogOut, LogIn, ChevronLeft, ChevronRight, Users, ChevronsUpDown, Check, CheckSquare } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
-import { getPopularTags } from "@/app/actions"
+import { getPopularTags, getTeams } from "@/app/actions"
 import { useSession, signIn, signOut } from "next-auth/react"
 import { cn } from "@/lib/utils"
 import {
@@ -18,6 +18,19 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 
 interface SidebarProps {
   user?: {
@@ -33,11 +46,28 @@ export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [popularTags, setPopularTags] = useState<{tag: string, count: number}[]>([])
+  const [teams, setTeams] = useState<{id: string, name: string}[]>([])
   const { data: session } = useSession()
   const [isCollapsed, setIsCollapsed] = useState(false)
 
   useEffect(() => {
     getPopularTags().then(setPopularTags)
+    getTeams().then(setTeams)
+
+    const handleTeamUpdate = () => {
+        getTeams().then(setTeams)
+    }
+
+    const handleRetroCreated = () => {
+        getPopularTags().then(setPopularTags)
+    }
+
+    window.addEventListener('team-updated', handleTeamUpdate)
+    window.addEventListener('retro-created', handleRetroCreated)
+    return () => {
+        window.removeEventListener('team-updated', handleTeamUpdate)
+        window.removeEventListener('retro-created', handleRetroCreated)
+    }
   }, [])
 
   const handleFilterChange = (key: string, value: string) => {
@@ -121,13 +151,15 @@ export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
               Navigation
             </h2>
           )}
-          <nav className="flex flex-col gap-2">
+            <nav className="flex flex-col gap-2">
             <NavItem href="/" icon={LayoutDashboard} label="Dashboard" />
+            <NavItem href="/teams" icon={Users} label="Teams" />
+            <NavItem href="/actions" icon={CheckSquare} label="Actions" />
             <NavItem href="/history" icon={History} label="History" />
           </nav>
         </div>
 
-        {!isCollapsed && (
+        {!isCollapsed && !pathname.startsWith('/retro/') && (
           <div>
             <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
               <Filter className="w-5 h-5" />
@@ -135,41 +167,53 @@ export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
             </h2>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Creator</Label>
+                <Label>Team</Label>
                 <Input 
-                  placeholder="Filter by creator..." 
-                  defaultValue={searchParams.get('creator') || ''}
-                  onChange={(e) => handleFilterChange('creator', e.target.value)}
+                  placeholder="Filter by team..." 
+                  value={searchParams.get('teamId') || ''}
+                  onChange={(e) => handleFilterChange('teamId', e.target.value)}
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Tags</Label>
-                <Input 
-                  placeholder="Filter by tag..." 
-                  value={searchParams.get('tag') || ''}
-                  onChange={(e) => handleFilterChange('tag', e.target.value)}
-                />
-              </div>
-              
-              {popularTags.length > 0 && (
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Tag className="w-3 h-3" />
-                    Popular Tags
-                  </Label>
-                  <div className="flex flex-wrap gap-2">
-                    {popularTags.map(({ tag, count }) => (
-                      <Badge
-                        key={tag}
-                        variant={searchParams.get('tag') === tag ? "default" : "secondary"}
-                        className="cursor-pointer hover:opacity-80"
-                        onClick={() => handleFilterChange('tag', tag)}
-                      >
-                        {tag} ({count})
-                      </Badge>
-                    ))}
+              {pathname !== '/teams' && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Creator</Label>
+                    <Input 
+                      placeholder="Filter by creator..." 
+                      defaultValue={searchParams.get('creator') || ''}
+                      onChange={(e) => handleFilterChange('creator', e.target.value)}
+                    />
                   </div>
-                </div>
+                  <div className="space-y-2">
+                    <Label>Tags</Label>
+                    <Input 
+                      placeholder="Filter by tag..." 
+                      value={searchParams.get('tag') || ''}
+                      onChange={(e) => handleFilterChange('tag', e.target.value)}
+                    />
+                  </div>
+                  
+                  {popularTags.length > 0 && (
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Tag className="w-3 h-3" />
+                        Popular Tags
+                      </Label>
+                      <div className="flex flex-wrap gap-2">
+                        {popularTags.map(({ tag, count }) => (
+                          <Badge
+                            key={tag}
+                            variant={searchParams.get('tag') === tag ? "default" : "secondary"}
+                            className="cursor-pointer hover:opacity-80"
+                            onClick={() => handleFilterChange('tag', tag)}
+                          >
+                            {tag} ({count})
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

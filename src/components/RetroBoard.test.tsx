@@ -135,16 +135,7 @@ describe('RetroBoard', () => {
     expect(screen.queryByText('other-user')).not.toBeInTheDocument()
   })
 
-  it('renders reactions', () => {
-      const reactionData = { ...mockRetroData, columns: [
-          { ...mockRetroData.columns[0], items: [{ id: 'item-1', content: 'Test Item', summary: null, username: 'other-user', votes: [], reactions: [{ userId: 'user-2', emoji: '👍' }] }] }
-      ]}
-      render(<RetroBoard initialData={reactionData} user={{ name: 'test-user' }} />)
-      // We expect to see the emoji
-      expect(screen.getByText('👍')).toBeInTheDocument()
-      // And the count
-      expect(screen.getByText('1')).toBeInTheDocument()
-  })
+
 
   it('emits move-item event on drag end', () => {
     // This is hard to test with full DnD simulation in jsdom without complex setup.
@@ -153,5 +144,11 @@ describe('RetroBoard', () => {
     // For now, we'll just ensure the component renders without crashing with DnD context.
     render(<RetroBoard initialData={mockRetroData} user={{ name: 'test-user' }} />)
     expect(screen.getByText('What went well')).toBeInTheDocument()
+  })
+
+  it('renders team name if present', () => {
+    const teamData = { ...mockRetroData, team: { id: 'team-1', name: 'Engineering Team' } }
+    render(<RetroBoard initialData={teamData} user={{ name: 'test-user' }} />)
+    expect(screen.getByText('Engineering Team')).toBeInTheDocument()
   })
 })

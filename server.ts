@@ -232,6 +232,35 @@ app.prepare().then(() => {
             }
         });
 
+        socket.on("toggle-action-item", async ({ retroId, actionId }) => {
+            try {
+                const action = await prisma.actionItem.findUnique({ where: { id: actionId } });
+                if (action) {
+                    await prisma.actionItem.update({
+                        where: { id: actionId },
+                        data: { completed: !action.completed }
+                    });
+
+                    const updatedRetro = await prisma.retrospective.findUnique({
+                        where: { id: retroId },
+                        include: {
+                            columns: {
+                                include: {
+                                    items: {
+                                        include: { votes: true, reactions: true }
+                                    }
+                                }
+                            },
+                            actions: true
+                        }
+                    });
+                    io.to(retroId).emit("retro-updated", updatedRetro);
+                }
+            } catch (error) {
+                console.error("Error toggling action item:", error);
+            }
+        });
+
         socket.on("toggle-reaction", async ({ retroId, itemId, userId, emoji }) => {
             try {
                 const existingReaction = await prisma.reaction.findFirst({
@@ -287,7 +316,7 @@ app.prepare().then(() => {
                 });
 
                 // Remove the moved item from the array (if it's there - it might be if we just updated columnId)
-                const otherItems = itemsInColumn.filter(i => i.id !== itemId);
+                const otherItems = itemsInColumn.filter((i: any) => i.id !== itemId);
 
                 // Insert at new index
                 // Clamp index to valid range
@@ -296,7 +325,7 @@ app.prepare().then(() => {
 
                 // Update order for all items in the column
                 // We use a transaction to ensure consistency
-                const updates = otherItems.map((item, index) =>
+                const updates = otherItems.map((item: any, index: number) =>
                     prisma.item.update({
                         where: { id: item.id },
                         data: { order: index }
@@ -322,6 +351,43 @@ app.prepare().then(() => {
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
                 console.error("Error moving item:", error);
+            }
+        });
+
+        socket.on("extend-timer", async ({ retroId }) => {
+            try {
+                const retro = await prisma.retrospective.findUnique({ where: { id: retroId } });
+                if (!retro) return;
+
+                let updateData: any = {};
+                if (retro.status === 'INPUT') {
+                    updateData.inputDuration = (retro.inputDuration || 0) + 5;
+                } else if (retro.status === 'VOTING') {
+                    updateData.votingDuration = (retro.votingDuration || 0) + 5;
+                } else if (retro.status === 'REVIEW') {
+                    updateData.reviewDuration = (retro.reviewDuration || 0) + 5;
+                } else {
+                    return; // No timer for other phases
+                }
+
+                const updatedRetro = await prisma.retrospective.update({
+                    where: { id: retroId },
+                    data: updateData,
+                    include: {
+                        columns: {
+                            include: {
+                                items: {
+                                    orderBy: { order: 'asc' },
+                                    include: { votes: true, reactions: true }
+                                }
+                            }
+                        },
+                        actions: true
+                    }
+                });
+                io.to(retroId).emit("retro-updated", updatedRetro);
+            } catch (error) {
+                console.error("Error extending timer:", error);
             }
         });
 

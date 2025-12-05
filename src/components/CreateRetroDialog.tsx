@@ -3,7 +3,7 @@
 import * as React from 'react'
 import { useState, useEffect } from "react"
 import { useRouter } from 'next/navigation'
-import { createRetrospective, getUniqueTags } from '@/app/actions'
+import { createRetrospective, getUniqueTags, getTeams } from '@/app/actions'
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -35,17 +35,22 @@ import {
 
 import { useSession } from "next-auth/react"
 
-export function CreateRetroDialog() {
+export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: string }) {
   const [open, setOpen] = useState(false)
   const [tags, setTags] = useState<string[]>([])
+  const [teams, setTeams] = useState<{id: string, name: string}[]>([])
+  const [selectedTeamId, setSelectedTeamId] = useState<string>(preselectedTeamId || "")
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
   const [openCombobox, setOpenCombobox] = useState(false)
+  const [openTeamCombobox, setOpenTeamCombobox] = useState(false)
   const [creator, setCreator] = useState("")
+  const [mounted, setMounted] = useState(false)
   const router = useRouter()
   const { data: session } = useSession()
 
   useEffect(() => {
+    setMounted(true)
     if (session?.user?.name) {
       setCreator(session.user.name)
     } else {
@@ -54,7 +59,21 @@ export function CreateRetroDialog() {
     }
     
     getUniqueTags().then((tags: string[]) => setTags(tags))
+    getTeams().then(setTeams)
+
+    const handleTeamUpdate = () => {
+        getTeams().then(setTeams)
+    }
+
+    window.addEventListener('team-updated', handleTeamUpdate)
+    return () => window.removeEventListener('team-updated', handleTeamUpdate)
   }, [session])
+
+  useEffect(() => {
+    if (preselectedTeamId) {
+        setSelectedTeamId(preselectedTeamId)
+    }
+  }, [preselectedTeamId])
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -65,6 +84,8 @@ export function CreateRetroDialog() {
     try {
       const retro = await createRetrospective(formData)
       setOpen(false)
+      // Dispatch event to update sidebar
+      window.dispatchEvent(new Event('retro-created'))
       router.push(`/retro/${retro.id}`)
     } catch (error) {
       console.error("Error creating retro:", error)
@@ -79,12 +100,21 @@ export function CreateRetroDialog() {
     )
   }
 
+  if (!mounted) {
+    return (
+      <Button className="gap-2">
+        <Plus className="h-4 w-4" />
+        Create New Session
+      </Button>
+    )
+  }
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="gap-2">
+        <Button className={cn("gap-2", preselectedTeamId && "w-full")} variant={preselectedTeamId ? "outline" : "default"} size={preselectedTeamId ? "sm" : "default"}>
           <Plus className="h-4 w-4" />
-          Create New Session
+          {preselectedTeamId ? "New Session" : "Create New Session"}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px] overflow-visible">
@@ -107,6 +137,55 @@ export function CreateRetroDialog() {
                 className="col-span-3"
                 required
               />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="teamId" className="text-right">
+                Team
+              </Label>
+              <div className="col-span-3">
+                  <Popover open={openTeamCombobox} onOpenChange={setOpenTeamCombobox}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={openTeamCombobox}
+                        className="w-full justify-between"
+                      >
+                        {selectedTeamId ? teams.find((team) => team.id === selectedTeamId)?.name : "Select a team..."}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="p-0">
+                      <Command>
+                        <CommandInput placeholder="Search teams..." />
+                        <CommandList>
+                          <CommandEmpty>No team found.</CommandEmpty>
+                          <CommandGroup>
+                            {teams.map((team) => (
+                              <CommandItem
+                                key={team.id}
+                                value={team.name.toLowerCase()}
+                                onSelect={() => {
+                                  setSelectedTeamId(team.id)
+                                  setOpenTeamCombobox(false)
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    selectedTeamId === team.id ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                {team.name}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  <input type="hidden" name="teamId" value={selectedTeamId} required />
+              </div>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label className="text-right">
@@ -147,16 +226,19 @@ export function CreateRetroDialog() {
                             )}
                         </CommandEmpty>
                         <CommandGroup>
-                          {tags.map((tag) => (
-                            <CommandItem
-                              key={tag}
-                              value={tag.toLowerCase()}
-                              keywords={[tag]}
-                              onSelect={() => {
-                                toggleTag(tag)
-                                setOpenCombobox(false)
-                              }}
-                            >
+                            {tags.map((tag) => (
+                              <CommandItem
+                                key={tag}
+                                value={tag.toLowerCase()}
+                                onSelect={(currentValue) => {
+                                  // currentValue is lowercased by cmdk, but we need the original tag
+                                  // Since we don't have the original tag in the callback if we rely on value,
+                                  // we can just use the tag from the closure since we are mapping.
+                                  console.log("Selected tag:", tag, "Current Value:", currentValue)
+                                  toggleTag(tag)
+                                  setOpenCombobox(false)
+                                }}
+                              >
                               <Check
                                 className={cn(
                                   "mr-2 h-4 w-4",
@@ -189,15 +271,15 @@ export function CreateRetroDialog() {
                 <div className="col-span-3 flex gap-2">
                     <div className="flex flex-col gap-1">
                         <Label htmlFor="inputDuration" className="text-xs text-muted-foreground">Input</Label>
-                        <Input type="number" id="inputDuration" name="inputDuration" defaultValue="10" min="0" />
+                        <Input type="number" id="inputDuration" name="inputDuration" defaultValue="10" min="2" />
                     </div>
                     <div className="flex flex-col gap-1">
                         <Label htmlFor="votingDuration" className="text-xs text-muted-foreground">Voting</Label>
-                        <Input type="number" id="votingDuration" name="votingDuration" defaultValue="5" min="0" />
+                        <Input type="number" id="votingDuration" name="votingDuration" defaultValue="5" min="2" />
                     </div>
                     <div className="flex flex-col gap-1">
                         <Label htmlFor="reviewDuration" className="text-xs text-muted-foreground">Review</Label>
-                        <Input type="number" id="reviewDuration" name="reviewDuration" defaultValue="10" min="0" />
+                        <Input type="number" id="reviewDuration" name="reviewDuration" defaultValue="10" min="2" />
                     </div>
                 </div>
             </div>

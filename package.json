@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "tsx watch server.ts",
     "build": "next build",
     "start": "NODE_ENV=production tsx server.ts",
     "lint": "eslint",
@@ -33,6 +33,7 @@
     "pdfmake": "^0.2.20",
     "react": "19.2.0",
     "react-dom": "19.2.0",
+    "react-wordcloud": "^1.2.7",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "tailwind-merge": "^3.4.0"

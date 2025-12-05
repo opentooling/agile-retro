@@ -93,3 +93,12 @@ To ensure **Federated Logout** works correctly (i.e., signing out of the app als
 1.  In your Keycloak Client settings, find **Valid Post Logout Redirect URIs**.
 2.  Add your application's URL (e.g., `http://localhost:3000` or `https://your-app.com`) or simply `+`.
 3.  Ensure **Front-Channel Logout** is enabled if applicable, though the app uses the OIDC logout endpoint directly.
+
+## Authorization & Roles
+
+The application implements a role-based authorization system:
+
+1.  **Default Role**: Every authenticated user is automatically assigned the `user` role.
+2.  **Admin Role**: Users authenticated via Keycloak who have the `admin` role assigned in Keycloak (specifically in `realm_access.roles`) will automatically receive the `admin` role in the application.
+
+These roles are available in the user session (`session.roles`) and can be used to control access to specific features or pages.

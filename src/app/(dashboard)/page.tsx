@@ -9,6 +9,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
   const params = await searchParams
   const creatorFilter = typeof params.creator === 'string' ? params.creator : undefined
   const tagFilter = typeof params.tag === 'string' ? params.tag : undefined
+  const teamIdFilter = typeof params.teamId === 'string' ? params.teamId : undefined
 
   const whereClause: any = {}
   if (creatorFilter) {
@@ -17,15 +18,29 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
   if (tagFilter) {
     whereClause.tags = { contains: tagFilter }
   }
+  if (teamIdFilter) {
+    // If it looks like a UUID, try exact match, otherwise partial name match
+    // Actually, since we changed the filter to be free text, we should probably support partial name match
+    // But we might still have old links with IDs.
+    // Let's check if it's a valid UUID or just treat as name search?
+    // For simplicity given the new requirement, let's assume it's a name search if not a UUID, 
+    // OR just search by name relation.
+    whereClause.team = {
+        name: {
+            contains: teamIdFilter
+        }
+    }
+  }
 
   const recentRetros = await prisma.retrospective.findMany({
     where: whereClause,
     orderBy: { createdAt: 'desc' },
-    take: 20
+    take: 20,
+    include: { team: true }
   })
 
   // Analytics
-  const totalRetros = await prisma.retrospective.count()
+  const totalRetros = await prisma.retrospective.count({ where: whereClause })
   const totalItems = await prisma.item.count()
   // This is a rough estimate of active users based on unique userIds in votes/items would be better but expensive
   // For now, let's just show total retros as a placeholder or maybe something else simple
@@ -42,41 +57,56 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
 
       {/* Analytics Widgets */}
       <div className="grid gap-4 md:grid-cols-3 mb-8">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Retrospectives</CardTitle>
-            <LayoutDashboard className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalRetros}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Items</CardTitle>
-            <ListTodo className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalItems}</div>
-          </CardContent>
-        </Card>
-         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Sessions</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {recentRetros.filter((r: { status: string }) => r.status !== 'CLOSED').length}
-            </div>
-            <p className="text-xs text-muted-foreground">Currently open</p>
-          </CardContent>
-        </Card>
+        <Link href="/history">
+            <Card className="hover:bg-accent transition-colors cursor-pointer h-full">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Retrospectives</CardTitle>
+                <LayoutDashboard className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+                <div className="text-2xl font-bold">{totalRetros}</div>
+            </CardContent>
+            </Card>
+        </Link>
+        
+        <Link href="/history?status=active">
+            <Card className="hover:bg-accent transition-colors cursor-pointer h-full">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Active Sessions</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+                <div className="text-2xl font-bold">
+                {recentRetros.filter((r: { status: string }) => r.status !== 'CLOSED').length}
+                </div>
+                <p className="text-xs text-muted-foreground">Currently open</p>
+            </CardContent>
+            </Card>
+        </Link>
+
+        <Link href="/actions">
+            <Card className="hover:bg-accent transition-colors cursor-pointer h-full">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Open Actions</CardTitle>
+                <ListTodo className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+                <div className="text-2xl font-bold">
+                {await prisma.actionItem.count({
+                    where: {
+                        completed: false,
+                        retrospective: whereClause
+                    }
+                })}
+                </div>
+            </CardContent>
+            </Card>
+        </Link>
       </div>
 
       <h2 className="text-2xl font-bold mb-4">Recent Sessions</h2>
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {recentRetros.map((retro: { id: string; title: string; status: string; createdAt: Date; tags: string | null; creator: string }) => (
+        {recentRetros.map((retro) => (
           <Link key={retro.id} href={`/retro/${retro.id}`}>
             <Card className="hover:bg-accent transition-colors h-full flex flex-col">
               <CardHeader>
@@ -94,6 +124,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
                     </span>
                     <span>{formatDistanceToNow(retro.createdAt, { addSuffix: true })}</span>
                   </div>
+                  {retro.team && (
+                      <div className="text-xs font-semibold text-primary">
+                          Team: {retro.team.name}
+                      </div>
+                  )}
                   {retro.tags && (
                     <div className="flex flex-wrap gap-1 mt-2">
                       {retro.tags.split(',').map((tag: string, i: number) => (

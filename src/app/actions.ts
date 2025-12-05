@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { redirect } from 'next/navigation'
+import { revalidatePath } from 'next/cache'
 
 function parseIntSafe(value: FormDataEntryValue | null): number | null {
     if (!value) return null;
@@ -16,17 +17,23 @@ export async function createRetrospective(formData: FormData) {
     const title = formData.get('title') as string
     const tags = formData.get('tags') as string
     const creator = formData.get('creator') as string
+    const teamId = formData.get('teamId') as string
 
     const inputDuration = parseIntSafe(formData.get('inputDuration'))
     const votingDuration = parseIntSafe(formData.get('votingDuration'))
     const reviewDuration = parseIntSafe(formData.get('reviewDuration'))
     const isAnonymous = formData.get('isAnonymous') === 'on'
 
-    console.log("Data:", { title, tags, creator, inputDuration, votingDuration, reviewDuration, isAnonymous })
+    console.log("Data:", { title, tags, creator, teamId, inputDuration, votingDuration, reviewDuration, isAnonymous })
 
     if (!title || !title.trim()) {
         console.error("Title missing")
         throw new Error('Title is required')
+    }
+
+    if (!teamId || !teamId.trim()) {
+        console.error("Team ID missing")
+        throw new Error('Team is required')
     }
 
     try {
@@ -35,6 +42,7 @@ export async function createRetrospective(formData: FormData) {
                 title: title.trim(),
                 tags: tags || "",
                 creator: creator || "Anonymous",
+                teamId: teamId,
                 inputDuration,
                 votingDuration,
                 reviewDuration,
@@ -49,11 +57,63 @@ export async function createRetrospective(formData: FormData) {
                 }
             }
         })
+        revalidatePath('/')
+        revalidatePath('/history')
         return retro
     } catch (error) {
         console.error("Prisma Error:", error)
         throw error
     }
+}
+
+export async function createTeam(name: string) {
+    if (!name || !name.trim()) {
+        throw new Error('Team name is required')
+    }
+
+    try {
+        const team = await prisma.team.create({
+            data: {
+                name: name.trim()
+            }
+        })
+        revalidatePath('/teams')
+        revalidatePath('/')
+        return team
+    } catch (error) {
+        console.error("Error creating team:", error)
+        throw error
+    }
+}
+
+export async function updateTeam(id: string, name: string) {
+    if (!id) {
+        throw new Error('Team ID is required')
+    }
+    if (!name || !name.trim()) {
+        throw new Error('Team name is required')
+    }
+
+    try {
+        const team = await prisma.team.update({
+            where: { id },
+            data: {
+                name: name.trim()
+            }
+        })
+        revalidatePath('/teams')
+        revalidatePath('/')
+        return team
+    } catch (error) {
+        console.error("Error updating team:", error)
+        throw error
+    }
+}
+
+export async function getTeams() {
+    return await prisma.team.findMany({
+        orderBy: { name: 'asc' }
+    })
 }
 
 export async function getUniqueTags() {

@@ -3,6 +3,7 @@
 
 generator client {
   provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x"]
 }
 
 datasource db {
@@ -27,6 +28,16 @@ model Retrospective {
 
   columns   Column[]
   actions   ActionItem[]
+  
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id])
+}
+
+model Team {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  retrospectives Retrospective[]
 }
 
 model Column {

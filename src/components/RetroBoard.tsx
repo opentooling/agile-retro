@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download } from 'lucide-react'
+import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users } from 'lucide-react'
 import { cn } from "@/lib/utils"
 import { ModeToggle } from "@/components/mode-toggle"
 import {
@@ -33,6 +33,10 @@ type RetroData = {
   title: string
   creator: string
   status: string
+  team?: {
+    id: string
+    name: string
+  }
   columns: {
     id: string
     title: string
@@ -96,11 +100,17 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
 
   const [participants, setParticipants] = useState<{ userId: string, username: string, isReady: boolean }[]>([])
   const [isReady, setIsReady] = useState(false)
+  const [isWarningDismissed, setIsWarningDismissed] = useState(false)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
+
+  // Reset warning dismissal on phase change
+  useEffect(() => {
+    setIsWarningDismissed(false)
+  }, [retro.status])
 
   useEffect(() => {
     // Generate or retrieve userId
@@ -166,6 +176,41 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
     const interval = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(interval)
   }, [])
+
+  // Auto-advance logic
+  const hasAutoAdvancedRef = useMemo(() => ({ current: false }), [retro.status]) // Reset on status change
+
+  useEffect(() => {
+      if (!isJoined || !retro.phaseStartTime || !now) return
+
+      const currentDuration = 
+          retro.status === 'INPUT' ? retro.inputDuration :
+          retro.status === 'VOTING' ? retro.votingDuration :
+          retro.status === 'REVIEW' ? retro.reviewDuration : null;
+
+      if (currentDuration) {
+          const startTime = new Date(retro.phaseStartTime).getTime();
+          const endTime = startTime + currentDuration * 60 * 1000;
+          const diff = Math.ceil((endTime - now) / 1000);
+          
+          if (diff <= 0 && !hasAutoAdvancedRef.current) {
+              // Time is up!
+              // Only owner triggers the advance to avoid race conditions
+              if (retro.creator === username) {
+                  hasAutoAdvancedRef.current = true;
+                  
+                  let nextStatus = '';
+                  if (retro.status === 'INPUT') nextStatus = 'VOTING';
+                  else if (retro.status === 'VOTING') nextStatus = 'REVIEW';
+                  else if (retro.status === 'REVIEW') nextStatus = 'ACTIONS';
+                  
+                  if (nextStatus && socket) {
+                      socket.emit('update-status', { retroId: retro.id, status: nextStatus });
+                  }
+              }
+          }
+      }
+  }, [now, retro, username, isJoined, socket, hasAutoAdvancedRef])
 
   const handleAddItem = (columnId: string) => {
     const content = newItemContent[columnId]
@@ -374,7 +419,15 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
         <div className="max-w-7xl mx-auto">
             <div className="flex justify-between items-center mb-8 bg-white dark:bg-slate-900 p-6 rounded-lg shadow-sm border border-slate-200 dark:border-slate-800">
             <div className="flex items-center gap-4">
-                <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-50">{retro.title}</h1>
+                <div>
+                    <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-50">{retro.title}</h1>
+                    {retro.team && (
+                        <div className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                            <Users className="w-4 h-4" />
+                            {retro.team.name}
+                        </div>
+                    )}
+                </div>
                 <ModeToggle />
             </div>
             <div className="flex items-center gap-6">
@@ -393,7 +446,6 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                     if (currentDuration && retro.phaseStartTime && now) {
                         const startTime = new Date(retro.phaseStartTime).getTime();
                         const endTime = startTime + currentDuration * 60 * 1000;
-                        // const now = new Date().getTime(); // Use state 'now'
                         const diff = Math.max(0, Math.ceil((endTime - now) / 1000));
                         
                         const minutes = Math.floor(diff / 60);
@@ -401,8 +453,13 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                         const isLowTime = diff < 60 && diff > 0;
                         const isTimeUp = diff === 0;
 
+                        // Auto-advance logic for owner
+                        if (isOwner && isTimeUp && retro.status !== 'ACTIONS' && retro.status !== 'CLOSED') {
+                             // Logic handled in useEffect
+                        }
+
                         return (
-                            <div className="flex flex-col items-end">
+                            <div className="flex flex-col items-end relative">
                                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Time Remaining</span>
                                 <span className={cn(
                                     "text-2xl font-black font-mono",
@@ -411,6 +468,42 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                                 )}>
                                     {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
                                 </span>
+                                {isOwner && isLowTime && !isWarningDismissed && (
+                                    <div className="absolute top-full mt-4 right-0 w-80 bg-white dark:bg-slate-900 p-6 rounded-xl shadow-2xl border-2 border-red-200 dark:border-red-900 z-50 animate-in fade-in slide-in-from-top-4 zoom-in-95">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="flex items-center gap-2">
+                                                <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-full">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                                </div>
+                                                <p className="text-lg font-bold text-red-600 dark:text-red-400">Time is running out!</p>
+                                            </div>
+                                            <button 
+                                                onClick={() => setIsWarningDismissed(true)}
+                                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
+                                            >
+                                                <span className="sr-only">Dismiss</span>
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 18 12"/></svg>
+                                            </button>
+                                        </div>
+                                        <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
+                                            Less than 1 minute remaining in this phase. Would you like to extend the time?
+                                        </p>
+                                        <Button 
+                                            size="lg" 
+                                            variant="destructive"
+                                            className="w-full h-12 text-base font-bold shadow-md hover:shadow-lg transition-all"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (socket) {
+                                                    socket.emit('extend-timer', { retroId: retro.id });
+                                                    setIsWarningDismissed(true); // Dismiss after extending
+                                                }
+                                            }}
+                                        >
+                                            Extend by 5 Minutes
+                                        </Button>
+                                    </div>
+                                )}
                             </div>
                         );
                     }
@@ -444,10 +537,21 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                         )}
                     </div>
                 )}
-                {retro.status === 'VOTING' && isOwner && (
-                <Button onClick={() => handleUpdateStatus('REVIEW')} className="bg-blue-600 hover:bg-blue-700 gap-2">
-                    <Eye className="w-4 h-4" /> Start Review
-                </Button>
+                {retro.status === 'VOTING' && (
+                    <div className="flex gap-2">
+                        <Button 
+                            variant={isReady ? "default" : "outline"}
+                            className={cn(isReady && "bg-green-600 hover:bg-green-700 text-white")}
+                            onClick={handleToggleReady}
+                        >
+                            {isReady ? "I'm Ready!" : "Mark as Ready"}
+                        </Button>
+                        {isOwner && (
+                            <Button onClick={() => handleUpdateStatus('REVIEW')} className="bg-blue-600 hover:bg-blue-700 gap-2">
+                                <Eye className="w-4 h-4" /> Start Review
+                            </Button>
+                        )}
+                    </div>
                 )}
                 {retro.status === 'REVIEW' && isOwner && (
                 <Button onClick={() => handleUpdateStatus('ACTIONS')} className="bg-blue-600 hover:bg-blue-700 gap-2">
@@ -599,8 +703,20 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                     {retro.actions && retro.actions.length > 0 ? (
                         retro.actions.map((action) => (
                         <Card key={action.id} className="border-l-4 border-l-green-500">
-                            <CardContent className="p-4 font-medium">
-                            {action.content}
+                            <CardContent className="p-4 font-medium flex items-center gap-3">
+                                <input 
+                                    type="checkbox" 
+                                    checked={action.completed} 
+                                    className="w-5 h-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                                    onChange={() => {
+                                        if (socket) {
+                                            socket.emit('toggle-action-item', { retroId: retro.id, actionId: action.id })
+                                        }
+                                    }}
+                                />
+                                <span className={cn(action.completed && "line-through text-muted-foreground")}>
+                                    {action.content}
+                                </span>
                             </CardContent>
                         </Card>
                         ))

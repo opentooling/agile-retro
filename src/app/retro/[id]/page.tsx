@@ -19,7 +19,8 @@ export default async function RetroPage({ params }: { params: Promise<{ id: stri
           }
         }
       },
-      actions: true
+      actions: true,
+      team: true
     }
   })
 
