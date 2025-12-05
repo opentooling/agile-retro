@@ -42,7 +42,9 @@ build-multiarch-image:
 
 publish-helm-chart:
   stage: publish-chart
-  image: alpine/helm:3.12.3
+  image:
+    name: alpine/helm:3.12.3
+    entrypoint: [""]
   before_script:
     - echo "Logging into Helm registry..."
     - echo "$DOCKER_PASSWORD" | helm registry login "$DOCKER_REGISTRY" --username "$DOCKER_USER" --password-stdin
