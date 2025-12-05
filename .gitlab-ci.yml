@@ -1,16 +1,62 @@
-# You can override the included template(s) by including variable overrides
-# SAST customization: https://docs.gitlab.com/ee/user/application_security/sast/#customizing-the-sast-settings
-# Secret Detection customization: https://docs.gitlab.com/user/application_security/secret_detection/pipeline/configure
-# Dependency Scanning customization: https://docs.gitlab.com/ee/user/application_security/dependency_scanning/#customizing-the-dependency-scanning-settings
-# Container Scanning customization: https://docs.gitlab.com/ee/user/application_security/container_scanning/#customizing-the-container-scanning-settings
-# Note that environment variables can be set in several places
-# See https://docs.gitlab.com/ee/ci/variables/#cicd-variable-precedence
-stages:
-- test
-- secret-detection
+image: docker:24.0.5
+
+services:
+  - docker:24.0.5-dind
+
 variables:
+  # GitLab Registry credentials (automatically set by GitLab)
+  DOCKER_REGISTRY: $CI_REGISTRY
+  DOCKER_USER: $CI_REGISTRY_USER
+  DOCKER_PASSWORD: $CI_REGISTRY_PASSWORD
+  IMAGE_NAME: $CI_PROJECT_PATH
+  
+  # Secret Detection
   SECRET_DETECTION_ENABLED: 'true'
-secret_detection:
-  stage: secret-detection
+
+stages:
+  - test
+  - secret-detection
+  - build-image
+  - publish-chart
+
+# Secret Detection Job
 include:
-- template: Security/Secret-Detection.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+
+# Job to build and push multi-arch Docker image (Linux amd64 & arm64)
+build-multiarch-image:
+  stage: build-image
+  before_script:
+    - echo "Logging into registry..."
+    - echo "$DOCKER_PASSWORD" | docker login "$DOCKER_REGISTRY" -u "$DOCKER_USER" --password-stdin
+    # Install QEMU emulators for multi-arch build
+    - docker run --privileged --rm tonistiigi/binfmt --install all
+    # Create a new builder instance
+    - docker buildx create --name mybuilder --driver docker-container --bootstrap
+    - docker buildx use mybuilder
+  script:
+    - |
+      echo "Building and pushing image for linux/amd64 and linux/arm64..."
+      docker buildx build --platform linux/amd64,linux/arm64 \
+        --tag "$DOCKER_REGISTRY/$IMAGE_NAME:latest" \
+        --tag "$DOCKER_REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHORT_SHA" \
+        --push .
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG
+
+# Job to package and publish Helm chart as OCI artifact
+publish-helm-chart:
+  stage: publish-chart
+  image: alpine/helm:3.12.3
+  before_script:
+    - echo "Logging into Helm registry..."
+    - echo "$DOCKER_PASSWORD" | helm registry login "$DOCKER_REGISTRY" --username "$DOCKER_USER" --password-stdin
+  script:
+    - echo "Packaging Helm chart..."
+    - helm package charts/agile-retro
+    - echo "Pushing Helm chart to OCI registry..."
+    - helm push agile-retro-*.tgz oci://$DOCKER_REGISTRY/$IMAGE_NAME/charts
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG
