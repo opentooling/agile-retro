@@ -33,6 +33,8 @@ build-multiarch-image:
       docker buildx build --platform linux/amd64,linux/arm64 \
         --tag "$DOCKER_REGISTRY/$IMAGE_NAME:latest" \
         --tag "$DOCKER_REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHORT_SHA" \
+        --cache-from type=registry,ref=$DOCKER_REGISTRY/$IMAGE_NAME:buildcache \
+        --cache-to type=registry,ref=$DOCKER_REGISTRY/$IMAGE_NAME:buildcache,mode=max \
         --push .
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
