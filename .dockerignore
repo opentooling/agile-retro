@@ -9,3 +9,5 @@ README.md
 .env.local
 .DS_Store
 charts
+prisma/dev.db
+*.db

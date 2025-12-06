@@ -37,8 +37,20 @@ build-multiarch-image:
         --cache-to type=registry,ref=$DOCKER_REGISTRY/$IMAGE_NAME:buildcache,mode=max \
         --push .
   rules:
-    - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - Dockerfile
+        - .dockerignore
+        - package.json
+        - package-lock.json
+        - server.ts
+        - src/**/*
+        - public/**/*
+        - prisma/**/*
+        - scripts/**/*
+        - "*.{ts,mjs,json}"
+        - .gitlab-ci.yml
 
 publish-helm-chart:
   stage: publish-chart
@@ -54,5 +66,8 @@ publish-helm-chart:
     - echo "Pushing Helm chart to OCI registry..."
     - helm push agile-retro-*.tgz oci://$DOCKER_REGISTRY/$IMAGE_NAME/charts
   rules:
-    - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - charts/**/*
+        - .gitlab-ci.yml

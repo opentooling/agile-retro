@@ -52,6 +52,7 @@ ingress:
   #      - chart-example.local
 
 resources: {}
+
   # limits:
   #   cpu: 100m
   #   memory: 128Mi
@@ -72,10 +73,18 @@ tolerations: []
 
 affinity: {}
 
+persistence:
+  enabled: false
+  # storageClassName: default
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  # existingClaim: my-claim
+
 env:
   # Define environment variables here
   - name: DATABASE_URL
-    value: "file:/app/dev.db"
+    value: "file:/app/data/dev.db"
   - name: AUTH_TRUST_HOST
     value: "true"
 
