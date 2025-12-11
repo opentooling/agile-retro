@@ -1,0 +1,46 @@
+{{- if .Values.route.enabled }}
+1. Get the application URL by running these commands:
+  {{- if .Values.route.tls.enabled }}
+  echo "https://{{ .Values.route.host }}"
+  {{- else }}
+  echo "http://{{ .Values.route.host }}"
+  {{- end }}
+{{- else }}
+1. Get the application URL by running these commands:
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "agile-retro.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+{{- end }}
+
+2. Database Information:
+  - The application uses SQLite with a persistent volume
+  - Database file: /app/prisma/dev.db
+  - Volume mount: {{ .Values.persistence.mountPath }}
+
+3. Authentication:
+  {{- if .Values.auth.google.enabled }}
+  - Google OAuth is enabled
+  {{- end }}
+  {{- if .Values.auth.keycloak.enabled }}
+  - Keycloak OAuth is enabled
+  {{- end }}
+  {{- if not (or .Values.auth.google.enabled .Values.auth.keycloak.enabled) }}
+  - Configure authentication by setting auth.google or auth.keycloak values
+  {{- end }}
+
+4. Environment Configuration:
+  - AUTH_SECRET is {{ if .Values.auth.secret }}configured{{ else }}NOT SET - Please configure!{{ end }}
+  - NEXTAUTH_URL: {{ .Values.nextauth.url }}
+
+5. Useful Commands:
+  # View logs
+  kubectl logs -f deployment/{{ include "agile-retro.fullname" . }} -n {{ .Release.Namespace }}
+  
+  # Access the pod shell
+  kubectl exec -it deployment/{{ include "agile-retro.fullname" . }} -n {{ .Release.Namespace }} -- /bin/sh
+  
+  # Check database migrations
+  kubectl exec -it deployment/{{ include "agile-retro.fullname" . }} -n {{ .Release.Namespace }} -- npx prisma migrate status
+
+For more information, visit: https://github.com/opentooling/agile-retro
