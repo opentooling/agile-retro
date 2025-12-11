@@ -5,11 +5,11 @@ import { ModeToggle } from "@/components/mode-toggle"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { LayoutDashboard, History, Filter, Tag, LogOut, LogIn, ChevronLeft, ChevronRight, Users, ChevronsUpDown, Check, CheckSquare } from "lucide-react"
+import { LayoutDashboard, History, Filter, Tag, LogOut, LogIn, ChevronLeft, ChevronRight, Users, CheckSquare, type LucideIcon } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
-import { getPopularTags, getTeams } from "@/app/actions"
+import { getPopularTags } from "@/app/actions"
 import { useSession, signIn, signOut } from "next-auth/react"
 import { cn } from "@/lib/utils"
 import {
@@ -18,19 +18,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
 
 interface SidebarProps {
   user?: {
@@ -41,31 +28,63 @@ interface SidebarProps {
   keycloakIssuer?: string
 }
 
+interface NavItemProps {
+  href: string
+  icon: LucideIcon
+  label: string
+  isActive: boolean
+  isCollapsed: boolean
+}
+
+function NavItem({ href, icon: Icon, label, isActive, isCollapsed }: NavItemProps) {
+  if (isCollapsed) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant={isActive ? 'secondary' : 'ghost'} size="icon" className="w-full" asChild>
+              <Link href={href}>
+                <Icon className="w-5 h-5" />
+                <span className="sr-only">{label}</span>
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            {label}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    )
+  }
+
+  return (
+    <Button variant={isActive ? 'secondary' : 'ghost'} className="justify-start w-full" asChild>
+      <Link href={href}>
+        <Icon className="w-5 h-5 mr-2" />
+        {label}
+      </Link>
+    </Button>
+  )
+}
+
+
 export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
   const [popularTags, setPopularTags] = useState<{tag: string, count: number}[]>([])
-  const [teams, setTeams] = useState<{id: string, name: string}[]>([])
   const { data: session } = useSession()
   const [isCollapsed, setIsCollapsed] = useState(false)
 
   useEffect(() => {
     getPopularTags().then(setPopularTags)
-    getTeams().then(setTeams)
-
-    const handleTeamUpdate = () => {
-        getTeams().then(setTeams)
-    }
 
     const handleRetroCreated = () => {
         getPopularTags().then(setPopularTags)
     }
 
-    window.addEventListener('team-updated', handleTeamUpdate)
     window.addEventListener('retro-created', handleRetroCreated)
     return () => {
-        window.removeEventListener('team-updated', handleTeamUpdate)
         window.removeEventListener('retro-created', handleRetroCreated)
     }
   }, [])
@@ -85,8 +104,9 @@ export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
   }
 
   const handleSignOut = async () => {
-    if (session?.provider === 'keycloak' && keycloakIssuer) {
-        const idToken = session.id_token
+    const customSession = session as any
+    if (customSession?.provider === 'keycloak' && keycloakIssuer) {
+        const idToken = customSession.id_token
         let logoutUrl = `${keycloakIssuer}/protocol/openid-connect/logout?post_logout_redirect_uri=${encodeURIComponent(window.location.origin)}`
         
         if (idToken) {
@@ -97,39 +117,6 @@ export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
     } else {
         await signOut()
     }
-  }
-
-  const NavItem = ({ href, icon: Icon, label }: { href: string, icon: any, label: string }) => {
-    const isActive = pathname === href
-    
-    if (isCollapsed) {
-      return (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant={isActive ? 'secondary' : 'ghost'} size="icon" className="w-full" asChild>
-                <Link href={href}>
-                  <Icon className="w-5 h-5" />
-                  <span className="sr-only">{label}</span>
-                </Link>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              {label}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      )
-    }
-
-    return (
-      <Button variant={isActive ? 'secondary' : 'ghost'} className="justify-start w-full" asChild>
-        <Link href={href}>
-          <Icon className="w-5 h-5 mr-2" />
-          {label}
-        </Link>
-      </Button>
-    )
   }
 
   return (
@@ -152,10 +139,10 @@ export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
             </h2>
           )}
             <nav className="flex flex-col gap-2">
-            <NavItem href="/" icon={LayoutDashboard} label="Dashboard" />
-            <NavItem href="/teams" icon={Users} label="Teams" />
-            <NavItem href="/actions" icon={CheckSquare} label="Actions" />
-            <NavItem href="/history" icon={History} label="History" />
+            <NavItem href="/" icon={LayoutDashboard} label="Dashboard" isActive={pathname === "/"} isCollapsed={isCollapsed} />
+            <NavItem href="/teams" icon={Users} label="Teams" isActive={pathname === "/teams"} isCollapsed={isCollapsed} />
+            <NavItem href="/actions" icon={CheckSquare} label="Actions" isActive={pathname === "/actions"} isCollapsed={isCollapsed} />
+            <NavItem href="/history" icon={History} label="History" isActive={pathname === "/history"} isCollapsed={isCollapsed} />
           </nav>
         </div>
 

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import RetroBoard from './RetroBoard'
 import { io } from 'socket.io-client'
  

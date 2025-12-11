@@ -359,7 +359,7 @@ app.prepare().then(() => {
                 const retro = await prisma.retrospective.findUnique({ where: { id: retroId } });
                 if (!retro) return;
 
-                let updateData: any = {};
+                const updateData: any = {};
                 if (retro.status === 'INPUT') {
                     updateData.inputDuration = (retro.inputDuration || 0) + 5;
                 } else if (retro.status === 'VOTING') {
