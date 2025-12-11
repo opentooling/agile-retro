@@ -33,7 +33,6 @@
     "pdfmake": "^0.2.20",
     "react": "19.2.1",
     "react-dom": "19.2.1",
-    "react-wordcloud": "^1.2.7",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "tailwind-merge": "^3.4.0"
