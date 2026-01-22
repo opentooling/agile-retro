@@ -54,6 +54,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Note: In a strictly optimized build we might want to compile server.ts to js
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 
+# OpenShift Compat: Ensure files are writable by group 0 (root)
+# OpenShift runs containers with a random UID but as part of the root group (0).
+RUN chgrp -R 0 /app && \
+    chmod -R g=u /app
+
 USER nextjs
 
 EXPOSE 3000
