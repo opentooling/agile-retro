@@ -1,16 +1,21 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider"
 
-const geistSans = Geist({
+// Self-hosted Geist fonts (OFL licensed) so the build never reaches out to
+// fonts.googleapis.com — required for airgapped / TLS-proxied office networks.
+// The .woff2 files are variable fonts covering weights 100–900.
+const geistSans = localFont({
+  src: [{ path: "./fonts/geist-sans-latin.woff2", weight: "100 900", style: "normal" }],
   variable: "--font-geist-sans",
-  subsets: ["latin"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: [{ path: "./fonts/geist-mono-latin.woff2", weight: "100 900", style: "normal" }],
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
