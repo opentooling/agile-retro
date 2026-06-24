@@ -7,28 +7,25 @@
 #     useradd / chgrp dance is needed.
 #   - Build on the full image (has npm + build tooling); run on the minimal one.
 # =============================================================================
-FROM registry.access.redhat.com/ubi9/nodejs-22 AS base
+
+# ----- builder: install dependencies and compile the Next.js app -----
+FROM registry.access.redhat.com/ubi9/nodejs-22 AS builder
 
 # node:sqlite is behind an experimental flag on Node 22 (stable/unflagged on Node 24+).
 ENV NODE_OPTIONS=--experimental-sqlite
+ENV NEXT_TELEMETRY_DISABLED=1
 # UBI Node.js images default WORKDIR to /opt/app-root/src and USER to 1001.
 WORKDIR /opt/app-root/src
 
-# ----- deps: install node_modules from the lockfile -----
-# No native database engine binaries are fetched, so this works in an airgapped/offline build.
-FROM base AS deps
+# Install dependencies first so this layer is cached and only re-runs when the
+# lockfile changes (not on every source edit). No native database engine
+# binaries are fetched, so this works in an airgapped/offline build.
 COPY --chown=1001:0 package.json package-lock.json* ./
 RUN npm ci --legacy-peer-deps
 
-# ----- builder: compile the Next.js app -----
-FROM base AS builder
-COPY --from=deps --chown=1001:0 /opt/app-root/src/node_modules ./node_modules
-COPY --chown=1001:0 . .
-
-# Disable Next.js telemetry during the build.
-ENV NEXT_TELEMETRY_DISABLED=1
-
+# Now copy the rest of the source and build.
 # No code generation step needed — the SQLite schema is created at runtime by src/lib/db.ts.
+COPY --chown=1001:0 . .
 RUN npm run build
 
 # ----- runner: minimal UBI 9 Node.js 22 runtime -----
