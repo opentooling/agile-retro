@@ -47,7 +47,6 @@ build-multiarch-image:
         - server.ts
         - src/**/*
         - public/**/*
-        - prisma/**/*
         - scripts/**/*
         - "*.{ts,mjs,json}"
         - .gitlab-ci.yml

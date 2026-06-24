@@ -14,7 +14,6 @@ on:
       - 'server.ts'
       - 'src/**'
       - 'public/**'
-      - 'prisma/**'
       - 'scripts/**'
       - '*.ts'
       - '*.mjs'

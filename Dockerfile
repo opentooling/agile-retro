@@ -1,77 +1,64 @@
-# Node 22+ is required for the built-in `node:sqlite` module.
-FROM node:22-slim AS base
-
-# CA certificates for outbound TLS. No Prisma engine binaries are downloaded,
-# so this image builds with no network access to external binary hosts.
-RUN apt-get update -y && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+# =============================================================================
+# Red Hat UBI 9 + Node.js 22 images.
+#   - Node 22 is required for the built-in `node:sqlite` module.
+#   - UBI images are freely redistributable and run unprivileged as user 1001.
+#   - They follow the OpenShift "arbitrary UID / group 0" convention natively
+#     (/opt/app-root is owned by 1001:0 and group-writable), so no manual
+#     useradd / chgrp dance is needed.
+#   - Build on the full image (has npm + build tooling); run on the minimal one.
+# =============================================================================
+FROM registry.access.redhat.com/ubi9/nodejs-22 AS base
 
 # node:sqlite is behind an experimental flag on Node 22 (stable/unflagged on Node 24+).
 ENV NODE_OPTIONS=--experimental-sqlite
+# UBI Node.js images default WORKDIR to /opt/app-root/src and USER to 1001.
+WORKDIR /opt/app-root/src
 
-# Install dependencies only when needed
+# ----- deps: install node_modules from the lockfile -----
+# No native database engine binaries are fetched, so this works in an airgapped/offline build.
 FROM base AS deps
-WORKDIR /app
-
-# Install dependencies based on the preferred package manager
-COPY package.json package-lock.json* ./
+COPY --chown=1001:0 package.json package-lock.json* ./
 RUN npm ci --legacy-peer-deps
 
-# Rebuild the source code only when needed
+# ----- builder: compile the Next.js app -----
 FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY --from=deps --chown=1001:0 /opt/app-root/src/node_modules ./node_modules
+COPY --chown=1001:0 . .
 
-# Next.js collects completely anonymous telemetry data about general usage.
-# Learn more here: https://nextjs.org/telemetry
-# Uncomment the following line in case you want to disable telemetry during the build.
+# Disable Next.js telemetry during the build.
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# No `prisma generate` needed — the SQLite schema is created at runtime by src/lib/db.ts.
+# No code generation step needed — the SQLite schema is created at runtime by src/lib/db.ts.
 RUN npm run build
 
-# Production image, copy all the files and run next
-FROM base AS runner
-WORKDIR /app
+# ----- runner: minimal UBI 9 Node.js 22 runtime -----
+FROM registry.access.redhat.com/ubi9/nodejs-22-minimal AS runner
+WORKDIR /opt/app-root/src
 
-ENV NODE_ENV=production
-# Uncomment the following line in case you want to disable telemetry during runtime.
-ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    NODE_OPTIONS=--experimental-sqlite \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+# We run a custom server ("tsx server.ts"), so we ship the source, the full
+# Next.js build output (.next), and node_modules. Files are owned by 1001:0 so
+# an arbitrary OpenShift UID (member of group 0) can read them.
+COPY --from=builder --chown=1001:0 /opt/app-root/src/public ./public
+COPY --from=builder --chown=1001:0 /opt/app-root/src/package.json ./package.json
+COPY --from=builder --chown=1001:0 /opt/app-root/src/server.ts ./server.ts
+COPY --from=builder --chown=1001:0 /opt/app-root/src/src ./src
+COPY --from=builder --chown=1001:0 /opt/app-root/src/.next ./.next
+COPY --from=builder --chown=1001:0 /opt/app-root/src/node_modules ./node_modules
 
-# Copy necessary files
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/server.ts ./server.ts
-COPY --from=builder /app/src ./src
-
-# Writable directory for the SQLite database file (default DATABASE_URL=file:./prisma/dev.db).
+# Writable directory for the SQLite database file (default DATABASE_URL=file:./data/dev.db).
 # The schema is created automatically on first connection by src/lib/db.ts.
-RUN mkdir -p /app/prisma
+# Group-writable so an arbitrary OpenShift UID (in group 0) can create the DB file.
+RUN mkdir -p data && chmod -R g+rwX data
 
-# Automatically leverage output traces to reduce image size
-# https://nextjs.org/docs/advanced-features/output-file-tracing
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-# We need node_modules for tsx and other runtime deps since we are using a custom server
-# Note: In a strictly optimized build we might want to compile server.ts to js
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
-
-# OpenShift Compat: Ensure files are writable by group 0 (root)
-# OpenShift runs containers with a random UID but as part of the root group (0).
-RUN chgrp -R 0 /app && \
-    chmod -R g=u /app
-
-USER nextjs
+USER 1001
 
 EXPOSE 3000
 
-ENV PORT=3000
-# set hostname to localhost
-ENV HOSTNAME="0.0.0.0"
-
-# Using npm start which runs "tsx server.ts"
+# "npm start" runs "tsx server.ts" with NODE_ENV/NODE_OPTIONS already set above.
 CMD ["npm", "start"]

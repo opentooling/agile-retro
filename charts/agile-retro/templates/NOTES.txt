@@ -15,7 +15,7 @@
 
 2. Database Information:
   - The application uses SQLite with a persistent volume
-  - Database file: /app/prisma/dev.db
+  - Database file: /app/data/dev.db
   - Volume mount: {{ .Values.persistence.mountPath }}
 
 3. Authentication:
@@ -40,7 +40,7 @@
   # Access the pod shell
   kubectl exec -it deployment/{{ include "agile-retro.fullname" . }} -n {{ .Release.Namespace }} -- /bin/sh
   
-  # Check database migrations
-  kubectl exec -it deployment/{{ include "agile-retro.fullname" . }} -n {{ .Release.Namespace }} -- npx prisma migrate status
+  # Verify the database file (schema is auto-created on first run)
+  kubectl exec -it deployment/{{ include "agile-retro.fullname" . }} -n {{ .Release.Namespace }} -- ls -l /app/data/dev.db
 
 For more information, visit: https://github.com/opentooling/agile-retro

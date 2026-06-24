@@ -33,10 +33,11 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # The SQLite schema is created automatically on first connection by
+          # src/lib/db.ts, so no migration step is required at startup.
           command: ["/bin/sh", "-c"]
           args:
             - |
-              npx prisma migrate deploy
               npm start
           volumeMounts:
             - name: data

@@ -1,8 +1,8 @@
 /**
  * SQLite data-access layer built on Node's built-in `node:sqlite` module.
  *
- * This replaces Prisma. It requires NO native modules and NO network access at
- * install or build time, so it works in airgapped/offline environments.
+ * It requires NO native modules and NO network access at install or build time,
+ * so it works in airgapped/offline environments.
  *
  * Requirements:
  *   - Node 22+ (node:sqlite is available; in Node 22 it is behind the
@@ -14,18 +14,19 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import fs from "node:fs";
 
 // ---------------------------------------------------------------------------
 // Connection
 // ---------------------------------------------------------------------------
 
 function resolveDbPath(): string {
-  // Support the existing DATABASE_URL ("file:./prisma/dev.db") and an explicit
-  // DATABASE_PATH override. Falls back to ./prisma/dev.db (the legacy location).
+  // Resolve the SQLite file from DATABASE_URL ("file:./data/dev.db") or an
+  // explicit DATABASE_PATH override. Defaults to ./data/dev.db.
   const explicit = process.env.DATABASE_PATH;
   if (explicit) return path.resolve(process.cwd(), explicit);
 
-  const url = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
+  const url = process.env.DATABASE_URL ?? "file:./data/dev.db";
   const filePart = url.startsWith("file:") ? url.slice("file:".length) : url;
   return path.resolve(process.cwd(), filePart);
 }
@@ -105,7 +106,10 @@ const globalForDb = globalThis as unknown as { __sqlite?: DatabaseSync };
 
 function getDb(): DatabaseSync {
   if (!globalForDb.__sqlite) {
-    const db = new DatabaseSync(resolveDbPath());
+    const dbPath = resolveDbPath();
+    // node:sqlite does not create the parent directory; ensure it exists.
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSync(dbPath);
     db.exec("PRAGMA foreign_keys = ON;");
     db.exec(SCHEMA_SQL);
     globalForDb.__sqlite = db;
