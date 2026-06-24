@@ -1,24 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { PrismaClient, Prisma } from '@prisma/client'
+import * as db from '@/lib/db'
 import PdfPrinter from 'pdfmake'
 import { TDocumentDefinitions } from 'pdfmake/interfaces'
-
-const prisma = new PrismaClient()
-
-type RetroWithRelations = Prisma.RetrospectiveGetPayload<{
-    include: {
-        columns: {
-            include: {
-                items: {
-                    include: {
-                        votes: true
-                    }
-                }
-            }
-        },
-        actions: true
-    }
-}>
 
 const fonts = {
     Roboto: {
@@ -36,21 +19,7 @@ export async function GET(
     const { id } = await params
 
     try {
-        const retro: RetroWithRelations | null = await prisma.retrospective.findUnique({
-            where: { id },
-            include: {
-                columns: {
-                    include: {
-                        items: {
-                            include: {
-                                votes: true
-                            }
-                        }
-                    }
-                },
-                actions: true
-            }
-        })
+        const retro = db.getRetroFull(id)
 
         if (!retro) {
             return NextResponse.json({ error: 'Retrospective not found' }, { status: 404 })

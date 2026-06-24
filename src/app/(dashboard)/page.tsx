@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma'
+import * as db from '@/lib/db'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from 'next/link'
 import { formatDistanceToNow } from 'date-fns'
@@ -11,40 +11,20 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
   const tagFilter = typeof params.tag === 'string' ? params.tag : undefined
   const teamIdFilter = typeof params.teamId === 'string' ? params.teamId : undefined
 
-  const whereClause: any = {}
-  if (creatorFilter) {
-    whereClause.creator = { contains: creatorFilter }
-  }
-  if (tagFilter) {
-    whereClause.tags = { contains: tagFilter }
-  }
-  if (teamIdFilter) {
-    // If it looks like a UUID, try exact match, otherwise partial name match
-    // Actually, since we changed the filter to be free text, we should probably support partial name match
-    // But we might still have old links with IDs.
-    // Let's check if it's a valid UUID or just treat as name search?
-    // For simplicity given the new requirement, let's assume it's a name search if not a UUID, 
-    // OR just search by name relation.
-    whereClause.team = {
-        name: {
-            contains: teamIdFilter
-        }
-    }
-  }
+  const filter: db.RetroFilter = {}
+  if (creatorFilter) filter.creatorContains = creatorFilter
+  if (tagFilter) filter.tagsContains = tagFilter
+  // Free-text team search by name (still supports old links that pass a team name).
+  if (teamIdFilter) filter.teamNameContains = teamIdFilter
 
-  const recentRetros = await prisma.retrospective.findMany({
-    where: whereClause,
-    orderBy: { createdAt: 'desc' },
-    take: 20,
-    include: { team: true }
-  })
+  const recentRetros = db.listRetrospectives(filter, 20)
 
   // Analytics
-  const totalRetros = await prisma.retrospective.count({ where: whereClause })
-  const totalItems = await prisma.item.count()
+  const totalRetros = db.countRetrospectives(filter)
+  const totalItems = db.countItems()
   // This is a rough estimate of active users based on unique userIds in votes/items would be better but expensive
   // For now, let's just show total retros as a placeholder or maybe something else simple
-  
+
   return (
     <div className="p-8">
       <div className="flex justify-between items-center mb-8">
@@ -92,12 +72,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
             </CardHeader>
             <CardContent>
                 <div className="text-2xl font-bold">
-                {await prisma.actionItem.count({
-                    where: {
-                        completed: false,
-                        retrospective: whereClause
-                    }
-                })}
+                {db.countOpenActions(filter)}
                 </div>
             </CardContent>
             </Card>

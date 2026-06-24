@@ -1,7 +1,6 @@
 'use server'
 
-import { prisma } from '@/lib/prisma'
-import { redirect } from 'next/navigation'
+import * as db from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 
 function parseIntSafe(value: FormDataEntryValue | null): number | null {
@@ -37,8 +36,8 @@ export async function createRetrospective(formData: FormData) {
     }
 
     try {
-        const retro = await prisma.retrospective.create({
-            data: {
+        const retro = db.createRetrospectiveWithColumns(
+            {
                 title: title.trim(),
                 tags: tags || "",
                 creator: creator || "Anonymous",
@@ -48,20 +47,18 @@ export async function createRetrospective(formData: FormData) {
                 reviewDuration,
                 isAnonymous,
                 phaseStartTime: new Date(), // Start input phase immediately
-                columns: {
-                    create: [
-                        { title: 'What went well', type: 'WHAT_WENT_WELL' },
-                        { title: 'What didn\'t go well', type: 'WHAT_DIDNT_GO_WELL' },
-                        { title: 'What should be improved', type: 'WHAT_SHOULD_BE_IMPROVED' },
-                    ]
-                }
-            }
-        })
+            },
+            [
+                { title: 'What went well', type: 'WHAT_WENT_WELL' },
+                { title: "What didn't go well", type: 'WHAT_DIDNT_GO_WELL' },
+                { title: 'What should be improved', type: 'WHAT_SHOULD_BE_IMPROVED' },
+            ]
+        )
         revalidatePath('/')
         revalidatePath('/history')
         return retro
     } catch (error) {
-        console.error("Prisma Error:", error)
+        console.error("DB Error:", error)
         throw error
     }
 }
@@ -72,11 +69,7 @@ export async function createTeam(name: string) {
     }
 
     try {
-        const team = await prisma.team.create({
-            data: {
-                name: name.trim()
-            }
-        })
+        const team = db.createTeam(name.trim())
         revalidatePath('/teams')
         revalidatePath('/')
         return team
@@ -95,12 +88,7 @@ export async function updateTeam(id: string, name: string) {
     }
 
     try {
-        const team = await prisma.team.update({
-            where: { id },
-            data: {
-                name: name.trim()
-            }
-        })
+        const team = db.updateTeam(id, name.trim())
         revalidatePath('/teams')
         revalidatePath('/')
         return team
@@ -111,18 +99,12 @@ export async function updateTeam(id: string, name: string) {
 }
 
 export async function getTeams() {
-    return await prisma.team.findMany({
-        orderBy: { name: 'asc' }
-    })
+    return db.listTeams()
 }
 
 export async function getUniqueTags() {
-    const retros = await prisma.retrospective.findMany({
-        select: { tags: true }
-    })
-
-    const allTags = retros
-        .flatMap((r: { tags: string }) => r.tags.split(','))
+    const allTags = db.getAllTagStrings()
+        .flatMap((tags: string) => tags.split(','))
         .map((t: string) => t.trim())
         .filter((t: string) => t.length > 0)
 
@@ -130,15 +112,13 @@ export async function getUniqueTags() {
 }
 
 export async function getPopularTags() {
-    const retros = await prisma.retrospective.findMany({
-        select: { tags: true }
-    })
+    const tagStrings = db.getAllTagStrings()
 
     const tagCounts: Record<string, number> = {}
 
-    retros.forEach((r: { tags: string }) => {
-        if (!r.tags) return
-        r.tags.split(',').forEach((t: string) => {
+    tagStrings.forEach((tags: string) => {
+        if (!tags) return
+        tags.split(',').forEach((t: string) => {
             const tag = t.trim()
             if (tag) {
                 tagCounts[tag] = (tagCounts[tag] || 0) + 1

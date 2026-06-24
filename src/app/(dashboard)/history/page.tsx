@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma'
+import * as db from '@/lib/db'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from 'next/link'
@@ -14,32 +14,18 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
   const statusFilter = typeof params.status === 'string' ? params.status : undefined
   const myBoardsFilter = typeof params.myBoards === 'string' ? params.myBoards === 'true' : false
 
-  const whereClause: any = {}
-  if (creatorFilter) {
-    whereClause.creator = { contains: creatorFilter }
-  }
-  if (tagFilter) {
-    whereClause.tags = { contains: tagFilter }
-  }
-  if (teamIdFilter) {
-    whereClause.team = {
-        name: {
-            contains: teamIdFilter
-        }
-    }
-  }
-  if (statusFilter === 'active') {
-    whereClause.status = { not: 'CLOSED' }
-  }
+  const filter: db.RetroFilter = {}
+  if (creatorFilter) filter.creatorContains = creatorFilter
+  if (tagFilter) filter.tagsContains = tagFilter
+  if (teamIdFilter) filter.teamNameContains = teamIdFilter
+  if (statusFilter === 'active') filter.statusNot = 'CLOSED'
+  // "My boards" overrides the creator filter with an exact match.
   if (myBoardsFilter && session?.user?.name) {
-    whereClause.creator = session.user.name
+    filter.creatorEquals = session.user.name
+    delete filter.creatorContains
   }
 
-  const retros = await prisma.retrospective.findMany({
-    where: whereClause,
-    orderBy: { createdAt: 'desc' },
-    include: { team: true }
-  })
+  const retros = db.listRetrospectives(filter)
 
   return (
     <div className="container mx-auto p-8">

@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import next from "next";
 import { Server } from "socket.io";
-import { prisma } from "./src/lib/prisma";
+import * as db from "./src/lib/db";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -30,10 +30,7 @@ app.prepare().then(() => {
             console.log(`Socket ${socket.id} joined retro ${retroId} as ${username}`);
 
             try {
-                const retro = await prisma.retrospective.findUnique({
-                    where: { id: retroId },
-                    select: { status: true }
-                });
+                const retro = db.getRetroStatus(retroId);
 
                 if (retro?.status === 'CLOSED') {
                     return;
@@ -60,36 +57,18 @@ app.prepare().then(() => {
         socket.on("add-item", async ({ retroId, columnId, content, userId, username }) => {
             try {
                 // Get max order in this column
-                const maxOrderAgg = await prisma.item.aggregate({
-                    where: { columnId },
-                    _max: { order: true }
-                });
-                const nextOrder = (maxOrderAgg._max.order ?? -1) + 1;
+                const nextOrder = (db.itemMaxOrder(columnId) ?? -1) + 1;
 
-                await prisma.item.create({
-                    data: {
-                        content,
-                        columnId,
-                        userId: userId || "anonymous",
-                        username: username || "Anonymous",
-                        order: nextOrder
-                    }
+                db.createItem({
+                    content,
+                    columnId,
+                    userId: userId || "anonymous",
+                    username: username || "Anonymous",
+                    order: nextOrder
                 });
 
                 // Fetch updated retro
-                const updatedRetro = await prisma.retrospective.findUnique({
-                    where: { id: retroId },
-                    include: {
-                        columns: {
-                            include: {
-                                items: {
-                                    orderBy: { order: 'asc' },
-                                    include: { votes: true, reactions: true }
-                                }
-                            }
-                        }
-                    }
-                });
+                const updatedRetro = db.getRetroFull(retroId);
 
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
@@ -101,44 +80,26 @@ app.prepare().then(() => {
             try {
                 // Check current votes for this user in this retro
                 // We need to aggregate all votes by this user for items in this retro
-                // This is a bit complex with Prisma relations, simpler to fetch all items and filter
+                // Simpler to fetch the user's existing vote directly and adjust it
                 // Or just trust client for MVP but better to verify
 
                 // Let's just update the vote
                 // Find existing vote
-                const existingVote = await prisma.vote.findFirst({
-                    where: { itemId, userId }
-                });
+                const existingVote = db.findVote(itemId, userId);
 
                 if (existingVote) {
                     const newCount = existingVote.count + delta;
                     if (newCount <= 0) {
-                        await prisma.vote.delete({ where: { id: existingVote.id } });
+                        db.deleteVote(existingVote.id);
                     } else {
-                        await prisma.vote.update({
-                            where: { id: existingVote.id },
-                            data: { count: newCount }
-                        });
+                        db.updateVoteCount(existingVote.id, newCount);
                     }
                 } else if (delta > 0) {
-                    await prisma.vote.create({
-                        data: { itemId, userId, count: delta }
-                    });
+                    db.createVote({ itemId, userId, count: delta });
                 }
 
                 // Fetch updated retro and emit
-                const updatedRetro = await prisma.retrospective.findUnique({
-                    where: { id: retroId },
-                    include: {
-                        columns: {
-                            include: {
-                                items: {
-                                    include: { votes: true, reactions: true }
-                                }
-                            }
-                        }
-                    }
-                });
+                const updatedRetro = db.getRetroFull(retroId);
 
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
@@ -148,22 +109,7 @@ app.prepare().then(() => {
 
         socket.on("update-status", async ({ retroId, status }) => {
             try {
-                const updatedRetro = await prisma.retrospective.update({
-                    where: { id: retroId },
-                    data: {
-                        status,
-                        phaseStartTime: new Date() // Reset timer on phase change
-                    },
-                    include: {
-                        columns: {
-                            include: {
-                                items: {
-                                    include: { votes: true, reactions: true }
-                                }
-                            }
-                        }
-                    }
-                });
+                const updatedRetro = db.updateRetroStatus(retroId, status, new Date());
 
                 // Reset readiness on phase change
                 if (participants[retroId]) {
@@ -181,23 +127,9 @@ app.prepare().then(() => {
 
         socket.on("update-item-summary", async ({ retroId, itemId, summary }) => {
             try {
-                await prisma.item.update({
-                    where: { id: itemId },
-                    data: { summary }
-                });
+                db.updateItemSummary(itemId, summary);
 
-                const updatedRetro = await prisma.retrospective.findUnique({
-                    where: { id: retroId },
-                    include: {
-                        columns: {
-                            include: {
-                                items: {
-                                    include: { votes: true, reactions: true }
-                                }
-                            }
-                        }
-                    }
-                });
+                const updatedRetro = db.getRetroFull(retroId);
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
                 console.error("Error updating summary:", error);
@@ -206,26 +138,9 @@ app.prepare().then(() => {
 
         socket.on("add-action-item", async ({ retroId, content }) => {
             try {
-                await prisma.actionItem.create({
-                    data: {
-                        content,
-                        retrospectiveId: retroId
-                    }
-                });
+                db.createActionItem({ content, retrospectiveId: retroId });
 
-                const updatedRetro = await prisma.retrospective.findUnique({
-                    where: { id: retroId },
-                    include: {
-                        columns: {
-                            include: {
-                                items: {
-                                    include: { votes: true, reactions: true }
-                                }
-                            }
-                        },
-                        actions: true
-                    }
-                });
+                const updatedRetro = db.getRetroFull(retroId);
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
                 console.error("Error adding action item:", error);
@@ -234,26 +149,11 @@ app.prepare().then(() => {
 
         socket.on("toggle-action-item", async ({ retroId, actionId }) => {
             try {
-                const action = await prisma.actionItem.findUnique({ where: { id: actionId } });
+                const action = db.getActionItem(actionId);
                 if (action) {
-                    await prisma.actionItem.update({
-                        where: { id: actionId },
-                        data: { completed: !action.completed }
-                    });
+                    db.updateActionCompleted(actionId, !action.completed);
 
-                    const updatedRetro = await prisma.retrospective.findUnique({
-                        where: { id: retroId },
-                        include: {
-                            columns: {
-                                include: {
-                                    items: {
-                                        include: { votes: true, reactions: true }
-                                    }
-                                }
-                            },
-                            actions: true
-                        }
-                    });
+                    const updatedRetro = db.getRetroFull(retroId);
                     io.to(retroId).emit("retro-updated", updatedRetro);
                 }
             } catch (error) {
@@ -263,31 +163,15 @@ app.prepare().then(() => {
 
         socket.on("toggle-reaction", async ({ retroId, itemId, userId, emoji }) => {
             try {
-                const existingReaction = await prisma.reaction.findFirst({
-                    where: { itemId, userId, emoji }
-                });
+                const existingReaction = db.findReaction(itemId, userId, emoji);
 
                 if (existingReaction) {
-                    await prisma.reaction.delete({ where: { id: existingReaction.id } });
+                    db.deleteReaction(existingReaction.id);
                 } else {
-                    await prisma.reaction.create({
-                        data: { itemId, userId, emoji }
-                    });
+                    db.createReaction({ itemId, userId, emoji });
                 }
 
-                const updatedRetro = await prisma.retrospective.findUnique({
-                    where: { id: retroId },
-                    include: {
-                        columns: {
-                            include: {
-                                items: {
-                                    include: { votes: true, reactions: true }
-                                }
-                            }
-                        },
-                        actions: true
-                    }
-                });
+                const updatedRetro = db.getRetroFull(retroId);
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
                 console.error("Error toggling reaction:", error);
@@ -297,57 +181,32 @@ app.prepare().then(() => {
         socket.on("move-item", async ({ retroId, itemId, targetColumnId, newIndex }) => {
             try {
                 // 1. Get the item to verify it exists and get its current column
-                const itemToMove = await prisma.item.findUnique({ where: { id: itemId } });
+                const itemToMove = db.getItem(itemId);
                 if (!itemToMove) return;
 
                 // 2. Update the item's column immediately (if changed)
                 if (itemToMove.columnId !== targetColumnId) {
-                    await prisma.item.update({
-                        where: { id: itemId },
-                        data: { columnId: targetColumnId }
-                    });
+                    db.updateItemColumn(itemId, targetColumnId);
                 }
 
                 // 3. Reorder items in the target column
                 // Fetch all items in the target column (including the moved one)
-                const itemsInColumn = await prisma.item.findMany({
-                    where: { columnId: targetColumnId },
-                    orderBy: { order: 'asc' }
-                });
+                const itemsInColumn = db.listItemsInColumn(targetColumnId);
 
                 // Remove the moved item from the array (if it's there - it might be if we just updated columnId)
-                const otherItems = itemsInColumn.filter((i: any) => i.id !== itemId);
+                const otherItems = itemsInColumn.filter((i) => i.id !== itemId);
 
                 // Insert at new index
                 // Clamp index to valid range
                 const insertIndex = Math.max(0, Math.min(newIndex, otherItems.length));
-                otherItems.splice(insertIndex, 0, { ...itemToMove, columnId: targetColumnId } as any);
+                otherItems.splice(insertIndex, 0, { ...itemToMove, columnId: targetColumnId });
 
-                // Update order for all items in the column
-                // We use a transaction to ensure consistency
-                const updates = otherItems.map((item: any, index: number) =>
-                    prisma.item.update({
-                        where: { id: item.id },
-                        data: { order: index }
-                    })
-                );
-
-                await prisma.$transaction(updates);
-
-                const updatedRetro = await prisma.retrospective.findUnique({
-                    where: { id: retroId },
-                    include: {
-                        columns: {
-                            include: {
-                                items: {
-                                    orderBy: { order: 'asc' },
-                                    include: { votes: true, reactions: true }
-                                }
-                            }
-                        },
-                        actions: true
-                    }
+                // Update order for all items in the column, atomically.
+                db.transaction(() => {
+                    otherItems.forEach((item, index) => db.updateItemOrder(item.id, index));
                 });
+
+                const updatedRetro = db.getRetroFull(retroId);
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
                 console.error("Error moving item:", error);
@@ -356,10 +215,10 @@ app.prepare().then(() => {
 
         socket.on("extend-timer", async ({ retroId }) => {
             try {
-                const retro = await prisma.retrospective.findUnique({ where: { id: retroId } });
+                const retro = db.getRetro(retroId);
                 if (!retro) return;
 
-                const updateData: any = {};
+                const updateData: { inputDuration?: number; votingDuration?: number; reviewDuration?: number } = {};
                 if (retro.status === 'INPUT') {
                     updateData.inputDuration = (retro.inputDuration || 0) + 5;
                 } else if (retro.status === 'VOTING') {
@@ -370,21 +229,7 @@ app.prepare().then(() => {
                     return; // No timer for other phases
                 }
 
-                const updatedRetro = await prisma.retrospective.update({
-                    where: { id: retroId },
-                    data: updateData,
-                    include: {
-                        columns: {
-                            include: {
-                                items: {
-                                    orderBy: { order: 'asc' },
-                                    include: { votes: true, reactions: true }
-                                }
-                            }
-                        },
-                        actions: true
-                    }
-                });
+                const updatedRetro = db.updateRetroDurations(retroId, updateData);
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
                 console.error("Error extending timer:", error);
@@ -399,10 +244,7 @@ app.prepare().then(() => {
                     delete participants[retroId][socket.id];
 
                     try {
-                        const retro = await prisma.retrospective.findUnique({
-                            where: { id: retroId },
-                            select: { status: true }
-                        });
+                        const retro = db.getRetroStatus(retroId);
 
                         if (retro?.status !== 'CLOSED') {
                             io.to(retroId).emit("participants-updated", Object.values(participants[retroId]));

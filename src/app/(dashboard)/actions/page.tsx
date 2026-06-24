@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma'
+import * as db from '@/lib/db'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CheckCircle, Circle, Trash2 } from 'lucide-react'
@@ -15,58 +15,23 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
   const creatorFilter = typeof params.creator === 'string' ? params.creator : undefined
   const retroIdFilter = typeof params.retroId === 'string' ? params.retroId : undefined
 
-  const whereClause: any = {}
-  
+  const filter: db.ActionFilter = {}
+
   if (statusFilter === 'open') {
-    whereClause.completed = false
+    filter.completed = false
   } else if (statusFilter === 'closed') {
-    whereClause.completed = true
+    filter.completed = true
   }
 
-  if (teamIdFilter || creatorFilter) {
-    whereClause.retrospective = {}
-    
-    if (teamIdFilter) {
-        whereClause.retrospective.team = {
-            name: {
-                contains: teamIdFilter
-            }
-        }
-    }
+  if (teamIdFilter) filter.teamNameContains = teamIdFilter
+  if (creatorFilter) filter.creatorContains = creatorFilter
+  if (retroIdFilter) filter.retrospectiveId = retroIdFilter
 
-    if (creatorFilter) {
-        whereClause.retrospective.creator = {
-            contains: creatorFilter
-        }
-    }
-  }
-
-  if (retroIdFilter) {
-      whereClause.retrospectiveId = retroIdFilter
-  }
-
-  const actions = await prisma.actionItem.findMany({
-    where: whereClause,
-    include: {
-        retrospective: {
-            include: {
-                team: true
-            }
-        }
-    },
-    orderBy: {
-        retrospective: {
-            createdAt: 'desc'
-        }
-    }
-  })
+  const actions = db.listActionItems(filter)
 
   async function toggleAction(actionId: string, completed: boolean) {
     'use server'
-    await prisma.actionItem.update({
-        where: { id: actionId },
-        data: { completed }
-    })
+    db.updateActionCompleted(actionId, completed)
     revalidatePath('/actions')
   }
 
