@@ -14,6 +14,11 @@
 {{- end }}
 
 2. Database Information:
+  {{- if .Values.sqlite.enabled }}
+  - The application uses file-based SQLite (single replica; schema auto-created).
+  - DB file: {{ .Values.sqlite.mountPath }}/{{ .Values.sqlite.fileName }}
+    (persistence {{ if .Values.sqlite.persistence.enabled }}enabled, {{ .Values.sqlite.persistence.size }}{{ else }}DISABLED — data lost on restart{{ end }})
+  {{- else }}
   - The application uses PostgreSQL (schema auto-created on first connection).
   {{- if .Values.postgresql.enabled }}
   - Bundled Postgres: deployment/{{ include "agile-retro.fullname" . }}-postgres
@@ -21,6 +26,7 @@
   - DATABASE_URL is injected from secret {{ include "agile-retro.fullname" . }}-postgres
   {{- else }}
   - External database: {{ if .Values.externalDatabase.existingSecret }}from secret {{ .Values.externalDatabase.existingSecret }}{{ else if .Values.externalDatabase.url }}configured via externalDatabase.url{{ else }}NOT SET — set externalDatabase.url or externalDatabase.existingSecret!{{ end }}
+  {{- end }}
   {{- end }}
 
 3. Authentication:

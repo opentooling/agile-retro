@@ -73,6 +73,19 @@ tolerations: []
 
 affinity: {}
 
+# File-based SQLite (node:sqlite) — a single-replica fallback that needs no DB
+# container, just a small PVC for the database file. When enabled it takes
+# precedence: the bundled Postgres is not deployed and externalDatabase is ignored.
+sqlite:
+  enabled: false
+  mountPath: /data          # PVC is mounted here; the DB file lives in it
+  fileName: dev.db
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClassName: ""    # "" = cluster default
+    existingClaim: ""
+
 # Bundled PostgreSQL (runs as a separate container/Deployment in this release).
 postgresql:
   enabled: true

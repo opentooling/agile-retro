@@ -5,7 +5,13 @@ metadata:
   labels:
     {{- include "agile-retro.labels" . | nindent 4 }}
 spec:
-  {{- if not .Values.autoscaling.enabled }}
+  {{- if .Values.sqlite.enabled }}
+  # SQLite is a single-writer file DB — never run more than one replica, and use
+  # Recreate so the old pod releases the RWO volume before the new one mounts it.
+  replicas: 1
+  strategy:
+    type: Recreate
+  {{- else if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
   selector:
@@ -53,9 +59,11 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
-            # PostgreSQL connection string.
+            # Database connection. src/lib/db.ts picks the backend from the scheme.
             - name: DATABASE_URL
-              {{- if .Values.postgresql.enabled }}
+              {{- if .Values.sqlite.enabled }}
+              value: "file:{{ .Values.sqlite.mountPath }}/{{ .Values.sqlite.fileName }}"
+              {{- else if .Values.postgresql.enabled }}
               valueFrom:
                 secretKeyRef:
                   name: {{ include "agile-retro.fullname" . }}-postgres
@@ -66,7 +74,7 @@ spec:
                   name: {{ .Values.externalDatabase.existingSecret }}
                   key: {{ .Values.externalDatabase.existingSecretKey | default "database-url" }}
               {{- else }}
-              value: {{ required "Set postgresql.enabled=true, or provide externalDatabase.url / externalDatabase.existingSecret" .Values.externalDatabase.url | quote }}
+              value: {{ required "Set sqlite.enabled=true, or postgresql.enabled=true, or provide externalDatabase.url / externalDatabase.existingSecret" .Values.externalDatabase.url | quote }}
               {{- end }}
             {{- if .Values.app.url }}
             # Public URL of the app, so Auth.js builds correct OAuth redirect URIs
@@ -128,6 +136,11 @@ spec:
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.sqlite.enabled }}
+          volumeMounts:
+            - name: sqlite-data
+              mountPath: {{ .Values.sqlite.mountPath | quote }}
+          {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -139,4 +152,14 @@ spec:
       {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.sqlite.enabled }}
+      volumes:
+        - name: sqlite-data
+        {{- if .Values.sqlite.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.sqlite.persistence.existingClaim | default (printf "%s-sqlite" (include "agile-retro.fullname" .)) }}
+        {{- else }}
+          emptyDir: {}
+        {{- end }}
       {{- end }}

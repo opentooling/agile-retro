@@ -13,6 +13,9 @@
 FROM registry.access.redhat.com/ubi9/nodejs-22 AS builder
 
 ENV NEXT_TELEMETRY_DISABLED=1
+# Enables the node:sqlite backend when DATABASE_URL is a file: URL (harmless for
+# the Postgres backend, which is the default). Node 22 keeps it behind this flag.
+ENV NODE_OPTIONS=--experimental-sqlite
 # UBI Node.js images default WORKDIR to /opt/app-root/src and USER to 1001.
 WORKDIR /opt/app-root/src
 
@@ -37,6 +40,7 @@ WORKDIR /opt/app-root/src
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
+    NODE_OPTIONS=--experimental-sqlite \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
