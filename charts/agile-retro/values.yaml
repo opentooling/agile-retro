@@ -81,12 +81,21 @@ persistence:
   size: 1Gi
   # existingClaim: my-claim
 
+# Public-facing app configuration for Auth.js (NextAuth).
+app:
+  # Full public URL the app is served from (scheme + host, NO trailing slash).
+  # Auth.js uses this to build OAuth redirect URIs that match what you register
+  # in your IdP, e.g. <app.url>/api/auth/callback/keycloak.
+  # Leave empty only for local/dev where the host can be safely inferred.
+  url: ""  # e.g. https://agile-retro.apps.example.com
+  # Trust X-Forwarded-Proto/Host from the ingress/route (TLS terminated upstream).
+  # Required in most cluster deployments behind a proxy. Sets AUTH_TRUST_HOST=true.
+  trustHost: true
+
 env:
   # Define environment variables here
   - name: DATABASE_URL
     value: "file:/app/data/dev.db"
-  - name: AUTH_TRUST_HOST
-    value: "true"
 
 envFromSecret: ""
 # envFromSecret: "my-app-secret"

@@ -26,7 +26,11 @@ RUN npm ci --legacy-peer-deps
 # Now copy the rest of the source and build.
 # No code generation step needed — the SQLite schema is created at runtime by src/lib/db.ts.
 COPY --chown=1001:0 . .
-RUN npm run build
+# Raise the open-file limit before building: `next build` spawns one worker
+# process per CPU core, which can exhaust the default fd limit on many-core
+# build hosts and fail with "spawn node EMFILE". `|| true` keeps the build
+# working if the environment's hard limit is already lower than this.
+RUN ulimit -n 65536 || true; npm run build
 
 # ----- runner: minimal UBI 9 Node.js 22 runtime -----
 FROM registry.access.redhat.com/ubi9/nodejs-22-minimal AS runner

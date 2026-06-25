@@ -31,7 +31,8 @@
 
 4. Environment Configuration:
   - AUTH_SECRET is {{ if .Values.auth.secret }}configured{{ else }}NOT SET - Please configure!{{ end }}
-  - NEXTAUTH_URL: {{ .Values.nextauth.url }}
+  - AUTH_URL: {{ if .Values.app.url }}{{ .Values.app.url }}{{ else }}NOT SET - inferred from request host (set app.url for OAuth behind a proxy){{ end }}
+  - AUTH_TRUST_HOST: {{ .Values.app.trustHost }}
 
 5. Useful Commands:
   # View logs

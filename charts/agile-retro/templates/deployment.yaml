@@ -56,6 +56,17 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- if .Values.app.url }}
+            # Public URL of the app, so Auth.js builds correct OAuth redirect URIs
+            # (e.g. <app.url>/api/auth/callback/keycloak) behind a proxy/route.
+            - name: AUTH_URL
+              value: {{ .Values.app.url | quote }}
+            {{- end }}
+            {{- if .Values.app.trustHost }}
+            # Trust X-Forwarded-Proto/Host from the ingress/route (TLS terminated upstream).
+            - name: AUTH_TRUST_HOST
+              value: "true"
+            {{- end }}
             {{- if or .Values.auth.secret .Values.auth.existingSecret }}
             - name: AUTH_SECRET
               {{- if .Values.auth.existingSecret }}
