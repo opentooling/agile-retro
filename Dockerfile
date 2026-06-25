@@ -1,18 +1,17 @@
 # =============================================================================
 # Red Hat UBI 9 + Node.js 22 images.
-#   - Node 22 is required for the built-in `node:sqlite` module.
 #   - UBI images are freely redistributable and run unprivileged as user 1001.
 #   - They follow the OpenShift "arbitrary UID / group 0" convention natively
 #     (/opt/app-root is owned by 1001:0 and group-writable), so no manual
 #     useradd / chgrp dance is needed.
 #   - Build on the full image (has npm + build tooling); run on the minimal one.
+#   - The app connects to an external PostgreSQL via DATABASE_URL (pg, pure JS),
+#     so no database engine binaries are fetched at build time.
 # =============================================================================
 
 # ----- builder: install dependencies and compile the Next.js app -----
 FROM registry.access.redhat.com/ubi9/nodejs-22 AS builder
 
-# node:sqlite is behind an experimental flag on Node 22 (stable/unflagged on Node 24+).
-ENV NODE_OPTIONS=--experimental-sqlite
 ENV NEXT_TELEMETRY_DISABLED=1
 # UBI Node.js images default WORKDIR to /opt/app-root/src and USER to 1001.
 WORKDIR /opt/app-root/src
@@ -24,7 +23,7 @@ COPY --chown=1001:0 package.json package-lock.json* ./
 RUN npm ci --legacy-peer-deps
 
 # Now copy the rest of the source and build.
-# No code generation step needed — the SQLite schema is created at runtime by src/lib/db.ts.
+# No code generation step needed — the Postgres schema is created at runtime by src/lib/db.ts.
 COPY --chown=1001:0 . .
 # Raise the open-file limit before building: `next build` spawns one worker
 # process per CPU core, which can exhaust the default fd limit on many-core
@@ -38,7 +37,6 @@ WORKDIR /opt/app-root/src
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
-    NODE_OPTIONS=--experimental-sqlite \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
@@ -52,10 +50,8 @@ COPY --from=builder --chown=1001:0 /opt/app-root/src/src ./src
 COPY --from=builder --chown=1001:0 /opt/app-root/src/.next ./.next
 COPY --from=builder --chown=1001:0 /opt/app-root/src/node_modules ./node_modules
 
-# Writable directory for the SQLite database file (default DATABASE_URL=file:./data/dev.db).
+# Data lives in an external PostgreSQL (DATABASE_URL); no local DB volume needed.
 # The schema is created automatically on first connection by src/lib/db.ts.
-# Group-writable so an arbitrary OpenShift UID (in group 0) can create the DB file.
-RUN mkdir -p data && chmod -R g+rwX data
 
 USER 1001
 

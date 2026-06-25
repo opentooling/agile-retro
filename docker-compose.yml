@@ -1,0 +1,49 @@
+# Local development stack: the app + a PostgreSQL container.
+#
+#   docker compose up --build
+#
+# The app connects to the `postgres` service over the compose network. The
+# schema is created automatically on first connection by src/lib/db.ts.
+#
+# Note: `postgres:16-alpine` is pulled from Docker Hub. In an airgapped/office
+# environment, point `services.postgres.image` at your internal mirror (or a
+# RHEL/UBI postgresql image).
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agile
+      POSTGRES_PASSWORD: agile
+      POSTGRES_DB: agile_retro
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agile -d agile_retro"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://agile:agile@postgres:5432/agile_retro
+      # Auth.js requires a secret in production (the image runs NODE_ENV=production).
+      AUTH_SECRET: dev-secret-change-me
+      AUTH_TRUST_HOST: "true"
+      # AUTH_URL: http://localhost:3000
+      # Add provider credentials to actually sign in, e.g.:
+      # AUTH_GOOGLE_ID: ...
+      # AUTH_GOOGLE_SECRET: ...
+      # AUTH_KEYCLOAK_ID: ...
+      # AUTH_KEYCLOAK_SECRET: ...
+      # AUTH_KEYCLOAK_ISSUER: https://keycloak.example.com/realms/your-realm
+
+volumes:
+  pgdata:

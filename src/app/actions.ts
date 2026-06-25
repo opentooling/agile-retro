@@ -36,7 +36,7 @@ export async function createRetrospective(formData: FormData) {
     }
 
     try {
-        const retro = db.createRetrospectiveWithColumns(
+        const retro = await db.createRetrospectiveWithColumns(
             {
                 title: title.trim(),
                 tags: tags || "",
@@ -69,7 +69,7 @@ export async function createTeam(name: string) {
     }
 
     try {
-        const team = db.createTeam(name.trim())
+        const team = await db.createTeam(name.trim())
         revalidatePath('/teams')
         revalidatePath('/')
         return team
@@ -88,7 +88,7 @@ export async function updateTeam(id: string, name: string) {
     }
 
     try {
-        const team = db.updateTeam(id, name.trim())
+        const team = await db.updateTeam(id, name.trim())
         revalidatePath('/teams')
         revalidatePath('/')
         return team
@@ -99,11 +99,11 @@ export async function updateTeam(id: string, name: string) {
 }
 
 export async function getTeams() {
-    return db.listTeams()
+    return await db.listTeams()
 }
 
 export async function getUniqueTags() {
-    const allTags = db.getAllTagStrings()
+    const allTags = (await db.getAllTagStrings())
         .flatMap((tags: string) => tags.split(','))
         .map((t: string) => t.trim())
         .filter((t: string) => t.length > 0)
@@ -112,7 +112,7 @@ export async function getUniqueTags() {
 }
 
 export async function getPopularTags() {
-    const tagStrings = db.getAllTagStrings()
+    const tagStrings = await db.getAllTagStrings()
 
     const tagCounts: Record<string, number> = {}
 

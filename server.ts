@@ -30,7 +30,7 @@ app.prepare().then(() => {
             console.log(`Socket ${socket.id} joined retro ${retroId} as ${username}`);
 
             try {
-                const retro = db.getRetroStatus(retroId);
+                const retro = await db.getRetroStatus(retroId);
 
                 if (retro?.status === 'CLOSED') {
                     return;
@@ -57,9 +57,9 @@ app.prepare().then(() => {
         socket.on("add-item", async ({ retroId, columnId, content, userId, username }) => {
             try {
                 // Get max order in this column
-                const nextOrder = (db.itemMaxOrder(columnId) ?? -1) + 1;
+                const nextOrder = (await db.itemMaxOrder(columnId) ?? -1) + 1;
 
-                db.createItem({
+                await db.createItem({
                     content,
                     columnId,
                     userId: userId || "anonymous",
@@ -68,7 +68,7 @@ app.prepare().then(() => {
                 });
 
                 // Fetch updated retro
-                const updatedRetro = db.getRetroFull(retroId);
+                const updatedRetro = await db.getRetroFull(retroId);
 
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
@@ -85,21 +85,21 @@ app.prepare().then(() => {
 
                 // Let's just update the vote
                 // Find existing vote
-                const existingVote = db.findVote(itemId, userId);
+                const existingVote = await db.findVote(itemId, userId);
 
                 if (existingVote) {
                     const newCount = existingVote.count + delta;
                     if (newCount <= 0) {
-                        db.deleteVote(existingVote.id);
+                        await db.deleteVote(existingVote.id);
                     } else {
-                        db.updateVoteCount(existingVote.id, newCount);
+                        await db.updateVoteCount(existingVote.id, newCount);
                     }
                 } else if (delta > 0) {
-                    db.createVote({ itemId, userId, count: delta });
+                    await db.createVote({ itemId, userId, count: delta });
                 }
 
                 // Fetch updated retro and emit
-                const updatedRetro = db.getRetroFull(retroId);
+                const updatedRetro = await db.getRetroFull(retroId);
 
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
@@ -109,7 +109,7 @@ app.prepare().then(() => {
 
         socket.on("update-status", async ({ retroId, status }) => {
             try {
-                const updatedRetro = db.updateRetroStatus(retroId, status, new Date());
+                const updatedRetro = await db.updateRetroStatus(retroId, status, new Date());
 
                 // Reset readiness on phase change
                 if (participants[retroId]) {
@@ -127,9 +127,9 @@ app.prepare().then(() => {
 
         socket.on("update-item-summary", async ({ retroId, itemId, summary }) => {
             try {
-                db.updateItemSummary(itemId, summary);
+                await db.updateItemSummary(itemId, summary);
 
-                const updatedRetro = db.getRetroFull(retroId);
+                const updatedRetro = await db.getRetroFull(retroId);
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
                 console.error("Error updating summary:", error);
@@ -138,9 +138,9 @@ app.prepare().then(() => {
 
         socket.on("add-action-item", async ({ retroId, content }) => {
             try {
-                db.createActionItem({ content, retrospectiveId: retroId });
+                await db.createActionItem({ content, retrospectiveId: retroId });
 
-                const updatedRetro = db.getRetroFull(retroId);
+                const updatedRetro = await db.getRetroFull(retroId);
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
                 console.error("Error adding action item:", error);
@@ -149,11 +149,11 @@ app.prepare().then(() => {
 
         socket.on("toggle-action-item", async ({ retroId, actionId }) => {
             try {
-                const action = db.getActionItem(actionId);
+                const action = await db.getActionItem(actionId);
                 if (action) {
-                    db.updateActionCompleted(actionId, !action.completed);
+                    await db.updateActionCompleted(actionId, !action.completed);
 
-                    const updatedRetro = db.getRetroFull(retroId);
+                    const updatedRetro = await db.getRetroFull(retroId);
                     io.to(retroId).emit("retro-updated", updatedRetro);
                 }
             } catch (error) {
@@ -163,15 +163,15 @@ app.prepare().then(() => {
 
         socket.on("toggle-reaction", async ({ retroId, itemId, userId, emoji }) => {
             try {
-                const existingReaction = db.findReaction(itemId, userId, emoji);
+                const existingReaction = await db.findReaction(itemId, userId, emoji);
 
                 if (existingReaction) {
-                    db.deleteReaction(existingReaction.id);
+                    await db.deleteReaction(existingReaction.id);
                 } else {
-                    db.createReaction({ itemId, userId, emoji });
+                    await db.createReaction({ itemId, userId, emoji });
                 }
 
-                const updatedRetro = db.getRetroFull(retroId);
+                const updatedRetro = await db.getRetroFull(retroId);
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
                 console.error("Error toggling reaction:", error);
@@ -181,17 +181,17 @@ app.prepare().then(() => {
         socket.on("move-item", async ({ retroId, itemId, targetColumnId, newIndex }) => {
             try {
                 // 1. Get the item to verify it exists and get its current column
-                const itemToMove = db.getItem(itemId);
+                const itemToMove = await db.getItem(itemId);
                 if (!itemToMove) return;
 
                 // 2. Update the item's column immediately (if changed)
                 if (itemToMove.columnId !== targetColumnId) {
-                    db.updateItemColumn(itemId, targetColumnId);
+                    await db.updateItemColumn(itemId, targetColumnId);
                 }
 
                 // 3. Reorder items in the target column
                 // Fetch all items in the target column (including the moved one)
-                const itemsInColumn = db.listItemsInColumn(targetColumnId);
+                const itemsInColumn = await db.listItemsInColumn(targetColumnId);
 
                 // Remove the moved item from the array (if it's there - it might be if we just updated columnId)
                 const otherItems = itemsInColumn.filter((i) => i.id !== itemId);
@@ -202,11 +202,9 @@ app.prepare().then(() => {
                 otherItems.splice(insertIndex, 0, { ...itemToMove, columnId: targetColumnId });
 
                 // Update order for all items in the column, atomically.
-                db.transaction(() => {
-                    otherItems.forEach((item, index) => db.updateItemOrder(item.id, index));
-                });
+                await db.reorderItems(otherItems.map((item) => item.id));
 
-                const updatedRetro = db.getRetroFull(retroId);
+                const updatedRetro = await db.getRetroFull(retroId);
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
                 console.error("Error moving item:", error);
@@ -215,7 +213,7 @@ app.prepare().then(() => {
 
         socket.on("extend-timer", async ({ retroId }) => {
             try {
-                const retro = db.getRetro(retroId);
+                const retro = await db.getRetro(retroId);
                 if (!retro) return;
 
                 const updateData: { inputDuration?: number; votingDuration?: number; reviewDuration?: number } = {};
@@ -229,7 +227,7 @@ app.prepare().then(() => {
                     return; // No timer for other phases
                 }
 
-                const updatedRetro = db.updateRetroDurations(retroId, updateData);
+                const updatedRetro = await db.updateRetroDurations(retroId, updateData);
                 io.to(retroId).emit("retro-updated", updatedRetro);
             } catch (error) {
                 console.error("Error extending timer:", error);
@@ -244,7 +242,7 @@ app.prepare().then(() => {
                     delete participants[retroId][socket.id];
 
                     try {
-                        const retro = db.getRetroStatus(retroId);
+                        const retro = await db.getRetroStatus(retroId);
 
                         if (retro?.status !== 'CLOSED') {
                             io.to(retroId).emit("participants-updated", Object.values(participants[retroId]));

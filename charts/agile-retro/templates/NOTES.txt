@@ -14,9 +14,14 @@
 {{- end }}
 
 2. Database Information:
-  - The application uses SQLite with a persistent volume
-  - Database file: /app/data/dev.db
-  - Volume mount: {{ .Values.persistence.mountPath }}
+  - The application uses PostgreSQL (schema auto-created on first connection).
+  {{- if .Values.postgresql.enabled }}
+  - Bundled Postgres: deployment/{{ include "agile-retro.fullname" . }}-postgres
+    (persistence {{ if .Values.postgresql.persistence.enabled }}enabled, {{ .Values.postgresql.persistence.size }}{{ else }}DISABLED — data lost on restart{{ end }})
+  - DATABASE_URL is injected from secret {{ include "agile-retro.fullname" . }}-postgres
+  {{- else }}
+  - External database: {{ if .Values.externalDatabase.existingSecret }}from secret {{ .Values.externalDatabase.existingSecret }}{{ else if .Values.externalDatabase.url }}configured via externalDatabase.url{{ else }}NOT SET — set externalDatabase.url or externalDatabase.existingSecret!{{ end }}
+  {{- end }}
 
 3. Authentication:
   {{- if .Values.auth.google.enabled }}
@@ -40,8 +45,10 @@
   
   # Access the pod shell
   kubectl exec -it deployment/{{ include "agile-retro.fullname" . }} -n {{ .Release.Namespace }} -- /bin/sh
-  
-  # Verify the database file (schema is auto-created on first run)
-  kubectl exec -it deployment/{{ include "agile-retro.fullname" . }} -n {{ .Release.Namespace }} -- ls -l /app/data/dev.db
+  {{- if .Values.postgresql.enabled }}
+
+  # Open a psql shell on the bundled Postgres
+  kubectl exec -it deployment/{{ include "agile-retro.fullname" . }}-postgres -n {{ .Release.Namespace }} -- psql -U {{ .Values.postgresql.auth.username }} -d {{ .Values.postgresql.auth.database }}
+  {{- end }}
 
 For more information, visit: https://github.com/opentooling/agile-retro

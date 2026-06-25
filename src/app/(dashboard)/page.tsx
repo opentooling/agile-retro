@@ -17,11 +17,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
   // Free-text team search by name (still supports old links that pass a team name).
   if (teamIdFilter) filter.teamNameContains = teamIdFilter
 
-  const recentRetros = db.listRetrospectives(filter, 20)
-
-  // Analytics
-  const totalRetros = db.countRetrospectives(filter)
-  const totalItems = db.countItems()
+  const [recentRetros, totalRetros, totalItems, openActions] = await Promise.all([
+    db.listRetrospectives(filter, 20),
+    db.countRetrospectives(filter),
+    db.countItems(),
+    db.countOpenActions(filter),
+  ])
   // This is a rough estimate of active users based on unique userIds in votes/items would be better but expensive
   // For now, let's just show total retros as a placeholder or maybe something else simple
 
@@ -72,7 +73,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
             </CardHeader>
             <CardContent>
                 <div className="text-2xl font-bold">
-                {db.countOpenActions(filter)}
+                {openActions}
                 </div>
             </CardContent>
             </Card>

@@ -25,7 +25,7 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
     delete filter.creatorContains
   }
 
-  const retros = db.listRetrospectives(filter)
+  const retros = await db.listRetrospectives(filter)
 
   return (
     <div className="container mx-auto p-8">

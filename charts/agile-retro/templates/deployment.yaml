@@ -33,15 +33,12 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # The SQLite schema is created automatically on first connection by
+          # The Postgres schema is created automatically on first connection by
           # src/lib/db.ts, so no migration step is required at startup.
           command: ["/bin/sh", "-c"]
           args:
             - |
               npm start
-          volumeMounts:
-            - name: data
-              mountPath: /app/data
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
@@ -56,6 +53,21 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            # PostgreSQL connection string.
+            - name: DATABASE_URL
+              {{- if .Values.postgresql.enabled }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agile-retro.fullname" . }}-postgres
+                  key: database-url
+              {{- else if .Values.externalDatabase.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalDatabase.existingSecret }}
+                  key: {{ .Values.externalDatabase.existingSecretKey | default "database-url" }}
+              {{- else }}
+              value: {{ required "Set postgresql.enabled=true, or provide externalDatabase.url / externalDatabase.existingSecret" .Values.externalDatabase.url | quote }}
+              {{- end }}
             {{- if .Values.app.url }}
             # Public URL of the app, so Auth.js builds correct OAuth redirect URIs
             # (e.g. <app.url>/api/auth/callback/keycloak) behind a proxy/route.
@@ -124,14 +136,6 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      volumes:
-        - name: data
-        {{- if .Values.persistence.enabled }}
-          persistentVolumeClaim:
-            claimName: {{ .Values.persistence.existingClaim | default (include "agile-retro.fullname" .) }}
-        {{- else }}
-          emptyDir: {}
-        {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}

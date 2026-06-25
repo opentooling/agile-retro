@@ -27,11 +27,11 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
   if (creatorFilter) filter.creatorContains = creatorFilter
   if (retroIdFilter) filter.retrospectiveId = retroIdFilter
 
-  const actions = db.listActionItems(filter)
+  const actions = await db.listActionItems(filter)
 
   async function toggleAction(actionId: string, completed: boolean) {
     'use server'
-    db.updateActionCompleted(actionId, completed)
+    await db.updateActionCompleted(actionId, completed)
     revalidatePath('/actions')
   }
 

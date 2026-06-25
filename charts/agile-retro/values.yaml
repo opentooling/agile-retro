@@ -73,13 +73,33 @@ tolerations: []
 
 affinity: {}
 
-persistence:
-  enabled: false
-  # storageClassName: default
-  accessModes:
-    - ReadWriteOnce
-  size: 1Gi
-  # existingClaim: my-claim
+# Bundled PostgreSQL (runs as a separate container/Deployment in this release).
+postgresql:
+  enabled: true
+  image: postgres:16-alpine   # airgapped: point at your mirror or a RHEL postgresql image
+  imagePullPolicy: IfNotPresent
+  auth:
+    username: agile
+    password: change-me-in-production
+    database: agile_retro
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClassName: ""      # "" = cluster default
+    existingClaim: ""
+  # OpenShift note: the community `postgres` image does NOT run under the default
+  # restricted SCC (it needs a fixed UID). To run it here either:
+  #   - set a podSecurityContext below (e.g. fsGroup/runAsUser), or
+  #   - grant the postgres ServiceAccount the 'anyuid' SCC, or
+  #   - switch `image` to a RHEL postgresql image (and adjust env var names).
+  podSecurityContext: {}
+  resources: {}
+
+# Used only when postgresql.enabled is false — point the app at an external DB.
+externalDatabase:
+  url: ""                     # postgres://user:pass@host:5432/dbname
+  existingSecret: ""          # name of a Secret containing the connection string
+  existingSecretKey: "database-url"
 
 # Public-facing app configuration for Auth.js (NextAuth).
 app:
@@ -93,9 +113,9 @@ app:
   trustHost: true
 
 env:
-  # Define environment variables here
-  - name: DATABASE_URL
-    value: "file:/app/data/dev.db"
+  # Define extra environment variables here. DATABASE_URL is injected
+  # automatically from the bundled Postgres secret (or externalDatabase).
+  []
 
 envFromSecret: ""
 # envFromSecret: "my-app-secret"

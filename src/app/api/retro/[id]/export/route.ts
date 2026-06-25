@@ -19,7 +19,7 @@ export async function GET(
     const { id } = await params
 
     try {
-        const retro = db.getRetroFull(id)
+        const retro = await db.getRetroFull(id)
 
         if (!retro) {
             return NextResponse.json({ error: 'Retrospective not found' }, { status: 404 })
