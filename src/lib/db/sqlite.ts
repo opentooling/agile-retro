@@ -14,7 +14,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import type {
-  Team, Retrospective, Column, Vote, Reaction, Item, ActionItem,
+  Team, TeamJiraConfig, Retrospective, Column, Vote, Reaction, Item, ActionItem,
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro,
 } from "./types";
@@ -40,7 +40,11 @@ const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS "Team" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "jiraBaseUrl" TEXT,
+    "jiraProjectKey" TEXT,
+    "jiraEmail" TEXT,
+    "jiraApiToken" TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "Team_name_key" ON "Team"("name");
 
@@ -102,9 +106,41 @@ CREATE TABLE IF NOT EXISTS "ActionItem" (
     "content" TEXT NOT NULL,
     "completed" BOOLEAN NOT NULL DEFAULT 0,
     "retrospectiveId" TEXT NOT NULL,
+    "assignee" TEXT,
+    "dueDate" DATETIME,
+    "externalUrl" TEXT,
+    "externalKey" TEXT,
     CONSTRAINT "ActionItem_retrospectiveId_fkey" FOREIGN KEY ("retrospectiveId") REFERENCES "Retrospective" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 `;
+
+/**
+ * Idempotent column additions for databases created before these columns
+ * existed. `CREATE TABLE IF NOT EXISTS` never alters an existing table, so we
+ * add new nullable columns here. Each ALTER is wrapped because node:sqlite has
+ * no "ADD COLUMN IF NOT EXISTS"; a duplicate-column error is expected and safe.
+ */
+const MIGRATIONS: string[] = [
+  `ALTER TABLE "Team" ADD COLUMN "jiraBaseUrl" TEXT`,
+  `ALTER TABLE "Team" ADD COLUMN "jiraProjectKey" TEXT`,
+  `ALTER TABLE "Team" ADD COLUMN "jiraEmail" TEXT`,
+  `ALTER TABLE "Team" ADD COLUMN "jiraApiToken" TEXT`,
+  `ALTER TABLE "ActionItem" ADD COLUMN "assignee" TEXT`,
+  `ALTER TABLE "ActionItem" ADD COLUMN "dueDate" DATETIME`,
+  `ALTER TABLE "ActionItem" ADD COLUMN "externalUrl" TEXT`,
+  `ALTER TABLE "ActionItem" ADD COLUMN "externalKey" TEXT`,
+];
+
+function applyMigrations(db: DatabaseSync): void {
+  for (const sql of MIGRATIONS) {
+    try {
+      db.exec(sql);
+    } catch (err: any) {
+      // "duplicate column name" means the migration already ran — ignore it.
+      if (!/duplicate column name/i.test(String(err?.message ?? err))) throw err;
+    }
+  }
+}
 
 // Cache the connection on globalThis so dev/HMR doesn't open many handles.
 const globalForDb = globalThis as unknown as { __sqlite?: DatabaseSync };
@@ -117,6 +153,7 @@ function getDb(): DatabaseSync {
     const db = new DatabaseSync(dbPath);
     db.exec("PRAGMA foreign_keys = ON;");
     db.exec(SCHEMA_SQL);
+    applyMigrations(db);
     globalForDb.__sqlite = db;
   }
   return globalForDb.__sqlite;
@@ -157,14 +194,29 @@ const toBool = (v: any): boolean => v === 1 || v === true || v === "1";
 const dateToDb = (d: Date | string | null | undefined): string | null =>
   d == null ? null : d instanceof Date ? d.toISOString() : d;
 
-const mapTeam = (r: Row): Team => ({ id: r.id, name: r.name, createdAt: toDate(r.createdAt) });
+const mapTeam = (r: Row): Team => ({
+  id: r.id,
+  name: r.name,
+  createdAt: toDate(r.createdAt),
+  jiraBaseUrl: r.jiraBaseUrl ?? null,
+  jiraProjectKey: r.jiraProjectKey ?? null,
+  jiraEmail: r.jiraEmail ?? null,
+  jiraApiToken: r.jiraApiToken ?? null,
+});
 const mapColumn = (r: Row): Column => ({ id: r.id, title: r.title, type: r.type, retrospectiveId: r.retrospectiveId });
 const mapVote = (r: Row): Vote => ({ id: r.id, itemId: r.itemId, userId: r.userId, count: r.count });
 const mapReaction = (r: Row): Reaction => ({
   id: r.id, emoji: r.emoji, userId: r.userId, itemId: r.itemId, createdAt: toDate(r.createdAt),
 });
 const mapActionItem = (r: Row): ActionItem => ({
-  id: r.id, content: r.content, completed: toBool(r.completed), retrospectiveId: r.retrospectiveId,
+  id: r.id,
+  content: r.content,
+  completed: toBool(r.completed),
+  retrospectiveId: r.retrospectiveId,
+  assignee: r.assignee ?? null,
+  dueDate: toDateOrNull(r.dueDate),
+  externalUrl: r.externalUrl ?? null,
+  externalKey: r.externalKey ?? null,
 });
 const mapRetro = (r: Row): Retrospective => ({
   id: r.id,
@@ -244,6 +296,20 @@ export function createTeam(name: string): Team {
 export function updateTeam(id: string, name: string): Team {
   const db = getDb();
   db.prepare(`UPDATE "Team" SET "name" = ? WHERE "id" = ?`).run(name, id);
+  return mapTeam(db.prepare(`SELECT * FROM "Team" WHERE "id" = ?`).get(id) as Row);
+}
+
+export function updateTeamJira(id: string, config: TeamJiraConfig): Team {
+  const db = getDb();
+  db.prepare(
+    `UPDATE "Team" SET "jiraBaseUrl" = ?, "jiraProjectKey" = ?, "jiraEmail" = ?, "jiraApiToken" = ? WHERE "id" = ?`
+  ).run(
+    config.jiraBaseUrl ?? null,
+    config.jiraProjectKey ?? null,
+    config.jiraEmail ?? null,
+    config.jiraApiToken ?? null,
+    id
+  );
   return mapTeam(db.prepare(`SELECT * FROM "Team" WHERE "id" = ?`).get(id) as Row);
 }
 
@@ -526,13 +592,34 @@ export function deleteReaction(id: string): void {
 // Action items
 // ---------------------------------------------------------------------------
 
-export function createActionItem(data: { content: string; retrospectiveId: string }): ActionItem {
+export function createActionItem(data: {
+  content: string;
+  retrospectiveId: string;
+  assignee?: string | null;
+  dueDate?: Date | null;
+}): ActionItem {
   const db = getDb();
   const id = randomUUID();
-  db.prepare(`INSERT INTO "ActionItem" ("id","content","completed","retrospectiveId") VALUES (?,?,?,?)`).run(
-    id, data.content, 0, data.retrospectiveId
+  db.prepare(
+    `INSERT INTO "ActionItem" ("id","content","completed","retrospectiveId","assignee","dueDate") VALUES (?,?,?,?,?,?)`
+  ).run(
+    id,
+    data.content,
+    0,
+    data.retrospectiveId,
+    data.assignee ?? null,
+    dateToDb(data.dueDate ?? null)
   );
   return mapActionItem(db.prepare(`SELECT * FROM "ActionItem" WHERE "id" = ?`).get(id) as Row);
+}
+
+export function setActionExternalLink(
+  id: string,
+  link: { externalUrl: string; externalKey: string }
+): void {
+  getDb()
+    .prepare(`UPDATE "ActionItem" SET "externalUrl" = ?, "externalKey" = ? WHERE "id" = ?`)
+    .run(link.externalUrl, link.externalKey, id);
 }
 
 export function getActionItem(id: string): ActionItem | null {
@@ -561,6 +648,10 @@ export function listActionItems(filter: ActionFilter): ActionItemWithRetro[] {
   if (filter.creatorContains) {
     clauses.push(`r."creator" LIKE ?`);
     params.push(`%${filter.creatorContains}%`);
+  }
+  if (filter.assigneeContains) {
+    clauses.push(`a."assignee" LIKE ?`);
+    params.push(`%${filter.assigneeContains}%`);
   }
   if (filter.teamNameContains) {
     needsTeamJoin = true;

@@ -1,6 +1,7 @@
 import * as db from '@/lib/db'
 import RetroBoard from '@/components/RetroBoard'
 import { notFound } from 'next/navigation'
+import { redactRetroFull } from '@/lib/sanitize'
 
 import { auth } from '@/auth'
 
@@ -13,5 +14,6 @@ export default async function RetroPage({ params }: { params: Promise<{ id: stri
     notFound()
   }
 
-  return <RetroBoard initialData={retro as any} user={session?.user} />
+  // Strip the Jira API token before handing the retro to the client component.
+  return <RetroBoard initialData={redactRetroFull(retro) as any} user={session?.user} />
 }

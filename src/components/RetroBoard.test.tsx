@@ -18,6 +18,12 @@ jest.mock('socket.io-client', () => {
 jest.mock('next-themes', () => ({
   useTheme: () => ({ theme: 'light', setTheme: jest.fn() }),
 }))
+
+// Mock the server actions imported by RetroBoard (e.g. the Jira plugin trigger)
+// so the component renders without pulling in the server-only data layer.
+jest.mock('@/app/actions', () => ({
+  createExternalTaskForAction: jest.fn(),
+}))
  
 // Mock next/link
 jest.mock('next/link', () => {

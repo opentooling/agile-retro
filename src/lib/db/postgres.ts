@@ -12,7 +12,7 @@
 import { Pool, type PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import type {
-  Team, Retrospective, Column, Vote, Reaction, Item, ActionItem,
+  Team, TeamJiraConfig, Retrospective, Column, Vote, Reaction, Item, ActionItem,
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro,
 } from "./types";
@@ -25,7 +25,11 @@ const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS "Team" (
     "id" TEXT PRIMARY KEY,
     "name" TEXT NOT NULL,
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "jiraBaseUrl" TEXT,
+    "jiraProjectKey" TEXT,
+    "jiraEmail" TEXT,
+    "jiraApiToken" TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "Team_name_key" ON "Team" ("name");
 
@@ -81,8 +85,23 @@ CREATE TABLE IF NOT EXISTS "ActionItem" (
     "id" TEXT PRIMARY KEY,
     "content" TEXT NOT NULL,
     "completed" BOOLEAN NOT NULL DEFAULT false,
-    "retrospectiveId" TEXT NOT NULL REFERENCES "Retrospective" ("id")
+    "retrospectiveId" TEXT NOT NULL REFERENCES "Retrospective" ("id"),
+    "assignee" TEXT,
+    "dueDate" TIMESTAMPTZ,
+    "externalUrl" TEXT,
+    "externalKey" TEXT
 );
+
+-- Idempotent column additions for databases created before these columns
+-- existed (CREATE TABLE IF NOT EXISTS never alters an existing table).
+ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "jiraBaseUrl" TEXT;
+ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "jiraProjectKey" TEXT;
+ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "jiraEmail" TEXT;
+ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "jiraApiToken" TEXT;
+ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "assignee" TEXT;
+ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "dueDate" TIMESTAMPTZ;
+ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "externalUrl" TEXT;
+ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "externalKey" TEXT;
 `;
 
 // Cache the pool and the one-time schema init on globalThis so dev/HMR and
@@ -163,7 +182,15 @@ async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promi
 
 type Row = Record<string, any>;
 
-const mapTeam = (r: Row): Team => ({ id: r.id, name: r.name, createdAt: r.createdAt });
+const mapTeam = (r: Row): Team => ({
+  id: r.id,
+  name: r.name,
+  createdAt: r.createdAt,
+  jiraBaseUrl: r.jiraBaseUrl ?? null,
+  jiraProjectKey: r.jiraProjectKey ?? null,
+  jiraEmail: r.jiraEmail ?? null,
+  jiraApiToken: r.jiraApiToken ?? null,
+});
 const mapColumn = (r: Row): Column => ({
   id: r.id, title: r.title, type: r.type, retrospectiveId: r.retrospectiveId,
 });
@@ -172,7 +199,14 @@ const mapReaction = (r: Row): Reaction => ({
   id: r.id, emoji: r.emoji, userId: r.userId, itemId: r.itemId, createdAt: r.createdAt,
 });
 const mapActionItem = (r: Row): ActionItem => ({
-  id: r.id, content: r.content, completed: r.completed, retrospectiveId: r.retrospectiveId,
+  id: r.id,
+  content: r.content,
+  completed: r.completed,
+  retrospectiveId: r.retrospectiveId,
+  assignee: r.assignee ?? null,
+  dueDate: r.dueDate ?? null,
+  externalUrl: r.externalUrl ?? null,
+  externalKey: r.externalKey ?? null,
 });
 const mapRetro = (r: Row): Retrospective => ({
   id: r.id,
@@ -257,6 +291,22 @@ export async function updateTeam(id: string, name: string): Promise<Team> {
   const row = await queryOne(
     `UPDATE "Team" SET "name" = $2 WHERE "id" = $1 RETURNING *`,
     [id, name]
+  );
+  return mapTeam(row as Row);
+}
+
+export async function updateTeamJira(id: string, config: TeamJiraConfig): Promise<Team> {
+  const row = await queryOne(
+    `UPDATE "Team"
+       SET "jiraBaseUrl" = $2, "jiraProjectKey" = $3, "jiraEmail" = $4, "jiraApiToken" = $5
+     WHERE "id" = $1 RETURNING *`,
+    [
+      id,
+      config.jiraBaseUrl ?? null,
+      config.jiraProjectKey ?? null,
+      config.jiraEmail ?? null,
+      config.jiraApiToken ?? null,
+    ]
   );
   return mapTeam(row as Row);
 }
@@ -562,12 +612,25 @@ export async function deleteReaction(id: string): Promise<void> {
 export async function createActionItem(data: {
   content: string;
   retrospectiveId: string;
+  assignee?: string | null;
+  dueDate?: Date | null;
 }): Promise<ActionItem> {
   const row = await queryOne(
-    `INSERT INTO "ActionItem" ("id","content","retrospectiveId") VALUES ($1,$2,$3) RETURNING *`,
-    [randomUUID(), data.content, data.retrospectiveId]
+    `INSERT INTO "ActionItem" ("id","content","retrospectiveId","assignee","dueDate")
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [randomUUID(), data.content, data.retrospectiveId, data.assignee ?? null, data.dueDate ?? null]
   );
   return mapActionItem(row as Row);
+}
+
+export async function setActionExternalLink(
+  id: string,
+  link: { externalUrl: string; externalKey: string }
+): Promise<void> {
+  await query(
+    `UPDATE "ActionItem" SET "externalUrl" = $2, "externalKey" = $3 WHERE "id" = $1`,
+    [id, link.externalUrl, link.externalKey]
+  );
 }
 
 export async function getActionItem(id: string): Promise<ActionItem | null> {
@@ -593,6 +656,9 @@ export async function listActionItems(filter: ActionFilter): Promise<ActionItemW
   }
   if (filter.creatorContains) {
     clauses.push(`r."creator" ILIKE $${params.push(`%${filter.creatorContains}%`)}`);
+  }
+  if (filter.assigneeContains) {
+    clauses.push(`a."assignee" ILIKE $${params.push(`%${filter.assigneeContains}%`)}`);
   }
   if (filter.teamNameContains) {
     needsTeamJoin = true;

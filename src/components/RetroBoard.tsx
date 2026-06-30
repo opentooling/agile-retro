@@ -7,9 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users } from 'lucide-react'
+import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users, Calendar, User as UserIcon, ExternalLink } from 'lucide-react'
 import { cn } from "@/lib/utils"
 import { ModeToggle } from "@/components/mode-toggle"
+import { MentionInput, MentionText } from "@/components/Mentions"
+import { createExternalTaskForAction } from "@/app/actions"
 import {
   DndContext, 
   closestCorners,
@@ -36,7 +38,8 @@ type RetroData = {
   team?: {
     id: string
     name: string
-  }
+    jiraConfigured?: boolean
+  } | null
   columns: {
     id: string
     title: string
@@ -54,6 +57,10 @@ type RetroData = {
     id: string
     content: string
     completed: boolean
+    assignee?: string | null
+    dueDate?: string | null
+    externalUrl?: string | null
+    externalKey?: string | null
   }[]
   inputDuration?: number | null
   votingDuration?: number | null
@@ -65,6 +72,152 @@ type RetroData = {
 
 
 
+
+type ActionData = {
+  id: string
+  content: string
+  completed: boolean
+  assignee?: string | null
+  dueDate?: string | null
+  externalUrl?: string | null
+  externalKey?: string | null
+}
+
+/** Compact input row for a new action item: content + assignee + due date. */
+function ActionComposer({
+  suggestions,
+  onAdd,
+}: {
+  suggestions: string[]
+  onAdd: (content: string, assignee: string | null, dueDate: string | null) => void
+}) {
+  const [content, setContent] = useState('')
+  const [assignee, setAssignee] = useState('')
+  const [dueDate, setDueDate] = useState('')
+
+  const submit = () => {
+    if (!content.trim()) return
+    onAdd(content.trim(), assignee.trim() || null, dueDate || null)
+    setContent('')
+    setAssignee('')
+    setDueDate('')
+  }
+
+  return (
+    <div className="flex flex-col gap-3 bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border">
+      <MentionInput
+        value={content}
+        onChange={setContent}
+        suggestions={suggestions}
+        placeholder="New action item... (use @ to mention)"
+        onEnter={submit}
+      />
+      <div className="flex flex-wrap gap-2 items-center">
+        <div className="flex-1 min-w-[160px]">
+          <MentionInput
+            value={assignee}
+            onChange={setAssignee}
+            suggestions={suggestions}
+            placeholder="Assignee (optional)"
+          />
+        </div>
+        <input
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          className="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+          aria-label="Due date"
+        />
+        <Button onClick={submit} disabled={!content.trim()}>Add</Button>
+      </div>
+    </div>
+  )
+}
+
+/** Display card for an action item, with assignee, due date and Jira link. */
+function ActionCard({
+  action,
+  names,
+  jiraConfigured,
+  readOnly,
+  onToggle,
+}: {
+  action: ActionData
+  names: string[]
+  jiraConfigured: boolean
+  readOnly?: boolean
+  onToggle?: () => void
+}) {
+  const [link, setLink] = useState<{ url: string; key: string } | null>(
+    action.externalUrl && action.externalKey
+      ? { url: action.externalUrl, key: action.externalKey }
+      : null
+  )
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const createInJira = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await createExternalTaskForAction(action.id, 'jira')
+      setLink(result)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create Jira issue')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card className="border-l-4 border-l-green-500 shadow-sm">
+      <CardContent className="p-4 flex flex-col gap-2">
+        <div className="flex items-start gap-3">
+          {onToggle && (
+            <input
+              type="checkbox"
+              checked={action.completed}
+              className="mt-1 w-5 h-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
+              onChange={onToggle}
+            />
+          )}
+          <span className={cn('font-medium', action.completed && 'line-through text-muted-foreground')}>
+            <MentionText text={action.content} names={names} />
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground pl-0">
+          {action.assignee && (
+            <span className="flex items-center gap-1 bg-secondary px-2 py-0.5 rounded-full">
+              <UserIcon className="w-3 h-3" /> {action.assignee}
+            </span>
+          )}
+          {action.dueDate && (
+            <span className="flex items-center gap-1 bg-secondary px-2 py-0.5 rounded-full">
+              <Calendar className="w-3 h-3" /> Due {new Date(action.dueDate).toLocaleDateString()}
+            </span>
+          )}
+          {link ? (
+            <a
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-blue-600 hover:underline"
+            >
+              <ExternalLink className="w-3 h-3" /> {link.key}
+            </a>
+          ) : (
+            jiraConfigured && !readOnly && (
+              <Button size="sm" variant="outline" className="h-6 px-2 gap-1" onClick={createInJira} disabled={busy}>
+                <ExternalLink className="w-3 h-3" /> {busy ? 'Creating…' : 'Create in Jira'}
+              </Button>
+            )
+          )}
+          {error && <span className="text-red-500">{error}</span>}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 function SortableItem({ id, children, disabled }: { id: string, children: React.ReactNode, disabled?: boolean }) {
   const {
@@ -262,9 +415,18 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
     socket.emit('update-item-summary', { retroId: retro.id, itemId, summary })
   }
 
-  const handleAddActionItem = (content: string) => {
+  const handleAddActionItem = (
+    content: string,
+    assignee?: string | null,
+    dueDate?: string | null
+  ) => {
     if (!socket || !content.trim()) return
-    socket.emit('add-action-item', { retroId: retro.id, content })
+    socket.emit('add-action-item', {
+      retroId: retro.id,
+      content,
+      assignee: assignee || null,
+      dueDate: dueDate || null,
+    })
   }
 
   const handleToggleReady = () => {
@@ -371,6 +533,19 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
 
   const votesRemaining = 10 - totalVotesUsed
   const isOwner = retro.creator === username
+
+  // Names available for @mentions and action assignment: live participants,
+  // the current user, the creator, and (when not anonymous) item authors.
+  const mentionNames = useMemo(() => {
+    const names = new Set<string>()
+    participants.forEach(p => { if (p.username) names.add(p.username) })
+    if (username) names.add(username)
+    if (retro.creator) names.add(retro.creator)
+    if (!retro.isAnonymous) {
+      retro.columns.forEach(c => c.items.forEach(i => { if (i.username) names.add(i.username) }))
+    }
+    return Array.from(names)
+  }, [participants, username, retro])
 
   if (!isJoined) {
     return (
@@ -582,7 +757,7 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                     <Card key={item.id} className="shadow-sm hover:shadow-md transition-shadow duration-300 border-l-4 border-l-blue-500">
                         <CardContent className="p-6">
                         <div className="flex justify-between items-start mb-4">
-                            <div className="text-xl font-medium leading-relaxed">{item.content}</div>
+                            <div className="text-xl font-medium leading-relaxed"><MentionText text={item.content} names={mentionNames} /></div>
                             <div className="flex items-center gap-1 text-yellow-500 font-bold bg-yellow-50 dark:bg-yellow-900/20 px-3 py-1 rounded-full">
                             <Star className="w-5 h-5 fill-current" /> {totalVotes}
                             </div>
@@ -624,7 +799,7 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                         <Card key={item.id} className="border-l-4 border-l-yellow-500 shadow-sm">
                         <CardContent className="p-5">
                             <div className="flex justify-between items-start">
-                            <div className="font-medium text-lg">{item.content}</div>
+                            <div className="font-medium text-lg"><MentionText text={item.content} names={mentionNames} /></div>
                             <div className="flex items-center gap-1 text-yellow-600 font-bold">
                                 <Star className="w-4 h-4 fill-current" /> {totalVotes}
                             </div>
@@ -647,31 +822,15 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                 </h2>
                 <div className="space-y-4">
                     {retro.actions?.map((action) => (
-                    <Card key={action.id} className="border-l-4 border-l-green-500 shadow-sm">
-                        <CardContent className="p-5 font-medium">
-                        {action.content}
-                        </CardContent>
-                    </Card>
+                    <ActionCard
+                        key={action.id}
+                        action={action}
+                        names={mentionNames}
+                        jiraConfigured={Boolean(retro.team?.jiraConfigured)}
+                    />
                     ))}
                 </div>
-                <div className="flex gap-3 bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border">
-                    <Input 
-                    placeholder="New action item..." 
-                    className="flex-1"
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                        handleAddActionItem(e.currentTarget.value)
-                        e.currentTarget.value = ''
-                        }
-                    }}
-                    />
-                    <Button 
-                    onClick={(e) => {
-                    const input = e.currentTarget.previousElementSibling as HTMLInputElement
-                    handleAddActionItem(input.value)
-                    input.value = ''
-                    }}>Add</Button>
-                </div>
+                <ActionComposer suggestions={mentionNames} onAdd={handleAddActionItem} />
                 </div>
             </div>
             ) : retro.status === 'CLOSED' ? (
@@ -702,23 +861,17 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                     <div className="space-y-4">
                     {retro.actions && retro.actions.length > 0 ? (
                         retro.actions.map((action) => (
-                        <Card key={action.id} className="border-l-4 border-l-green-500">
-                            <CardContent className="p-4 font-medium flex items-center gap-3">
-                                <input 
-                                    type="checkbox" 
-                                    checked={action.completed} 
-                                    className="w-5 h-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
-                                    onChange={() => {
-                                        if (socket) {
-                                            socket.emit('toggle-action-item', { retroId: retro.id, actionId: action.id })
-                                        }
-                                    }}
-                                />
-                                <span className={cn(action.completed && "line-through text-muted-foreground")}>
-                                    {action.content}
-                                </span>
-                            </CardContent>
-                        </Card>
+                        <ActionCard
+                            key={action.id}
+                            action={action}
+                            names={mentionNames}
+                            jiraConfigured={Boolean(retro.team?.jiraConfigured)}
+                            onToggle={() => {
+                                if (socket) {
+                                    socket.emit('toggle-action-item', { retroId: retro.id, actionId: action.id })
+                                }
+                            }}
+                        />
                         ))
                     ) : (
                         <div className="text-muted-foreground italic p-4 border border-dashed rounded-lg text-center">
@@ -744,7 +897,7 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                             <Card key={item.id}>
                                 <CardContent className="p-4">
                                 <div className="flex justify-between items-start">
-                                    <div className="font-medium">{item.content}</div>
+                                    <div className="font-medium"><MentionText text={item.content} names={mentionNames} /></div>
                                     <div className="flex items-center gap-1 text-yellow-600 font-bold">
                                     <Star className="w-4 h-4 fill-current" /> {totalVotes}
                                     </div>
@@ -796,7 +949,7 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                         <SortableItem key={item.id} id={item.id} disabled={retro.status !== 'INPUT'}>
                         <Card className="bg-white dark:bg-gray-800 shadow-sm hover:shadow-md transition-shadow duration-200 border-0">
                             <CardContent className="p-4 space-y-3">
-                            <div className="whitespace-pre-wrap text-sm leading-relaxed">{item.content}</div>
+                            <div className="whitespace-pre-wrap text-sm leading-relaxed"><MentionText text={item.content} names={mentionNames} /></div>
                             <div className="flex flex-col gap-3 pt-2 border-t border-gray-100 dark:border-gray-700">
                                 <div className="text-xs font-medium text-muted-foreground bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full w-fit">
                                     {retro.isAnonymous ? "Anonymous" : item.username}
@@ -847,19 +1000,16 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                     {retro.status === 'INPUT' && (
                         <div className="pt-2">
                         <div className="relative">
-                            <Textarea 
-                            placeholder="Add a new item..." 
+                            <MentionInput
+                            multiline
+                            placeholder="Add a new item... (use @ to mention)"
                             value={newItemContent[column.id] || ''}
-                            onChange={(e) => setNewItemContent(prev => ({ ...prev, [column.id]: e.target.value }))}
+                            onChange={(v) => setNewItemContent(prev => ({ ...prev, [column.id]: v }))}
+                            suggestions={mentionNames}
                             className="min-h-[80px] pr-12 resize-none shadow-sm focus-visible:ring-indigo-500"
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault()
-                                    handleAddItem(column.id)
-                                }
-                            }}
+                            onEnter={() => handleAddItem(column.id)}
                             />
-                            <Button 
+                            <Button
                                 size="icon"
                                 className="absolute bottom-2 right-2 h-8 w-8 bg-blue-600 hover:bg-blue-700"
                                 onClick={() => handleAddItem(column.id)}

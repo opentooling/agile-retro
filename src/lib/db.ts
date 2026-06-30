@@ -48,6 +48,7 @@ function bind<K extends keyof DbApi>(name: K): Asyncify<DbApi[K]> {
 export const listTeams = bind("listTeams");
 export const createTeam = bind("createTeam");
 export const updateTeam = bind("updateTeam");
+export const updateTeamJira = bind("updateTeamJira");
 export const getTeam = bind("getTeam");
 
 // Retrospectives
@@ -86,6 +87,7 @@ export const deleteReaction = bind("deleteReaction");
 export const createActionItem = bind("createActionItem");
 export const getActionItem = bind("getActionItem");
 export const updateActionCompleted = bind("updateActionCompleted");
+export const setActionExternalLink = bind("setActionExternalLink");
 export const listActionItems = bind("listActionItems");
 export const countOpenActions = bind("countOpenActions");
 

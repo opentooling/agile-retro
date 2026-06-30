@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createTeam, getTeams, updateTeam } from '@/app/actions'
+import { createTeam, getTeams, updateTeam, updateTeamJira } from '@/app/actions'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Users, Plus, CheckCircle, AlertCircle, Pencil } from 'lucide-react'
+import { Users, Plus, CheckCircle, AlertCircle, Pencil, Link2 } from 'lucide-react'
 import { CreateRetroDialog } from "@/components/CreateRetroDialog"
 import { useSearchParams } from 'next/navigation'
 
@@ -13,6 +14,10 @@ type Team = {
     id: string
     name: string
     createdAt: Date
+    jiraBaseUrl?: string | null
+    jiraProjectKey?: string | null
+    jiraEmail?: string | null
+    jiraConfigured?: boolean
 }
 
 export default function TeamsPage() {
@@ -189,10 +194,86 @@ function TeamCard({ team, onUpdate }: { team: Team, onUpdate: () => void }) {
                         )}
                     </div>
                 </div>
+                <JiraSettings team={team} />
                 <div className="w-full">
                     <CreateRetroDialog preselectedTeamId={team.id} />
                 </div>
             </CardContent>
         </Card>
+    )
+}
+
+function JiraSettings({ team }: { team: Team }) {
+    const [open, setOpen] = useState(false)
+    const [baseUrl, setBaseUrl] = useState(team.jiraBaseUrl ?? '')
+    const [projectKey, setProjectKey] = useState(team.jiraProjectKey ?? '')
+    const [email, setEmail] = useState(team.jiraEmail ?? '')
+    const [apiToken, setApiToken] = useState('')
+    const [configured, setConfigured] = useState(Boolean(team.jiraConfigured))
+    const [saving, setSaving] = useState(false)
+    const [msg, setMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+
+    async function handleSave() {
+        setSaving(true)
+        setMsg(null)
+        try {
+            const result = await updateTeamJira(team.id, {
+                jiraBaseUrl: baseUrl,
+                jiraProjectKey: projectKey,
+                jiraEmail: email,
+                jiraApiToken: apiToken,
+            })
+            setConfigured(Boolean(result.jiraConfigured))
+            setApiToken('')
+            setMsg({ type: 'success', text: 'Jira settings saved' })
+            setTimeout(() => setMsg(null), 3000)
+        } catch (e) {
+            setMsg({ type: 'error', text: e instanceof Error ? e.message : 'Failed to save' })
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    return (
+        <div className="w-full border rounded-lg">
+            <button
+                type="button"
+                className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium"
+                onClick={() => setOpen(o => !o)}
+            >
+                <span className="flex items-center gap-2">
+                    <Link2 className="w-4 h-4" /> Jira integration
+                </span>
+                <span className={`text-xs ${configured ? 'text-green-600' : 'text-muted-foreground'}`}>
+                    {configured ? 'Connected' : 'Not configured'}
+                </span>
+            </button>
+            {open && (
+                <div className="px-3 pb-3 flex flex-col gap-2">
+                    <div className="flex flex-col gap-1">
+                        <Label className="text-xs">Base URL</Label>
+                        <Input className="h-8" placeholder="https://yourco.atlassian.net" value={baseUrl} onChange={e => setBaseUrl(e.target.value)} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                        <Label className="text-xs">Project key</Label>
+                        <Input className="h-8" placeholder="PROJ" value={projectKey} onChange={e => setProjectKey(e.target.value)} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                        <Label className="text-xs">Account email</Label>
+                        <Input className="h-8" placeholder="you@yourco.com" value={email} onChange={e => setEmail(e.target.value)} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                        <Label className="text-xs">API token</Label>
+                        <Input className="h-8" type="password" placeholder={configured ? 'Leave blank to keep current' : 'Atlassian API token'} value={apiToken} onChange={e => setApiToken(e.target.value)} />
+                    </div>
+                    {msg && (
+                        <p className={`text-xs ${msg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{msg.text}</p>
+                    )}
+                    <Button size="sm" onClick={handleSave} disabled={saving}>
+                        {saving ? 'Saving…' : 'Save Jira settings'}
+                    </Button>
+                </div>
+            )}
+        </div>
     )
 }

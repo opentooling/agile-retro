@@ -12,7 +12,24 @@
 
 export type MaybePromise<T> = T | Promise<T>;
 
-export type Team = { id: string; name: string; createdAt: Date };
+export type Team = {
+  id: string;
+  name: string;
+  createdAt: Date;
+  // Jira integration, configured per team in Team settings. `jiraApiToken` is a
+  // secret and must be stripped before a Team is sent to the client.
+  jiraBaseUrl: string | null;
+  jiraProjectKey: string | null;
+  jiraEmail: string | null;
+  jiraApiToken: string | null;
+};
+
+export type TeamJiraConfig = {
+  jiraBaseUrl: string | null;
+  jiraProjectKey: string | null;
+  jiraEmail: string | null;
+  jiraApiToken: string | null;
+};
 
 export type Retrospective = {
   id: string;
@@ -44,7 +61,17 @@ export type Item = {
   votes: Vote[];
   reactions: Reaction[];
 };
-export type ActionItem = { id: string; content: string; completed: boolean; retrospectiveId: string };
+export type ActionItem = {
+  id: string;
+  content: string;
+  completed: boolean;
+  retrospectiveId: string;
+  assignee: string | null;
+  dueDate: Date | null;
+  // Link to an external task created by a plugin (e.g. a Jira issue).
+  externalUrl: string | null;
+  externalKey: string | null;
+};
 
 export type ColumnWithItems = Column & { items: Item[] };
 export type RetroFull = Retrospective & {
@@ -65,6 +92,7 @@ export type ActionFilter = {
   completed?: boolean;
   teamNameContains?: string;
   creatorContains?: string;
+  assigneeContains?: string;
   retrospectiveId?: string;
 };
 
@@ -101,6 +129,7 @@ export interface DbApi {
   listTeams(): MaybePromise<Team[]>;
   createTeam(name: string): MaybePromise<Team>;
   updateTeam(id: string, name: string): MaybePromise<Team>;
+  updateTeamJira(id: string, config: TeamJiraConfig): MaybePromise<Team>;
   getTeam(id: string): MaybePromise<Team | null>;
 
   // Retrospectives
@@ -148,9 +177,15 @@ export interface DbApi {
   deleteReaction(id: string): MaybePromise<void>;
 
   // Action items
-  createActionItem(data: { content: string; retrospectiveId: string }): MaybePromise<ActionItem>;
+  createActionItem(data: {
+    content: string;
+    retrospectiveId: string;
+    assignee?: string | null;
+    dueDate?: Date | null;
+  }): MaybePromise<ActionItem>;
   getActionItem(id: string): MaybePromise<ActionItem | null>;
   updateActionCompleted(id: string, completed: boolean): MaybePromise<void>;
+  setActionExternalLink(id: string, link: { externalUrl: string; externalKey: string }): MaybePromise<void>;
   listActionItems(filter: ActionFilter): MaybePromise<ActionItemWithRetro[]>;
   countOpenActions(retroFilter: RetroFilter): MaybePromise<number>;
 

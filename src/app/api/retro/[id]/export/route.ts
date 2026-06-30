@@ -25,10 +25,16 @@ export async function GET(
             return NextResponse.json({ error: 'Retrospective not found' }, { status: 404 })
         }
 
+        // When the retro is anonymous, usernames must not appear anywhere in the
+        // report (cards or the participants line).
+        const isAnonymous = retro.isAnonymous
+
         // Extract unique participants from items
-        const participants = Array.from(new Set(
-            retro.columns.flatMap((col: any) => col.items.map((item: any) => item.username))
-        )).sort()
+        const participants = isAnonymous
+            ? []
+            : Array.from(new Set(
+                retro.columns.flatMap((col: any) => col.items.map((item: any) => item.username))
+            )).sort()
 
         const printer = new PdfPrinter(fonts)
 
@@ -38,7 +44,7 @@ export async function GET(
                 {
                     columns: [
                         { text: `Date: ${retro.createdAt.toLocaleDateString()}`, style: 'subheader' },
-                        { text: `Participants: ${participants.length > 0 ? participants.join(', ') : 'None recorded'}`, style: 'subheader', alignment: 'right' }
+                        { text: isAnonymous ? 'Participants: Anonymous' : `Participants: ${participants.length > 0 ? participants.join(', ') : 'None recorded'}`, style: 'subheader', alignment: 'right' }
                     ]
                 },
 
@@ -46,11 +52,18 @@ export async function GET(
                 { text: 'Action Items', style: 'sectionHeader' },
                 retro.actions.length > 0
                     ? {
-                        ul: retro.actions.map((a: any) => ({
-                            text: a.content,
-                            color: a.completed ? 'green' : 'black',
-                            decoration: a.completed ? 'lineThrough' : undefined
-                        }))
+                        ul: retro.actions.map((a: any) => {
+                            const meta = [
+                                a.assignee ? `Assignee: ${a.assignee}` : null,
+                                a.dueDate ? `Due: ${new Date(a.dueDate).toLocaleDateString()}` : null,
+                                a.externalKey ? `Jira: ${a.externalKey}` : null,
+                            ].filter(Boolean).join('  •  ')
+                            return {
+                                text: meta ? `${a.content}   (${meta})` : a.content,
+                                color: a.completed ? 'green' : 'black',
+                                decoration: a.completed ? 'lineThrough' : undefined
+                            }
+                        })
                     }
                     : { text: 'No action items recorded.', italics: true, color: 'gray' },
 
@@ -77,7 +90,7 @@ export async function GET(
                                                 { text: totalVotes > 0 ? `Votes: ${totalVotes}` : '', width: 'auto', bold: true, color: '#ca8a04' }
                                             ]
                                         },
-                                        { text: `By: ${item.username}`, fontSize: 10, color: 'gray', margin: [0, 2, 0, 0] },
+                                        { text: `By: ${isAnonymous ? 'Anonymous' : item.username}`, fontSize: 10, color: 'gray', margin: [0, 2, 0, 0] },
                                         item.summary ? { text: `Notes: ${item.summary}`, fontSize: 10, italics: true, background: '#f3f4f6', margin: [0, 2, 0, 5] } : null,
                                         { canvas: [{ type: 'line', x1: 0, y1: 5, x2: 515, y2: 5, lineWidth: 0.5, lineColor: '#e5e7eb' }], margin: [0, 0, 0, 10] }
                                     ],

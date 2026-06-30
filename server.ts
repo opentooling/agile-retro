@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import next from "next";
 import { Server } from "socket.io";
 import * as db from "./src/lib/db";
+import { redactRetroFull } from "./src/lib/sanitize";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -70,7 +71,7 @@ app.prepare().then(() => {
                 // Fetch updated retro
                 const updatedRetro = await db.getRetroFull(retroId);
 
-                io.to(retroId).emit("retro-updated", updatedRetro);
+                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
             } catch (error) {
                 console.error("Error adding item:", error);
             }
@@ -101,7 +102,7 @@ app.prepare().then(() => {
                 // Fetch updated retro and emit
                 const updatedRetro = await db.getRetroFull(retroId);
 
-                io.to(retroId).emit("retro-updated", updatedRetro);
+                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
             } catch (error) {
                 console.error("Error voting:", error);
             }
@@ -119,7 +120,7 @@ app.prepare().then(() => {
                     io.to(retroId).emit("participants-updated", Object.values(participants[retroId]));
                 }
 
-                io.to(retroId).emit("retro-updated", updatedRetro);
+                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
             } catch (error) {
                 console.error("Error updating status:", error);
             }
@@ -130,18 +131,23 @@ app.prepare().then(() => {
                 await db.updateItemSummary(itemId, summary);
 
                 const updatedRetro = await db.getRetroFull(retroId);
-                io.to(retroId).emit("retro-updated", updatedRetro);
+                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
             } catch (error) {
                 console.error("Error updating summary:", error);
             }
         });
 
-        socket.on("add-action-item", async ({ retroId, content }) => {
+        socket.on("add-action-item", async ({ retroId, content, assignee, dueDate }) => {
             try {
-                await db.createActionItem({ content, retrospectiveId: retroId });
+                await db.createActionItem({
+                    content,
+                    retrospectiveId: retroId,
+                    assignee: assignee && String(assignee).trim() ? String(assignee).trim() : null,
+                    dueDate: dueDate ? new Date(dueDate) : null,
+                });
 
                 const updatedRetro = await db.getRetroFull(retroId);
-                io.to(retroId).emit("retro-updated", updatedRetro);
+                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
             } catch (error) {
                 console.error("Error adding action item:", error);
             }
@@ -154,7 +160,7 @@ app.prepare().then(() => {
                     await db.updateActionCompleted(actionId, !action.completed);
 
                     const updatedRetro = await db.getRetroFull(retroId);
-                    io.to(retroId).emit("retro-updated", updatedRetro);
+                    io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
                 }
             } catch (error) {
                 console.error("Error toggling action item:", error);
@@ -172,7 +178,7 @@ app.prepare().then(() => {
                 }
 
                 const updatedRetro = await db.getRetroFull(retroId);
-                io.to(retroId).emit("retro-updated", updatedRetro);
+                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
             } catch (error) {
                 console.error("Error toggling reaction:", error);
             }
@@ -205,7 +211,7 @@ app.prepare().then(() => {
                 await db.reorderItems(otherItems.map((item) => item.id));
 
                 const updatedRetro = await db.getRetroFull(retroId);
-                io.to(retroId).emit("retro-updated", updatedRetro);
+                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
             } catch (error) {
                 console.error("Error moving item:", error);
             }
@@ -228,7 +234,7 @@ app.prepare().then(() => {
                 }
 
                 const updatedRetro = await db.updateRetroDurations(retroId, updateData);
-                io.to(retroId).emit("retro-updated", updatedRetro);
+                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
             } catch (error) {
                 console.error("Error extending timer:", error);
             }

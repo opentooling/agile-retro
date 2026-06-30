@@ -89,6 +89,19 @@ export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
     }
   }, [])
 
+  // Carry the active filters along when navigating between screens, so they
+  // aren't cleared just because the user switched pages. Only cross-cutting
+  // filter keys are preserved (page-specific ones like status/myBoards are not).
+  const preservedFilters = (() => {
+    const preserved = new URLSearchParams()
+    for (const key of ['teamId', 'creator', 'tag', 'assignee']) {
+      const value = searchParams.get(key)
+      if (value) preserved.set(key, value)
+    }
+    const qs = preserved.toString()
+    return qs ? `?${qs}` : ''
+  })()
+
   const handleFilterChange = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams)
     if (value) {
@@ -139,10 +152,10 @@ export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
             </h2>
           )}
             <nav className="flex flex-col gap-2">
-            <NavItem href="/" icon={LayoutDashboard} label="Dashboard" isActive={pathname === "/"} isCollapsed={isCollapsed} />
-            <NavItem href="/teams" icon={Users} label="Teams" isActive={pathname === "/teams"} isCollapsed={isCollapsed} />
-            <NavItem href="/actions" icon={CheckSquare} label="Actions" isActive={pathname === "/actions"} isCollapsed={isCollapsed} />
-            <NavItem href="/history" icon={History} label="History" isActive={pathname === "/history"} isCollapsed={isCollapsed} />
+            <NavItem href={`/${preservedFilters}`} icon={LayoutDashboard} label="Dashboard" isActive={pathname === "/"} isCollapsed={isCollapsed} />
+            <NavItem href={`/teams${preservedFilters}`} icon={Users} label="Teams" isActive={pathname === "/teams"} isCollapsed={isCollapsed} />
+            <NavItem href={`/actions${preservedFilters}`} icon={CheckSquare} label="Actions" isActive={pathname === "/actions"} isCollapsed={isCollapsed} />
+            <NavItem href={`/history${preservedFilters}`} icon={History} label="History" isActive={pathname === "/history"} isCollapsed={isCollapsed} />
           </nav>
         </div>
 

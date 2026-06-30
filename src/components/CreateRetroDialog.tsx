@@ -44,6 +44,7 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
   const [tagInput, setTagInput] = useState('')
   const [openCombobox, setOpenCombobox] = useState(false)
   const [openTeamCombobox, setOpenTeamCombobox] = useState(false)
+  const [teamError, setTeamError] = useState(false)
   const [creator, setCreator] = useState("")
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
@@ -77,16 +78,33 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+
+    // Validate the team in JS. (The hidden teamId input is intentionally not
+    // `required`: a hidden + required control is non-focusable, which makes the
+    // browser silently block submission instead of reporting an error.)
+    if (!selectedTeamId) {
+      setTeamError(true)
+      return
+    }
+    setTeamError(false)
+
     const formData = new FormData(event.currentTarget)
+    formData.set('teamId', selectedTeamId)
     // Append selected tags to formData
     formData.set('tags', selectedTags.join(', '))
-    
+
     try {
       const retro = await createRetrospective(formData)
-      setOpen(false)
-      // Dispatch event to update sidebar
+      if (!retro?.id) {
+        throw new Error('Create returned no retrospective id')
+      }
+      // Notify the sidebar, then navigate to the new session. Navigation is
+      // initiated before closing the dialog so nothing about the dialog
+      // teardown can pre-empt the route change (this is the bug where creating
+      // from a team card didn't open the new session).
       window.dispatchEvent(new Event('retro-created'))
       router.push(`/retro/${retro.id}`)
+      setOpen(false)
     } catch (error) {
       console.error("Error creating retro:", error)
     }
@@ -184,7 +202,10 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                       </Command>
                     </PopoverContent>
                   </Popover>
-                  <input type="hidden" name="teamId" value={selectedTeamId} required />
+                  <input type="hidden" name="teamId" value={selectedTeamId} />
+                  {teamError && (
+                    <p className="text-xs text-red-600 mt-1">Please select a team.</p>
+                  )}
               </div>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">

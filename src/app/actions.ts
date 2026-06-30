@@ -1,7 +1,24 @@
 'use server'
 
 import * as db from '@/lib/db'
+import type { Team } from '@/lib/db/types'
+import { getPlugin } from '@/lib/plugins/registry'
 import { revalidatePath } from 'next/cache'
+
+/**
+ * Remove secrets (the Jira API token) before a Team is sent to a client
+ * component. Non-secret config (base URL, project key, email) is kept so the UI
+ * can show whether the integration is configured.
+ */
+export type SafeTeam = Omit<Team, 'jiraApiToken'> & { jiraConfigured: boolean }
+
+function sanitizeTeam(team: Team): SafeTeam {
+    const { jiraApiToken, ...rest } = team
+    return {
+        ...rest,
+        jiraConfigured: Boolean(team.jiraBaseUrl && team.jiraProjectKey && team.jiraEmail && jiraApiToken),
+    }
+}
 
 function parseIntSafe(value: FormDataEntryValue | null): number | null {
     if (!value) return null;
@@ -98,8 +115,68 @@ export async function updateTeam(id: string, name: string) {
     }
 }
 
-export async function getTeams() {
-    return await db.listTeams()
+export async function getTeams(): Promise<SafeTeam[]> {
+    const teams = await db.listTeams()
+    return teams.map(sanitizeTeam)
+}
+
+export async function updateTeamJira(
+    id: string,
+    config: { jiraBaseUrl: string; jiraProjectKey: string; jiraEmail: string; jiraApiToken: string }
+): Promise<SafeTeam> {
+    if (!id) throw new Error('Team ID is required')
+
+    const norm = (v: string) => (v && v.trim() ? v.trim() : null)
+
+    // If the token field is left blank on save, keep the existing stored token
+    // (so users can edit other settings without re-entering the secret).
+    let token = norm(config.jiraApiToken)
+    if (token === null) {
+        const existing = await db.getTeam(id)
+        token = existing?.jiraApiToken ?? null
+    }
+
+    const team = await db.updateTeamJira(id, {
+        jiraBaseUrl: norm(config.jiraBaseUrl),
+        jiraProjectKey: norm(config.jiraProjectKey),
+        jiraEmail: norm(config.jiraEmail),
+        jiraApiToken: token,
+    })
+    revalidatePath('/teams')
+    return sanitizeTeam(team)
+}
+
+/**
+ * Run a plugin (e.g. "jira") to create an external task for an action item, and
+ * persist the resulting link on the action. Returns the created link.
+ */
+export async function createExternalTaskForAction(
+    actionId: string,
+    pluginId: string
+): Promise<{ url: string; key: string }> {
+    const plugin = getPlugin(pluginId)
+    if (!plugin) throw new Error(`Unknown plugin: ${pluginId}`)
+
+    const action = await db.getActionItem(actionId)
+    if (!action) throw new Error('Action item not found')
+
+    if (action.externalUrl && action.externalKey) {
+        // Already linked — don't create a duplicate.
+        return { url: action.externalUrl, key: action.externalKey }
+    }
+
+    const retro = await db.getRetro(action.retrospectiveId)
+    if (!retro) throw new Error('Retrospective not found')
+
+    const team = await db.getTeam(retro.teamId)
+    if (!team) throw new Error('Team not found')
+
+    const result = await plugin.createTaskForAction({ action, retro, team })
+    await db.setActionExternalLink(actionId, { externalUrl: result.url, externalKey: result.key })
+
+    revalidatePath('/actions')
+    revalidatePath(`/retro/${retro.id}`)
+    return result
 }
 
 export async function getUniqueTags() {
