@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import * as db from '@/lib/db'
 import PdfPrinter from 'pdfmake'
 import { TDocumentDefinitions } from 'pdfmake/interfaces'
+import { auth } from '@/auth'
+import { authUserFromSession, canViewBoard } from '@/lib/authz'
 
 const fonts = {
     Roboto: {
@@ -19,10 +21,21 @@ export async function GET(
     const { id } = await params
 
     try {
+        // API routes are excluded from the auth middleware, so enforce access here.
+        const session = await auth()
+        const authUser = authUserFromSession(session)
+        if (!authUser) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
         const retro = await db.getRetroFull(id)
 
         if (!retro) {
             return NextResponse.json({ error: 'Retrospective not found' }, { status: 404 })
+        }
+
+        if (!canViewBoard(authUser, { teamId: retro.teamId, creator: retro.creator, team: retro.team })) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         }
 
         // When the retro is anonymous, usernames must not appear anywhere in the

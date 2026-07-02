@@ -4,6 +4,7 @@ declare module "next-auth" {
         id_token?: string
         provider?: string
         roles?: string[]
+        groups?: string[]
     }
 }
 
@@ -12,5 +13,6 @@ declare module "next-auth/jwt" {
         id_token?: string
         provider?: string
         roles?: string[]
+        groups?: string[]
     }
 }

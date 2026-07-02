@@ -94,11 +94,45 @@ To ensure **Federated Logout** works correctly (i.e., signing out of the app als
 2.  Add your application's URL (e.g., `http://localhost:3000` or `https://your-app.com`) or simply `+`.
 3.  Ensure **Front-Channel Logout** is enabled if applicable, though the app uses the OIDC logout endpoint directly.
 
-## Authorization & Roles
+## Authorization
 
-The application implements a role-based authorization system:
+The application implements team-based authorization driven by identity-provider
+**groups** plus a single global admin role. The policy lives in
+`src/lib/authz.ts` and is enforced in three places: the retro page
+(`src/app/retro/[id]/page.tsx`), the PDF export route, and — most importantly —
+the Socket.IO server (`server.ts`), which authenticates every connection from
+the session cookie and checks each action server-side.
 
-1.  **Default Role**: Every authenticated user is automatically assigned the `user` role.
-2.  **Admin Role**: Users authenticated via Keycloak who have the `admin` role assigned in Keycloak (specifically in `realm_access.roles`) will automatically receive the `admin` role in the application.
+### Where permissions come from
 
-These roles are available in the user session (`session.roles`) and can be used to control access to specific features or pages.
+| Source                      | Meaning                                                                 |
+| --------------------------- | ---------------------------------------------------------------------- |
+| `admin` realm role          | Global super-user. Can view, manage and moderate **every** board.      |
+| Team's **member groups**    | Users in these IdP groups can view/participate in that team's boards.  |
+| Team's **admin groups**     | Users in these IdP groups can manage (team-admin) that team's boards.  |
+| Team **creator** (`createdBy`) | Always a team-admin of the team they created.                       |
+
+Member/admin groups are configured **per team in Team settings** and matched
+against the user's `groups` claim at request time. The full setup (Keycloak
+mappers, the optional group picker, AD federation) is documented in
+[`docs/KEYCLOAK_GROUPS.md`](docs/KEYCLOAK_GROUPS.md).
+
+> Group-based access requires Keycloak (the `groups` claim). Users signing in
+> with Google receive only the `user` role, so they can use open boards but not
+> team-aligned ones.
+
+### Board access model
+
+- **Open boards** (created without a team): any authenticated user can view and
+  participate.
+- **Team-aligned boards** are protected: only the team's member/admin groups,
+  its creator, and global admins may view or participate. A team with **no**
+  groups configured is restricted to global admins (fails closed).
+- **Management** actions (advancing the phase, extending the timer) require the
+  board's facilitator (its creator), a team-admin of the board's team, or a
+  global admin.
+- **Editing an item or its summary/notes** requires the item's author, the
+  facilitator, a team-admin of the board's team, or a global admin.
+
+Relevant session fields: `session.roles` (contains `admin` for super-users) and
+`session.groups` (the user's IdP groups).

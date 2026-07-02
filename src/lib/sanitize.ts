@@ -5,12 +5,19 @@
  */
 import type { RetroFull, Team } from "./db/types";
 
-export type ClientTeam = Omit<Team, "jiraApiToken"> & { jiraConfigured: boolean };
+// The board's client payload deliberately omits the Jira token (secret) and the
+// access-control internals (group bindings, creator) — the client only needs
+// display info. Management/edit rights are computed server-side and passed
+// separately as the RetroBoard `viewer` prop.
+export type ClientTeam = Omit<
+  Team,
+  "jiraApiToken" | "memberGroups" | "adminGroups" | "createdBy"
+> & { jiraConfigured: boolean };
 export type ClientRetroFull = Omit<RetroFull, "team"> & { team: ClientTeam | null };
 
 export function redactTeam(team: Team | null): ClientTeam | null {
   if (!team) return null;
-  const { jiraApiToken, ...rest } = team;
+  const { jiraApiToken, memberGroups, adminGroups, createdBy, ...rest } = team;
   return {
     ...rest,
     jiraConfigured: Boolean(

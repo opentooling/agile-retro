@@ -44,7 +44,6 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
   const [tagInput, setTagInput] = useState('')
   const [openCombobox, setOpenCombobox] = useState(false)
   const [openTeamCombobox, setOpenTeamCombobox] = useState(false)
-  const [teamError, setTeamError] = useState(false)
   const [creator, setCreator] = useState("")
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
@@ -79,15 +78,9 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    // Validate the team in JS. (The hidden teamId input is intentionally not
-    // `required`: a hidden + required control is non-focusable, which makes the
-    // browser silently block submission instead of reporting an error.)
-    if (!selectedTeamId) {
-      setTeamError(true)
-      return
-    }
-    setTeamError(false)
-
+    // Team is optional. Leaving it unset creates an "open board" that any
+    // authenticated user can view and join. Selecting a team makes the board
+    // access-controlled (only team members / team-admins / admins).
     const formData = new FormData(event.currentTarget)
     formData.set('teamId', selectedTeamId)
     // Append selected tags to formData
@@ -169,7 +162,7 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                         aria-expanded={openTeamCombobox}
                         className="w-full justify-between"
                       >
-                        {selectedTeamId ? teams.find((team) => team.id === selectedTeamId)?.name : "Select a team..."}
+                        {selectedTeamId ? teams.find((team) => team.id === selectedTeamId)?.name : "No team (open board)"}
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
@@ -179,6 +172,22 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                         <CommandList>
                           <CommandEmpty>No team found.</CommandEmpty>
                           <CommandGroup>
+                            <CommandItem
+                              key="__no_team__"
+                              value="no team open board"
+                              onSelect={() => {
+                                setSelectedTeamId("")
+                                setOpenTeamCombobox(false)
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  selectedTeamId === "" ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              No team (open board)
+                            </CommandItem>
                             {teams.map((team) => (
                               <CommandItem
                                 key={team.id}
@@ -203,9 +212,11 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                     </PopoverContent>
                   </Popover>
                   <input type="hidden" name="teamId" value={selectedTeamId} />
-                  {teamError && (
-                    <p className="text-xs text-red-600 mt-1">Please select a team.</p>
-                  )}
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {selectedTeamId
+                      ? "Access-controlled: only this team's members, team-admins and admins."
+                      : "Open board: any signed-in user can view and join."}
+                  </p>
               </div>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">

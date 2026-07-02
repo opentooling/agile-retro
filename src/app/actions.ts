@@ -3,7 +3,26 @@
 import * as db from '@/lib/db'
 import type { Team } from '@/lib/db/types'
 import { getPlugin } from '@/lib/plugins/registry'
+import { pushActionDoneState } from '@/lib/jira-sync'
+import { auth } from '@/auth'
+import { authUserFromSession, isTeamAdmin, type RetroRef } from '@/lib/authz'
 import { revalidatePath } from 'next/cache'
+
+/** Trim, drop empties and de-duplicate a list of group identifiers. */
+function sanitizeGroups(groups: string[] | undefined): string[] {
+    if (!Array.isArray(groups)) return []
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const g of groups) {
+        const trimmed = String(g).trim()
+        if (!trimmed) continue
+        const key = trimmed.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push(trimmed)
+    }
+    return out
+}
 
 /**
  * Remove secrets (the Jira API token) before a Team is sent to a client
@@ -47,10 +66,9 @@ export async function createRetrospective(formData: FormData) {
         throw new Error('Title is required')
     }
 
-    if (!teamId || !teamId.trim()) {
-        console.error("Team ID missing")
-        throw new Error('Team is required')
-    }
+    // Team is optional: a board may be aligned to a team (access-controlled) or
+    // created without one ("open board", visible to any authenticated user).
+    const normalizedTeamId = teamId && teamId.trim() ? teamId.trim() : null
 
     try {
         const retro = await db.createRetrospectiveWithColumns(
@@ -58,7 +76,7 @@ export async function createRetrospective(formData: FormData) {
                 title: title.trim(),
                 tags: tags || "",
                 creator: creator || "Anonymous",
-                teamId: teamId,
+                teamId: normalizedTeamId,
                 inputDuration,
                 votingDuration,
                 reviewDuration,
@@ -80,20 +98,63 @@ export async function createRetrospective(formData: FormData) {
     }
 }
 
-export async function createTeam(name: string) {
+export async function createTeam(
+    name: string,
+    groups?: { memberGroups?: string[]; adminGroups?: string[] }
+): Promise<SafeTeam> {
     if (!name || !name.trim()) {
         throw new Error('Team name is required')
     }
 
+    // The creator is recorded and treated as a team-admin so they can always
+    // manage the team's boards, even before any access groups are configured.
+    const authUser = authUserFromSession(await auth())
+
     try {
-        const team = await db.createTeam(name.trim())
+        const team = await db.createTeam(name.trim(), {
+            createdBy: authUser?.id ?? null,
+            memberGroups: sanitizeGroups(groups?.memberGroups),
+            adminGroups: sanitizeGroups(groups?.adminGroups),
+        })
         revalidatePath('/teams')
         revalidatePath('/')
-        return team
+        return sanitizeTeam(team)
     } catch (error) {
         console.error("Error creating team:", error)
         throw error
     }
+}
+
+/**
+ * Update a team's access groups. Restricted to global admins and the team's own
+ * team-admins (its creator or members of its admin groups), because whoever can
+ * edit these bindings controls who can access the team's boards.
+ */
+export async function updateTeamGroups(
+    id: string,
+    memberGroups: string[],
+    adminGroups: string[]
+): Promise<SafeTeam> {
+    if (!id) throw new Error('Team ID is required')
+
+    const authUser = authUserFromSession(await auth())
+    if (!authUser) throw new Error('Unauthorized')
+
+    const existing = await db.getTeam(id)
+    if (!existing) throw new Error('Team not found')
+
+    const ref: RetroRef = { teamId: id, creator: '', team: existing }
+    if (!authUser.isAdmin && !isTeamAdmin(authUser, ref)) {
+        throw new Error('You are not allowed to edit this team\'s access groups')
+    }
+
+    const team = await db.updateTeamGroups(id, {
+        memberGroups: sanitizeGroups(memberGroups),
+        adminGroups: sanitizeGroups(adminGroups),
+    })
+    revalidatePath('/teams')
+    revalidatePath('/')
+    return sanitizeTeam(team)
 }
 
 export async function updateTeam(id: string, name: string) {
@@ -168,11 +229,18 @@ export async function createExternalTaskForAction(
     const retro = await db.getRetro(action.retrospectiveId)
     if (!retro) throw new Error('Retrospective not found')
 
+    if (!retro.teamId) throw new Error('This board is not aligned to a team, so external tasks cannot be created')
+
     const team = await db.getTeam(retro.teamId)
     if (!team) throw new Error('Team not found')
 
     const result = await plugin.createTaskForAction({ action, retro, team })
     await db.setActionExternalLink(actionId, { externalUrl: result.url, externalKey: result.key })
+
+    // If the action is already done, reflect that on the freshly-created issue.
+    if (action.completed) {
+        await pushActionDoneState(actionId, true)
+    }
 
     revalidatePath('/actions')
     revalidatePath(`/retro/${retro.id}`)

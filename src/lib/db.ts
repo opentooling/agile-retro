@@ -49,6 +49,7 @@ export const listTeams = bind("listTeams");
 export const createTeam = bind("createTeam");
 export const updateTeam = bind("updateTeam");
 export const updateTeamJira = bind("updateTeamJira");
+export const updateTeamGroups = bind("updateTeamGroups");
 export const getTeam = bind("getTeam");
 
 // Retrospectives
@@ -67,6 +68,7 @@ export const itemMaxOrder = bind("itemMaxOrder");
 export const createItem = bind("createItem");
 export const getItem = bind("getItem");
 export const listItemsInColumn = bind("listItemsInColumn");
+export const updateItemContent = bind("updateItemContent");
 export const updateItemSummary = bind("updateItemSummary");
 export const updateItemColumn = bind("updateItemColumn");
 export const reorderItems = bind("reorderItems");

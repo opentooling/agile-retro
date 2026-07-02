@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users, Calendar, User as UserIcon, ExternalLink } from 'lucide-react'
+import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users, Calendar, User as UserIcon, ExternalLink, Pencil, Check, X } from 'lucide-react'
 import { cn } from "@/lib/utils"
 import { ModeToggle } from "@/components/mode-toggle"
 import { MentionInput, MentionText } from "@/components/Mentions"
@@ -48,6 +48,7 @@ type RetroData = {
       id: string
       content: string
       summary: string | null
+      userId?: string
       username: string
       votes: { userId: string, count: number }[]
       reactions?: { userId: string, emoji: string }[]
@@ -243,13 +244,33 @@ function SortableItem({ id, children, disabled }: { id: string, children: React.
   );
 }
 
-export default function RetroBoard({ initialData, user }: { initialData: RetroData, user?: { name?: string | null, email?: string | null } }) {
+type Viewer = {
+  id: string
+  name: string | null
+  isAdmin: boolean
+  canManage: boolean
+}
+
+export default function RetroBoard({ initialData, user, viewer }: { initialData: RetroData, user?: { name?: string | null, email?: string | null }, viewer?: Viewer }) {
   const [retro, setRetro] = useState<RetroData>(initialData)
   const [socket, setSocket] = useState<Socket | null>(null)
   const [newItemContent, setNewItemContent] = useState<Record<string, string>>({})
   const [userId, setUserId] = useState<string>('')
   const [username, setUsername] = useState<string>('')
   const [isJoined, setIsJoined] = useState(false)
+  // Inline item editing: itemId -> draft content while editing.
+  const [editingItems, setEditingItems] = useState<Record<string, string>>({})
+  const [accessDenied, setAccessDenied] = useState(false)
+
+  // Can the current viewer edit this specific item (content or notes)?
+  // Mirrors the server policy: author, facilitator, team-admin or admin.
+  const canEditItem = (item: { userId?: string; username: string }) => {
+    if (!viewer) return false
+    if (viewer.isAdmin || viewer.canManage) return true
+    if (item.userId && viewer.id && item.userId === viewer.id) return true
+    if (viewer.name && item.username === viewer.name) return true
+    return false
+  }
 
   const [participants, setParticipants] = useState<{ userId: string, username: string, isReady: boolean }[]>([])
   const [isReady, setIsReady] = useState(false)
@@ -266,12 +287,15 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
   }, [retro.status])
 
   useEffect(() => {
-    // Generate or retrieve userId
+    // Identity: when authenticated, use the server-side viewer id so votes and
+    // reactions (now keyed by the authenticated user) line up with the UI.
+    // Fall back to a stored random id for anonymous/legacy use.
     let storedUserId = localStorage.getItem('retro-user-id')
     if (!storedUserId) {
       storedUserId = crypto.randomUUID()
       localStorage.setItem('retro-user-id', storedUserId)
     }
+    storedUserId = viewer?.id || storedUserId
     setUserId(storedUserId)
 
     if (user?.name) {
@@ -304,16 +328,26 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
     socketInstance.on('participants-updated', (updatedParticipants: any[]) => {
         setParticipants(updatedParticipants)
         // Update local ready state based on server (in case of reconnect or reset)
-        const myParticipant = updatedParticipants.find(p => p.userId === storedUserId)
+        const myId = viewer?.id || storedUserId
+        const myParticipant = updatedParticipants.find(p => p.userId === myId)
         if (myParticipant) {
             setIsReady(myParticipant.isReady)
         }
     })
 
+    // The server rejects actions the viewer isn't authorized for.
+    socketInstance.on('access-denied', () => {
+        setAccessDenied(true)
+    })
+
+    socketInstance.on('connect_error', (err: Error) => {
+        if (err?.message === 'unauthorized') setAccessDenied(true)
+    })
+
     return () => {
       socketInstance.disconnect()
     }
-  }, [retro.id, user]) // We might need to re-run if isJoined changes
+  }, [retro.id, user, viewer]) // We might need to re-run if isJoined changes
 
   // Re-emit join when isJoined becomes true
   useEffect(() => {
@@ -348,8 +382,9 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
           
           if (diff <= 0 && !hasAutoAdvancedRef.current) {
               // Time is up!
-              // Only owner triggers the advance to avoid race conditions
-              if (retro.creator === username) {
+              // Only a manager (facilitator / team-admin / admin) triggers the
+              // advance to avoid race conditions.
+              if (viewer ? viewer.canManage : retro.creator === username) {
                   hasAutoAdvancedRef.current = true;
                   
                   let nextStatus = '';
@@ -370,6 +405,23 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
     if (!socket || !content?.trim()) return
     socket.emit('add-item', { retroId: retro.id, columnId, content: content, userId, username })
     setNewItemContent(prev => ({ ...prev, [columnId]: '' }))
+  }
+
+  const startEditItem = (itemId: string, current: string) => {
+    setEditingItems(prev => ({ ...prev, [itemId]: current }))
+  }
+  const cancelEditItem = (itemId: string) => {
+    setEditingItems(prev => {
+      const next = { ...prev }
+      delete next[itemId]
+      return next
+    })
+  }
+  const saveEditItem = (itemId: string) => {
+    const content = editingItems[itemId]
+    if (!socket || content === undefined || !content.trim()) return
+    socket.emit('edit-item', { retroId: retro.id, itemId, content: content.trim() })
+    cancelEditItem(itemId)
   }
 
   const handleVote = (itemId: string, delta: number) => {
@@ -532,7 +584,9 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
   }, [retro, userId])
 
   const votesRemaining = 10 - totalVotesUsed
-  const isOwner = retro.creator === username
+  // Management rights come from the server (facilitator / team-admin / admin).
+  // Fall back to the name-based creator check for anonymous/legacy use.
+  const isOwner = viewer ? viewer.canManage : retro.creator === username
 
   // Names available for @mentions and action assignment: live participants,
   // the current user, the creator, and (when not anonymous) item authors.
@@ -592,6 +646,11 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
       {/* Main Board Area */}
       <div className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-7xl mx-auto">
+            {accessDenied && (
+              <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                That action wasn&apos;t permitted. You may not have the right access on this board.
+              </div>
+            )}
             <div className="flex justify-between items-center mb-8 bg-white dark:bg-slate-900 p-6 rounded-lg shadow-sm border border-slate-200 dark:border-slate-800">
             <div className="flex items-center gap-4">
                 <div>
@@ -764,12 +823,18 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                         </div>
                         <div className="space-y-2">
                             <label className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Summary / Notes</label>
-                            <Textarea 
-                            placeholder="Add summary..." 
+                            {canEditItem(item) ? (
+                            <Textarea
+                            placeholder="Add summary..."
                             value={item.summary || ''}
                             onChange={(e) => handleUpdateSummary(item.id, e.target.value)}
                             className="min-h-[100px] resize-y"
                             />
+                            ) : (
+                            <div className="min-h-[100px] rounded-md border bg-muted/40 p-3 text-sm whitespace-pre-wrap text-muted-foreground">
+                              {item.summary || 'No summary yet.'}
+                            </div>
+                            )}
                         </div>
                         </CardContent>
                     </Card>
@@ -949,7 +1014,39 @@ export default function RetroBoard({ initialData, user }: { initialData: RetroDa
                         <SortableItem key={item.id} id={item.id} disabled={retro.status !== 'INPUT'}>
                         <Card className="bg-white dark:bg-gray-800 shadow-sm hover:shadow-md transition-shadow duration-200 border-0">
                             <CardContent className="p-4 space-y-3">
-                            <div className="whitespace-pre-wrap text-sm leading-relaxed"><MentionText text={item.content} names={mentionNames} /></div>
+                            {editingItems[item.id] !== undefined ? (
+                              <div className="flex flex-col gap-2" onPointerDown={(e) => e.stopPropagation()}>
+                                <Textarea
+                                  value={editingItems[item.id]}
+                                  onChange={(e) => setEditingItems(prev => ({ ...prev, [item.id]: e.target.value }))}
+                                  className="min-h-[70px] text-sm"
+                                  autoFocus
+                                />
+                                <div className="flex gap-2 justify-end">
+                                  <Button size="sm" variant="ghost" onClick={() => cancelEditItem(item.id)}>
+                                    <X className="w-4 h-4" />
+                                  </Button>
+                                  <Button size="sm" onClick={() => saveEditItem(item.id)} disabled={!editingItems[item.id]?.trim()}>
+                                    <Check className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-start justify-between gap-2 group">
+                                <div className="whitespace-pre-wrap text-sm leading-relaxed flex-1"><MentionText text={item.content} names={mentionNames} /></div>
+                                {retro.status !== 'CLOSED' && retro.status !== 'ACTIONS' && canEditItem(item) && (
+                                  <button
+                                    type="button"
+                                    aria-label="Edit item"
+                                    className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0"
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={() => startEditItem(item.id, item.content)}
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            )}
                             <div className="flex flex-col gap-3 pt-2 border-t border-gray-100 dark:border-gray-700">
                                 <div className="text-xs font-medium text-muted-foreground bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full w-fit">
                                     {retro.isAnonymous ? "Anonymous" : item.username}

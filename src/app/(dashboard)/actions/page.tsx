@@ -5,6 +5,7 @@ import { CheckCircle, Circle, User as UserIcon, Calendar } from 'lucide-react'
 import { auth } from '@/auth'
 import { revalidatePath } from 'next/cache'
 import { JiraActionButton } from "@/components/JiraActionButton"
+import { reconcileAllLinkedActions, pushActionDoneState } from '@/lib/jira-sync'
 
 import Link from 'next/link'
 
@@ -30,11 +31,17 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
   if (assigneeFilter) filter.assigneeContains = assigneeFilter
   if (retroIdFilter) filter.retrospectiveId = retroIdFilter
 
+  // Poll-on-open: pull the latest done state from linked Jira issues before
+  // listing, so the page reflects changes made in Jira.
+  await reconcileAllLinkedActions()
+
   const actions = await db.listActionItems(filter)
 
   async function toggleAction(actionId: string, completed: boolean) {
     'use server'
     await db.updateActionCompleted(actionId, completed)
+    // Mirror the change to the linked Jira issue (best-effort).
+    await pushActionDoneState(actionId, completed)
     revalidatePath('/actions')
   }
 

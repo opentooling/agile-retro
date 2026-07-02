@@ -1,19 +1,23 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createTeam, getTeams, updateTeam, updateTeamJira } from '@/app/actions'
+import { createTeam, getTeams, updateTeam, updateTeamJira, updateTeamGroups } from '@/app/actions'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Users, Plus, CheckCircle, AlertCircle, Pencil, Link2 } from 'lucide-react'
+import { Users, Plus, CheckCircle, AlertCircle, Pencil, Link2, Shield } from 'lucide-react'
 import { CreateRetroDialog } from "@/components/CreateRetroDialog"
 import { useSearchParams } from 'next/navigation'
+import { GroupsField, useKeycloakGroups } from "@/components/GroupsField"
 
 type Team = {
     id: string
     name: string
     createdAt: Date
+    createdBy?: string | null
+    memberGroups?: string[]
+    adminGroups?: string[]
     jiraBaseUrl?: string | null
     jiraProjectKey?: string | null
     jiraEmail?: string | null
@@ -23,9 +27,11 @@ type Team = {
 export default function TeamsPage() {
     const [teams, setTeams] = useState<Team[]>([])
     const [newTeamName, setNewTeamName] = useState('')
+    const [newMemberGroups, setNewMemberGroups] = useState<string[]>([])
+    const [newAdminGroups, setNewAdminGroups] = useState<string[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-    // ...
+    const groupSuggestions = useKeycloakGroups()
     const searchParams = useSearchParams()
     const teamFilter = searchParams.get('teamId')
 
@@ -54,8 +60,10 @@ export default function TeamsPage() {
         setMessage(null)
 
         try {
-            await createTeam(newTeamName)
+            await createTeam(newTeamName, { memberGroups: newMemberGroups, adminGroups: newAdminGroups })
             setNewTeamName('')
+            setNewMemberGroups([])
+            setNewAdminGroups([])
             setMessage({ type: 'success', text: 'Team created successfully' })
             loadTeams()
             // Dispatch event to update sidebar
@@ -92,25 +100,50 @@ export default function TeamsPage() {
                     </CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <form onSubmit={handleCreateTeam} className="flex gap-4">
-                        <Input 
-                            placeholder="Enter team name (e.g. Engineering, Design)" 
-                            value={newTeamName}
-                            onChange={(e) => setNewTeamName(e.target.value)}
-                            className="max-w-md"
-                        />
-                        <Button type="submit" disabled={isLoading || !newTeamName.trim()}>
-                            {isLoading ? "Creating..." : "Create Team"}
-                        </Button>
+                    <form onSubmit={handleCreateTeam} className="flex flex-col gap-4">
+                        <div className="flex gap-4">
+                            <Input
+                                placeholder="Enter team name (e.g. Engineering, Design)"
+                                value={newTeamName}
+                                onChange={(e) => setNewTeamName(e.target.value)}
+                                className="max-w-md"
+                            />
+                            <Button type="submit" disabled={isLoading || !newTeamName.trim()}>
+                                {isLoading ? "Creating..." : "Create Team"}
+                            </Button>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2 max-w-2xl">
+                            <GroupsField
+                                label="Member groups (view & participate)"
+                                value={newMemberGroups}
+                                onChange={setNewMemberGroups}
+                                suggestions={groupSuggestions.groups}
+                                datalistId="new-team-member-groups"
+                                placeholder={groupSuggestions.configured ? 'Search groups…' : 'e.g. /Eng/Platform'}
+                            />
+                            <GroupsField
+                                label="Admin groups (manage boards)"
+                                value={newAdminGroups}
+                                onChange={setNewAdminGroups}
+                                suggestions={groupSuggestions.groups}
+                                datalistId="new-team-admin-groups"
+                                placeholder={groupSuggestions.configured ? 'Search groups…' : 'e.g. /Eng/Platform/Admins'}
+                            />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            Groups come from your identity provider (e.g. AD/Keycloak). Leave empty to restrict the
+                            team to global admins. You can change these later in the team&apos;s settings.
+                        </p>
                     </form>
                 </CardContent>
             </Card>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {teams.map((team) => (
-                    <TeamCard 
-                        key={team.id} 
-                        team={team} 
+                    <TeamCard
+                        key={team.id}
+                        team={team}
+                        groupSuggestions={groupSuggestions}
                         onUpdate={() => {
                             loadTeams()
                             setMessage({ type: 'success', text: 'Team updated successfully' })
@@ -129,7 +162,7 @@ export default function TeamsPage() {
     )
 }
 
-function TeamCard({ team, onUpdate }: { team: Team, onUpdate: () => void }) {
+function TeamCard({ team, onUpdate, groupSuggestions }: { team: Team, onUpdate: () => void, groupSuggestions: { configured: boolean, groups: string[] } }) {
     const [isEditing, setIsEditing] = useState(false)
     const [name, setName] = useState(team.name)
     const [isLoading, setIsLoading] = useState(false)
@@ -194,12 +227,99 @@ function TeamCard({ team, onUpdate }: { team: Team, onUpdate: () => void }) {
                         )}
                     </div>
                 </div>
+                <AccessGroupsSettings team={team} groupSuggestions={groupSuggestions} onUpdate={onUpdate} />
                 <JiraSettings team={team} />
                 <div className="w-full">
                     <CreateRetroDialog preselectedTeamId={team.id} />
                 </div>
             </CardContent>
         </Card>
+    )
+}
+
+function AccessGroupsSettings({
+    team,
+    groupSuggestions,
+    onUpdate,
+}: {
+    team: Team
+    groupSuggestions: { configured: boolean, groups: string[] }
+    onUpdate: () => void
+}) {
+    const [open, setOpen] = useState(false)
+    const [memberGroups, setMemberGroups] = useState<string[]>(team.memberGroups ?? [])
+    const [adminGroups, setAdminGroups] = useState<string[]>(team.adminGroups ?? [])
+    const [saving, setSaving] = useState(false)
+    const [msg, setMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+
+    useEffect(() => {
+        setMemberGroups(team.memberGroups ?? [])
+        setAdminGroups(team.adminGroups ?? [])
+    }, [team.memberGroups, team.adminGroups])
+
+    const count = (team.memberGroups?.length ?? 0) + (team.adminGroups?.length ?? 0)
+
+    async function handleSave() {
+        setSaving(true)
+        setMsg(null)
+        try {
+            await updateTeamGroups(team.id, memberGroups, adminGroups)
+            setMsg({ type: 'success', text: 'Access groups saved' })
+            onUpdate()
+            setTimeout(() => setMsg(null), 3000)
+        } catch (e) {
+            setMsg({ type: 'error', text: e instanceof Error ? e.message : 'Failed to save' })
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    return (
+        <div className="w-full border rounded-lg">
+            <button
+                type="button"
+                className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium"
+                onClick={() => setOpen(o => !o)}
+            >
+                <span className="flex items-center gap-2">
+                    <Shield className="w-4 h-4" /> Access groups
+                </span>
+                <span className={`text-xs ${count > 0 ? 'text-green-600' : 'text-muted-foreground'}`}>
+                    {count > 0 ? `${count} configured` : 'Admins only'}
+                </span>
+            </button>
+            {open && (
+                <div className="px-3 pb-3 flex flex-col gap-3">
+                    <GroupsField
+                        label="Member groups (view & participate)"
+                        value={memberGroups}
+                        onChange={setMemberGroups}
+                        suggestions={groupSuggestions.groups}
+                        datalistId={`member-groups-${team.id}`}
+                        placeholder={groupSuggestions.configured ? 'Search groups…' : 'e.g. /Eng/Platform'}
+                    />
+                    <GroupsField
+                        label="Admin groups (manage boards)"
+                        value={adminGroups}
+                        onChange={setAdminGroups}
+                        suggestions={groupSuggestions.groups}
+                        datalistId={`admin-groups-${team.id}`}
+                        placeholder={groupSuggestions.configured ? 'Search groups…' : 'e.g. /Eng/Platform/Admins'}
+                    />
+                    {!groupSuggestions.configured && (
+                        <p className="text-xs text-muted-foreground">
+                            Enter group paths/names exactly as they appear in your identity provider.
+                        </p>
+                    )}
+                    {msg && (
+                        <p className={`text-xs ${msg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{msg.text}</p>
+                    )}
+                    <Button size="sm" onClick={handleSave} disabled={saving}>
+                        {saving ? 'Saving…' : 'Save access groups'}
+                    </Button>
+                </div>
+            )}
+        </div>
     )
 }
 

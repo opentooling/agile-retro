@@ -10,7 +10,7 @@
  * New integrations (GitHub Issues, Linear, Trello, …) only need to implement
  * this interface and register themselves — no changes to call sites.
  */
-import type { ActionItem, Retrospective, Team } from "@/lib/db/types";
+import type { ActionItem, Retrospective, Team } from "../db/types";
 
 /** The context a plugin receives when asked to externalise an action. */
 export type ActionPluginContext = {
@@ -43,4 +43,19 @@ export interface RetroPlugin {
    * user-presentable message on failure.
    */
   createTaskForAction(ctx: ActionPluginContext): Promise<ExternalTaskResult>;
+
+  /**
+   * Read the "done" state of external tasks by key. Returns a map of key ->
+   * boolean (true when the external task is in a completed/done state). Keys the
+   * plugin cannot resolve are omitted from the map. Optional: plugins that don't
+   * support status sync can leave this unimplemented.
+   */
+  getIssueDoneState?(team: Team, keys: string[]): Promise<Map<string, boolean>>;
+
+  /**
+   * Move an external task into (done=true) or out of (done=false) its done
+   * state. Best-effort and idempotent: a no-op when the task is already in the
+   * requested state. Optional.
+   */
+  setIssueDone?(team: Team, key: string, done: boolean): Promise<void>;
 }

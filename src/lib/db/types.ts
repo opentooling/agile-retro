@@ -16,6 +16,15 @@ export type Team = {
   id: string;
   name: string;
   createdAt: Date;
+  // Identity (email/name) of the user who created the team. Treated as a
+  // team-admin so the creator can always manage the team's boards.
+  createdBy: string | null;
+  // Access control: identity-provider group identifiers (e.g. AD/Keycloak group
+  // paths or names) that grant membership / team-admin on this team's boards.
+  // Configured in Team settings. Empty means the team is access-restricted to
+  // global admins only (fail closed).
+  memberGroups: string[];
+  adminGroups: string[];
   // Jira integration, configured per team in Team settings. `jiraApiToken` is a
   // secret and must be stripped before a Team is sent to the client.
   jiraBaseUrl: string | null;
@@ -31,6 +40,17 @@ export type TeamJiraConfig = {
   jiraApiToken: string | null;
 };
 
+export type TeamGroups = {
+  memberGroups: string[];
+  adminGroups: string[];
+};
+
+export type TeamCreateOptions = {
+  createdBy?: string | null;
+  memberGroups?: string[];
+  adminGroups?: string[];
+};
+
 export type Retrospective = {
   id: string;
   title: string;
@@ -43,7 +63,7 @@ export type Retrospective = {
   votingDuration: number | null;
   reviewDuration: number | null;
   phaseStartTime: Date | null;
-  teamId: string;
+  teamId: string | null;
 };
 
 export type Column = { id: string; title: string; type: string; retrospectiveId: string };
@@ -101,7 +121,7 @@ export type CreateRetroInput = {
   title: string;
   tags: string;
   creator: string;
-  teamId: string;
+  teamId: string | null;
   inputDuration: number | null;
   votingDuration: number | null;
   reviewDuration: number | null;
@@ -127,9 +147,10 @@ export type RetroDurations = {
 export interface DbApi {
   // Teams
   listTeams(): MaybePromise<Team[]>;
-  createTeam(name: string): MaybePromise<Team>;
+  createTeam(name: string, opts?: TeamCreateOptions): MaybePromise<Team>;
   updateTeam(id: string, name: string): MaybePromise<Team>;
   updateTeamJira(id: string, config: TeamJiraConfig): MaybePromise<Team>;
+  updateTeamGroups(id: string, groups: TeamGroups): MaybePromise<Team>;
   getTeam(id: string): MaybePromise<Team | null>;
 
   // Retrospectives
@@ -160,6 +181,7 @@ export interface DbApi {
   }): MaybePromise<Item>;
   getItem(id: string): MaybePromise<Item | null>;
   listItemsInColumn(columnId: string): MaybePromise<Item[]>;
+  updateItemContent(id: string, content: string): MaybePromise<void>;
   updateItemSummary(id: string, summary: string): MaybePromise<void>;
   updateItemColumn(id: string, columnId: string): MaybePromise<void>;
   reorderItems(orderedIds: string[]): MaybePromise<void>;

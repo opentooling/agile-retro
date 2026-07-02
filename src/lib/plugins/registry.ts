@@ -5,7 +5,7 @@
  * these helpers rather than importing concrete plugins directly.
  */
 import type { RetroPlugin } from "./types";
-import type { Team } from "@/lib/db/types";
+import type { Team } from "../db/types";
 import { jiraPlugin } from "./jira";
 
 const PLUGINS: RetroPlugin[] = [jiraPlugin];

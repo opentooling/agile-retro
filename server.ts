@@ -1,8 +1,56 @@
 import { createServer } from "node:http";
 import next from "next";
 import { Server } from "socket.io";
+// next-auth/jwt ships `getToken` at runtime, but its type declarations only
+// re-export @auth/core/jwt (which omits it), so we access it via a cast.
+import * as NextAuthJwt from "next-auth/jwt";
+const getToken = (NextAuthJwt as any).getToken as (opts: any) => Promise<any>;
 import * as db from "./src/lib/db";
 import { redactRetroFull } from "./src/lib/sanitize";
+import { pushActionDoneState } from "./src/lib/jira-sync";
+import {
+    authUserFromToken,
+    canViewBoard,
+    canManageBoard,
+    canEditItem,
+    type AuthUser,
+    type RetroRef,
+} from "./src/lib/authz";
+
+/**
+ * Resolve the authenticated user from the Socket.IO handshake cookie. The
+ * browser sends the NextAuth session cookie automatically on the same-origin
+ * websocket handshake, so we can decode it with the shared AUTH_SECRET. We try
+ * both the secure (`__Secure-`) and non-secure cookie names so it works behind
+ * https and on plain http in dev.
+ */
+async function getSocketUser(cookie: string | undefined): Promise<AuthUser | null> {
+    if (!cookie) return null;
+    const secret = process.env.AUTH_SECRET;
+    if (!secret) {
+        console.error("AUTH_SECRET is not set; cannot authenticate socket connections");
+        return null;
+    }
+    const req = { headers: { cookie } } as any;
+    for (const secureCookie of [true, false]) {
+        try {
+            const token = await getToken({ req, secret, secureCookie });
+            const user = authUserFromToken(token);
+            if (user) return user;
+        } catch {
+            // Try the other cookie flavor.
+        }
+    }
+    return null;
+}
+
+/** Lightweight board reference (team + creator) used for authorization checks. */
+async function loadRetroRef(retroId: string): Promise<RetroRef | null> {
+    const retro = await db.getRetro(retroId);
+    if (!retro) return null;
+    const team = retro.teamId ? await db.getTeam(retro.teamId) : null;
+    return { teamId: retro.teamId, creator: retro.creator, team };
+}
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -16,31 +64,52 @@ app.prepare().then(() => {
 
     const io = new Server(httpServer);
 
-    // Note: We'll use a local instance here to avoid issues with singleton across different contexts if any
-
+    // Authenticate every socket connection from the handshake cookie. Sockets
+    // without a valid session are rejected — the app already requires login via
+    // Next.js middleware, so an unauthenticated socket should not exist.
+    io.use(async (socket, nextFn) => {
+        const user = await getSocketUser(socket.handshake.headers.cookie);
+        if (!user) {
+            return nextFn(new Error("unauthorized"));
+        }
+        socket.data.user = user;
+        nextFn();
+    });
 
     // In-memory participant tracking
     // retroId -> { socketId: { userId, username, isReady } }
     const participants: Record<string, Record<string, { userId: string, username: string, isReady: boolean }>> = {};
 
     io.on("connection", (socket) => {
-        console.log("Client connected", socket.id);
+        const user = socket.data.user as AuthUser;
+        console.log("Client connected", socket.id, user.id);
 
-        socket.on("join-retro", async ({ retroId, userId, username }) => {
-            socket.join(retroId);
-            console.log(`Socket ${socket.id} joined retro ${retroId} as ${username}`);
-
+        socket.on("join-retro", async ({ retroId }) => {
             try {
-                const retro = await db.getRetroStatus(retroId);
+                const ref = await loadRetroRef(retroId);
+                if (!ref) return;
 
-                if (retro?.status === 'CLOSED') {
+                // Enforce board access: team-aligned boards are restricted to
+                // their members / team-admins / admins; open boards are visible
+                // to any authenticated user.
+                if (!canViewBoard(user, ref)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
+
+                socket.join(retroId);
+                console.log(`Socket ${socket.id} joined retro ${retroId} as ${user.name ?? user.id}`);
+
+                const status = await db.getRetroStatus(retroId);
+                if (status?.status === 'CLOSED') {
                     return;
                 }
 
                 if (!participants[retroId]) {
                     participants[retroId] = {};
                 }
-                participants[retroId][socket.id] = { userId, username, isReady: false };
+                // Identity comes from the authenticated session, never the client.
+                participants[retroId][socket.id] = { userId: user.id, username: user.name ?? user.id, isReady: false };
 
                 io.to(retroId).emit("participants-updated", Object.values(participants[retroId]));
             } catch (error) {
@@ -48,23 +117,50 @@ app.prepare().then(() => {
             }
         });
 
-        socket.on("user-ready", ({ retroId, isReady }) => {
+        // Authorization guards. Each returns the board reference when the
+        // authenticated user is allowed to perform the action, or null (having
+        // emitted "access-denied") otherwise. Callers that only need the board
+        // to exist can ignore the ref.
+        const requireView = async (retroId: string): Promise<RetroRef | null> => {
+            const ref = await loadRetroRef(retroId);
+            if (!ref) return null;
+            if (!canViewBoard(user, ref)) {
+                socket.emit("access-denied", { retroId });
+                return null;
+            }
+            return ref;
+        };
+        const requireManage = async (retroId: string): Promise<RetroRef | null> => {
+            const ref = await loadRetroRef(retroId);
+            if (!ref) return null;
+            if (!canManageBoard(user, ref)) {
+                socket.emit("access-denied", { retroId });
+                return null;
+            }
+            return ref;
+        };
+
+        socket.on("user-ready", async ({ retroId, isReady }) => {
+            if (!(await requireView(retroId))) return;
             if (participants[retroId] && participants[retroId][socket.id]) {
                 participants[retroId][socket.id].isReady = isReady;
                 io.to(retroId).emit("participants-updated", Object.values(participants[retroId]));
             }
         });
 
-        socket.on("add-item", async ({ retroId, columnId, content, userId, username }) => {
+        socket.on("add-item", async ({ retroId, columnId, content }) => {
             try {
+                if (!(await requireView(retroId))) return;
+
                 // Get max order in this column
                 const nextOrder = (await db.itemMaxOrder(columnId) ?? -1) + 1;
 
+                // Authorship is taken from the authenticated session, not the client.
                 await db.createItem({
                     content,
                     columnId,
-                    userId: userId || "anonymous",
-                    username: username || "Anonymous",
+                    userId: user.id,
+                    username: user.name ?? user.id,
                     order: nextOrder
                 });
 
@@ -77,16 +173,34 @@ app.prepare().then(() => {
             }
         });
 
-        socket.on("vote", async ({ retroId, itemId, userId, delta }) => {
+        socket.on("edit-item", async ({ retroId, itemId, content }) => {
             try {
-                // Check current votes for this user in this retro
-                // We need to aggregate all votes by this user for items in this retro
-                // Simpler to fetch the user's existing vote directly and adjust it
-                // Or just trust client for MVP but better to verify
+                const ref = await loadRetroRef(retroId);
+                if (!ref) return;
+                const item = await db.getItem(itemId);
+                if (!item) return;
+                // Only the author, facilitator, team-admin or admin may edit.
+                if (!canEditItem(user, ref, item)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
+                const trimmed = String(content ?? "").trim();
+                if (!trimmed) return;
+                await db.updateItemContent(itemId, trimmed);
 
-                // Let's just update the vote
-                // Find existing vote
-                const existingVote = await db.findVote(itemId, userId);
+                const updatedRetro = await db.getRetroFull(retroId);
+                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
+            } catch (error) {
+                console.error("Error editing item:", error);
+            }
+        });
+
+        socket.on("vote", async ({ retroId, itemId, delta }) => {
+            try {
+                if (!(await requireView(retroId))) return;
+
+                // Votes belong to the authenticated user, never a client id.
+                const existingVote = await db.findVote(itemId, user.id);
 
                 if (existingVote) {
                     const newCount = existingVote.count + delta;
@@ -96,7 +210,7 @@ app.prepare().then(() => {
                         await db.updateVoteCount(existingVote.id, newCount);
                     }
                 } else if (delta > 0) {
-                    await db.createVote({ itemId, userId, count: delta });
+                    await db.createVote({ itemId, userId: user.id, count: delta });
                 }
 
                 // Fetch updated retro and emit
@@ -110,6 +224,9 @@ app.prepare().then(() => {
 
         socket.on("update-status", async ({ retroId, status }) => {
             try {
+                // Phase changes are a management action.
+                if (!(await requireManage(retroId))) return;
+
                 const updatedRetro = await db.updateRetroStatus(retroId, status, new Date());
 
                 // Reset readiness on phase change
@@ -128,6 +245,14 @@ app.prepare().then(() => {
 
         socket.on("update-item-summary", async ({ retroId, itemId, summary }) => {
             try {
+                const ref = await loadRetroRef(retroId);
+                if (!ref) return;
+                const item = await db.getItem(itemId);
+                if (!item) return;
+                if (!canEditItem(user, ref, item)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
                 await db.updateItemSummary(itemId, summary);
 
                 const updatedRetro = await db.getRetroFull(retroId);
@@ -139,6 +264,7 @@ app.prepare().then(() => {
 
         socket.on("add-action-item", async ({ retroId, content, assignee, dueDate }) => {
             try {
+                if (!(await requireView(retroId))) return;
                 await db.createActionItem({
                     content,
                     retrospectiveId: retroId,
@@ -155,26 +281,33 @@ app.prepare().then(() => {
 
         socket.on("toggle-action-item", async ({ retroId, actionId }) => {
             try {
+                if (!(await requireView(retroId))) return;
                 const action = await db.getActionItem(actionId);
                 if (action) {
-                    await db.updateActionCompleted(actionId, !action.completed);
+                    const newCompleted = !action.completed;
+                    await db.updateActionCompleted(actionId, newCompleted);
 
                     const updatedRetro = await db.getRetroFull(retroId);
                     io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
+
+                    // Mirror the new state to the linked Jira issue (best-effort).
+                    await pushActionDoneState(actionId, newCompleted);
                 }
             } catch (error) {
                 console.error("Error toggling action item:", error);
             }
         });
 
-        socket.on("toggle-reaction", async ({ retroId, itemId, userId, emoji }) => {
+        socket.on("toggle-reaction", async ({ retroId, itemId, emoji }) => {
             try {
-                const existingReaction = await db.findReaction(itemId, userId, emoji);
+                if (!(await requireView(retroId))) return;
+                // Reactions belong to the authenticated user.
+                const existingReaction = await db.findReaction(itemId, user.id, emoji);
 
                 if (existingReaction) {
                     await db.deleteReaction(existingReaction.id);
                 } else {
-                    await db.createReaction({ itemId, userId, emoji });
+                    await db.createReaction({ itemId, userId: user.id, emoji });
                 }
 
                 const updatedRetro = await db.getRetroFull(retroId);
@@ -186,6 +319,8 @@ app.prepare().then(() => {
 
         socket.on("move-item", async ({ retroId, itemId, targetColumnId, newIndex }) => {
             try {
+                if (!(await requireView(retroId))) return;
+
                 // 1. Get the item to verify it exists and get its current column
                 const itemToMove = await db.getItem(itemId);
                 if (!itemToMove) return;
@@ -219,6 +354,9 @@ app.prepare().then(() => {
 
         socket.on("extend-timer", async ({ retroId }) => {
             try {
+                // Extending the timer is a management action.
+                if (!(await requireManage(retroId))) return;
+
                 const retro = await db.getRetro(retroId);
                 if (!retro) return;
 

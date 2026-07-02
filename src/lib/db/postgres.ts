@@ -12,7 +12,7 @@
 import { Pool, type PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import type {
-  Team, TeamJiraConfig, Retrospective, Column, Vote, Reaction, Item, ActionItem,
+  Team, TeamJiraConfig, TeamGroups, TeamCreateOptions, Retrospective, Column, Vote, Reaction, Item, ActionItem,
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro,
 } from "./types";
@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS "Team" (
     "id" TEXT PRIMARY KEY,
     "name" TEXT NOT NULL,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "createdBy" TEXT,
+    "memberGroups" JSONB NOT NULL DEFAULT '[]',
+    "adminGroups" JSONB NOT NULL DEFAULT '[]',
     "jiraBaseUrl" TEXT,
     "jiraProjectKey" TEXT,
     "jiraEmail" TEXT,
@@ -45,7 +48,7 @@ CREATE TABLE IF NOT EXISTS "Retrospective" (
     "votingDuration" INTEGER,
     "reviewDuration" INTEGER,
     "phaseStartTime" TIMESTAMPTZ,
-    "teamId" TEXT NOT NULL REFERENCES "Team" ("id")
+    "teamId" TEXT REFERENCES "Team" ("id")
 );
 
 CREATE TABLE IF NOT EXISTS "Column" (
@@ -102,6 +105,12 @@ ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "assignee" TEXT;
 ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "dueDate" TIMESTAMPTZ;
 ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "externalUrl" TEXT;
 ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "externalKey" TEXT;
+-- Boards may now be created without a team ("open boards"), so teamId is nullable.
+ALTER TABLE "Retrospective" ALTER COLUMN "teamId" DROP NOT NULL;
+-- Per-team access control via identity-provider groups.
+ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "createdBy" TEXT;
+ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "memberGroups" JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "adminGroups" JSONB NOT NULL DEFAULT '[]';
 `;
 
 // Cache the pool and the one-time schema init on globalThis so dev/HMR and
@@ -182,10 +191,26 @@ async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promi
 
 type Row = Record<string, any>;
 
+function toGroups(raw: unknown): string[] {
+  // JSONB comes back parsed from node-pg; be defensive about strings too.
+  let value = raw;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(value) ? value.filter((g): g is string => typeof g === "string") : [];
+}
+
 const mapTeam = (r: Row): Team => ({
   id: r.id,
   name: r.name,
   createdAt: r.createdAt,
+  createdBy: r.createdBy ?? null,
+  memberGroups: toGroups(r.memberGroups),
+  adminGroups: toGroups(r.adminGroups),
   jiraBaseUrl: r.jiraBaseUrl ?? null,
   jiraProjectKey: r.jiraProjectKey ?? null,
   jiraEmail: r.jiraEmail ?? null,
@@ -279,10 +304,26 @@ export async function listTeams(): Promise<Team[]> {
   return (await query(`SELECT * FROM "Team" ORDER BY "name" ASC`)).map(mapTeam);
 }
 
-export async function createTeam(name: string): Promise<Team> {
+export async function createTeam(name: string, opts?: TeamCreateOptions): Promise<Team> {
   const row = await queryOne(
-    `INSERT INTO "Team" ("id", "name") VALUES ($1, $2) RETURNING *`,
-    [randomUUID(), name]
+    `INSERT INTO "Team" ("id", "name", "createdBy", "memberGroups", "adminGroups")
+     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb) RETURNING *`,
+    [
+      randomUUID(),
+      name,
+      opts?.createdBy ?? null,
+      JSON.stringify(opts?.memberGroups ?? []),
+      JSON.stringify(opts?.adminGroups ?? []),
+    ]
+  );
+  return mapTeam(row as Row);
+}
+
+export async function updateTeamGroups(id: string, groups: TeamGroups): Promise<Team> {
+  const row = await queryOne(
+    `UPDATE "Team" SET "memberGroups" = $2::jsonb, "adminGroups" = $3::jsonb
+     WHERE "id" = $1 RETURNING *`,
+    [id, JSON.stringify(groups.memberGroups ?? []), JSON.stringify(groups.adminGroups ?? [])]
   );
   return mapTeam(row as Row);
 }
@@ -382,7 +423,7 @@ export async function getRetroFull(id: string): Promise<RetroFull | null> {
     ...retro,
     columns: columnsWithItems,
     actions: actions.map(mapActionItem),
-    team: await getTeam(retro.teamId),
+    team: retro.teamId ? await getTeam(retro.teamId) : null,
   };
 }
 
@@ -470,8 +511,10 @@ export async function listRetrospectives(
     `SELECT r.* FROM "Retrospective" r ${join} ${where} ORDER BY r."createdAt" DESC ${limit}`,
     params
   );
-  const teams = await getTeamsByIds([...new Set(rows.map((r) => r.teamId as string))]);
-  return rows.map((row) => ({ ...mapRetro(row), team: teams.get(row.teamId) ?? null }));
+  const teams = await getTeamsByIds([
+    ...new Set(rows.map((r) => r.teamId as string | null).filter((t): t is string => !!t)),
+  ]);
+  return rows.map((row) => ({ ...mapRetro(row), team: row.teamId ? teams.get(row.teamId) ?? null : null }));
 }
 
 export async function countRetrospectives(filter: RetroFilter): Promise<number> {
@@ -524,6 +567,10 @@ export async function listItemsInColumn(columnId: string): Promise<Item[]> {
   return (
     await query(`SELECT * FROM "Item" WHERE "columnId" = $1 ORDER BY "order" ASC`, [columnId])
   ).map(mapItem);
+}
+
+export async function updateItemContent(id: string, content: string): Promise<void> {
+  await query(`UPDATE "Item" SET "content" = $2 WHERE "id" = $1`, [id, content]);
 }
 
 export async function updateItemSummary(id: string, summary: string): Promise<void> {
@@ -681,8 +728,10 @@ export async function listActionItems(filter: ActionFilter): Promise<ActionItemW
   const retroById = new Map<string, Retrospective & { team: Team | null }>();
   if (retroIds.length > 0) {
     const retros = (await query(`SELECT * FROM "Retrospective" WHERE "id" = ANY($1)`, [retroIds])).map(mapRetro);
-    const teams = await getTeamsByIds([...new Set(retros.map((r) => r.teamId))]);
-    for (const r of retros) retroById.set(r.id, { ...r, team: teams.get(r.teamId) ?? null });
+    const teams = await getTeamsByIds([
+      ...new Set(retros.map((r) => r.teamId).filter((t): t is string => !!t)),
+    ]);
+    for (const r of retros) retroById.set(r.id, { ...r, team: r.teamId ? teams.get(r.teamId) ?? null : null });
   }
 
   return rows.map((row) => ({

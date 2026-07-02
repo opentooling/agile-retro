@@ -14,7 +14,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import type {
-  Team, TeamJiraConfig, Retrospective, Column, Vote, Reaction, Item, ActionItem,
+  Team, TeamJiraConfig, TeamGroups, TeamCreateOptions, Retrospective, Column, Vote, Reaction, Item, ActionItem,
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro,
 } from "./types";
@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS "Team" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdBy" TEXT,
+    "memberGroups" TEXT NOT NULL DEFAULT '[]',
+    "adminGroups" TEXT NOT NULL DEFAULT '[]',
     "jiraBaseUrl" TEXT,
     "jiraProjectKey" TEXT,
     "jiraEmail" TEXT,
@@ -60,7 +63,7 @@ CREATE TABLE IF NOT EXISTS "Retrospective" (
     "votingDuration" INTEGER,
     "reviewDuration" INTEGER,
     "phaseStartTime" DATETIME,
-    "teamId" TEXT NOT NULL,
+    "teamId" TEXT,
     CONSTRAINT "Retrospective_teamId_fkey" FOREIGN KEY ("teamId") REFERENCES "Team" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
@@ -121,6 +124,9 @@ CREATE TABLE IF NOT EXISTS "ActionItem" (
  * no "ADD COLUMN IF NOT EXISTS"; a duplicate-column error is expected and safe.
  */
 const MIGRATIONS: string[] = [
+  `ALTER TABLE "Team" ADD COLUMN "createdBy" TEXT`,
+  `ALTER TABLE "Team" ADD COLUMN "memberGroups" TEXT NOT NULL DEFAULT '[]'`,
+  `ALTER TABLE "Team" ADD COLUMN "adminGroups" TEXT NOT NULL DEFAULT '[]'`,
   `ALTER TABLE "Team" ADD COLUMN "jiraBaseUrl" TEXT`,
   `ALTER TABLE "Team" ADD COLUMN "jiraProjectKey" TEXT`,
   `ALTER TABLE "Team" ADD COLUMN "jiraEmail" TEXT`,
@@ -139,6 +145,58 @@ function applyMigrations(db: DatabaseSync): void {
       // "duplicate column name" means the migration already ran — ignore it.
       if (!/duplicate column name/i.test(String(err?.message ?? err))) throw err;
     }
+  }
+  migrateRetroTeamIdNullable(db);
+}
+
+/**
+ * Boards may now be created without a team ("open boards"), so
+ * Retrospective.teamId must be nullable. Databases created before this change
+ * have it as NOT NULL; SQLite cannot drop a NOT NULL constraint in place, so we
+ * rebuild the table (the standard 12-step approach) only when needed.
+ */
+function migrateRetroTeamIdNullable(db: DatabaseSync): void {
+  const cols = db.prepare(`PRAGMA table_info("Retrospective")`).all() as Array<{
+    name: string;
+    notnull: number;
+  }>;
+  const teamCol = cols.find((c) => c.name === "teamId");
+  if (!teamCol || teamCol.notnull === 0) return; // already nullable (or fresh schema)
+
+  db.exec("PRAGMA foreign_keys=OFF");
+  db.exec("BEGIN");
+  try {
+    db.exec(`
+      CREATE TABLE "Retrospective_new" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "title" TEXT NOT NULL,
+          "status" TEXT NOT NULL DEFAULT 'INPUT',
+          "tags" TEXT NOT NULL DEFAULT '',
+          "creator" TEXT NOT NULL DEFAULT 'Anonymous',
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "isAnonymous" BOOLEAN NOT NULL DEFAULT 0,
+          "inputDuration" INTEGER,
+          "votingDuration" INTEGER,
+          "reviewDuration" INTEGER,
+          "phaseStartTime" DATETIME,
+          "teamId" TEXT,
+          CONSTRAINT "Retrospective_teamId_fkey" FOREIGN KEY ("teamId") REFERENCES "Team" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+      );
+      INSERT INTO "Retrospective_new"
+        ("id","title","status","tags","creator","createdAt","isAnonymous",
+         "inputDuration","votingDuration","reviewDuration","phaseStartTime","teamId")
+        SELECT "id","title","status","tags","creator","createdAt","isAnonymous",
+               "inputDuration","votingDuration","reviewDuration","phaseStartTime","teamId"
+        FROM "Retrospective";
+      DROP TABLE "Retrospective";
+      ALTER TABLE "Retrospective_new" RENAME TO "Retrospective";
+    `);
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  } finally {
+    db.exec("PRAGMA foreign_keys=ON");
   }
 }
 
@@ -194,10 +252,23 @@ const toBool = (v: any): boolean => v === 1 || v === true || v === "1";
 const dateToDb = (d: Date | string | null | undefined): string | null =>
   d == null ? null : d instanceof Date ? d.toISOString() : d;
 
+function parseGroups(raw: unknown): string[] {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((g): g is string => typeof g === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 const mapTeam = (r: Row): Team => ({
   id: r.id,
   name: r.name,
   createdAt: toDate(r.createdAt),
+  createdBy: r.createdBy ?? null,
+  memberGroups: parseGroups(r.memberGroups),
+  adminGroups: parseGroups(r.adminGroups),
   jiraBaseUrl: r.jiraBaseUrl ?? null,
   jiraProjectKey: r.jiraProjectKey ?? null,
   jiraEmail: r.jiraEmail ?? null,
@@ -285,11 +356,30 @@ export function listTeams(): Team[] {
   return getDb().prepare(`SELECT * FROM "Team" ORDER BY "name" ASC`).all().map(mapTeam);
 }
 
-export function createTeam(name: string): Team {
+export function createTeam(name: string, opts?: TeamCreateOptions): Team {
   const db = getDb();
   const id = randomUUID();
   const createdAt = new Date().toISOString();
-  db.prepare(`INSERT INTO "Team" ("id","name","createdAt") VALUES (?,?,?)`).run(id, name, createdAt);
+  db.prepare(
+    `INSERT INTO "Team" ("id","name","createdAt","createdBy","memberGroups","adminGroups") VALUES (?,?,?,?,?,?)`
+  ).run(
+    id,
+    name,
+    createdAt,
+    opts?.createdBy ?? null,
+    JSON.stringify(opts?.memberGroups ?? []),
+    JSON.stringify(opts?.adminGroups ?? [])
+  );
+  return mapTeam(db.prepare(`SELECT * FROM "Team" WHERE "id" = ?`).get(id) as Row);
+}
+
+export function updateTeamGroups(id: string, groups: TeamGroups): Team {
+  const db = getDb();
+  db.prepare(`UPDATE "Team" SET "memberGroups" = ?, "adminGroups" = ? WHERE "id" = ?`).run(
+    JSON.stringify(groups.memberGroups ?? []),
+    JSON.stringify(groups.adminGroups ?? []),
+    id
+  );
   return mapTeam(db.prepare(`SELECT * FROM "Team" WHERE "id" = ?`).get(id) as Row);
 }
 
@@ -362,7 +452,7 @@ export function getRetroFull(id: string): RetroFull | null {
     .all(id)
     .map(mapActionItem);
 
-  return { ...retro, columns: columnsWithItems, actions, team: getTeam(retro.teamId) };
+  return { ...retro, columns: columnsWithItems, actions, team: retro.teamId ? getTeam(retro.teamId) : null };
 }
 
 
@@ -447,6 +537,7 @@ export function listRetrospectives(filter: RetroFilter, take?: number): (Retrosp
   const teamCache = new Map<string, Team | null>();
   return rows.map((row) => {
     const retro = mapRetro(row);
+    if (!retro.teamId) return { ...retro, team: null };
     if (!teamCache.has(retro.teamId)) teamCache.set(retro.teamId, getTeam(retro.teamId));
     return { ...retro, team: teamCache.get(retro.teamId) ?? null };
   });
@@ -508,6 +599,10 @@ export function listItemsInColumn(columnId: string): Item[] {
     .prepare(`SELECT * FROM "Item" WHERE "columnId" = ? ORDER BY "order" ASC`)
     .all(columnId)
     .map(mapItem);
+}
+
+export function updateItemContent(id: string, content: string): void {
+  getDb().prepare(`UPDATE "Item" SET "content" = ? WHERE "id" = ?`).run(content, id);
 }
 
 export function updateItemSummary(id: string, summary: string): void {
@@ -676,7 +771,7 @@ export function listActionItems(filter: ActionFilter): ActionItemWithRetro[] {
       const retro = getRetro(action.retrospectiveId);
       retroCache.set(
         action.retrospectiveId,
-        retro ? { ...retro, team: getTeam(retro.teamId) } : null
+        retro ? { ...retro, team: retro.teamId ? getTeam(retro.teamId) : null } : null
       );
     }
     return { ...action, retrospective: retroCache.get(action.retrospectiveId)! };

@@ -2,6 +2,7 @@ import NextAuth from "next-auth"
 import Google from "next-auth/providers/google"
 import Keycloak from "next-auth/providers/keycloak"
 import type { Provider } from "next-auth/providers"
+import { parseGroupsClaim } from "@/lib/authz"
 
 const providers: Provider[] = []
 
@@ -31,20 +32,25 @@ export const { handlers, signIn, signOut, auth } = (NextAuth as any)({
 
                 // Default role
                 const roles = ['user']
+                let groups: string[] = []
 
-                // Extract roles from Keycloak profile
+                // Extract identity from the Keycloak profile:
+                //  - the global `admin` realm role (super-user), and
+                //  - the user's groups (the `groups` claim), which drive per-team
+                //    access via each team's configured member/admin groups. See
+                //    src/lib/authz.ts and docs/KEYCLOAK_GROUPS.md.
                 if (account.provider === 'keycloak' && profile) {
-                    // Keycloak typically puts roles in realm_access.roles or resource_access
-                    // We need to cast profile to any to access these properties as they are not in the standard Profile type
+                    // Cast: these claims aren't in the standard Profile type.
                     const keycloakProfile = profile as any
                     const realmRoles = keycloakProfile.realm_access?.roles || []
-
-                    if (realmRoles.includes('admin')) {
+                    if (Array.isArray(realmRoles) && realmRoles.includes('admin')) {
                         roles.push('admin')
                     }
+                    groups = parseGroupsClaim(keycloakProfile.groups)
                 }
 
                 token.roles = roles
+                token.groups = groups
             } else {
                 console.log("JWT Callback: No account (subsequent call)")
             }
@@ -55,6 +61,7 @@ export const { handlers, signIn, signOut, auth } = (NextAuth as any)({
             session.id_token = token.id_token
             session.provider = token.provider
             session.roles = token.roles || ['user'] // Fallback to user if not set
+            session.groups = token.groups || []
             return session
         },
     },
