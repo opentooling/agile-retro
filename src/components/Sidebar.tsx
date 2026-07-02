@@ -5,7 +5,7 @@ import { ModeToggle } from "@/components/mode-toggle"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { LayoutDashboard, History, Filter, Tag, LogOut, LogIn, ChevronLeft, ChevronRight, Users, CheckSquare, type LucideIcon } from "lucide-react"
+import { LayoutDashboard, History, Filter, Tag, LogOut, LogIn, ChevronLeft, ChevronRight, Users, CheckSquare, HelpCircle, type LucideIcon } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
@@ -156,6 +156,7 @@ export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
             <NavItem href={`/teams${preservedFilters}`} icon={Users} label="Teams" isActive={pathname === "/teams"} isCollapsed={isCollapsed} />
             <NavItem href={`/actions${preservedFilters}`} icon={CheckSquare} label="Actions" isActive={pathname === "/actions"} isCollapsed={isCollapsed} />
             <NavItem href={`/history${preservedFilters}`} icon={History} label="History" isActive={pathname === "/history"} isCollapsed={isCollapsed} />
+            <NavItem href="/help" icon={HelpCircle} label="Help" isActive={pathname === "/help"} isCollapsed={isCollapsed} />
           </nav>
         </div>
 

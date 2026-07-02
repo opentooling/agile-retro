@@ -51,6 +51,8 @@ COPY --from=builder --chown=1001:0 /opt/app-root/src/public ./public
 COPY --from=builder --chown=1001:0 /opt/app-root/src/package.json ./package.json
 COPY --from=builder --chown=1001:0 /opt/app-root/src/server.ts ./server.ts
 COPY --from=builder --chown=1001:0 /opt/app-root/src/src ./src
+# Ship docs/ so the in-app Help page can render docs/USER_GUIDE.md at runtime.
+COPY --from=builder --chown=1001:0 /opt/app-root/src/docs ./docs
 COPY --from=builder --chown=1001:0 /opt/app-root/src/.next ./.next
 COPY --from=builder --chown=1001:0 /opt/app-root/src/node_modules ./node_modules
 
