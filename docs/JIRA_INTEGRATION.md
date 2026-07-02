@@ -19,6 +19,8 @@ to add another tracker later.
 - Clicking it creates a Jira issue of type **Task** using the action's text,
   assignee and due date, then stores the resulting issue key + URL on the action
   so the button becomes a link to the issue. Creating twice is prevented.
+- Once linked, the action's **done state stays in two-way sync** with the Jira
+  issue (see [Two-way done sync](#two-way-done-sync)).
 
 ---
 
@@ -90,17 +92,58 @@ server.
 
 ---
 
+## Two-way done sync
+
+Once an action item is linked to a Jira issue, its **completed** state and the
+issue's **status** are kept in sync in both directions. "Done" is determined by
+Jira's **status category** (`statusCategory.key === "done"`), so it works with
+custom workflows without configuring specific status names.
+
+**App → Jira (immediate).** Toggling an action fires `pushActionDoneState`,
+which transitions the linked issue:
+
+- Marking **done** → transitions to a status in the **Done** category.
+- **Reopening** → transitions to a **To Do** (`new`) status, falling back to
+  **In Progress** (`indeterminate`).
+
+It first reads the issue's current category and skips if already there, so it's
+idempotent. If no suitable transition is available from the issue's current
+status, it's left unchanged.
+
+**Jira → App (poll on open).** When a board (`/retro/[id]`) or the **Actions**
+page is opened, the app reconciles: it reads each linked issue's status category
+and updates the action's `completed` flag to match Jira. This is a
+poll-on-open, not a background job — there is no webhook to configure.
+
+Because the app→Jira push runs on every toggle, the two stay converged and don't
+ping-pong.
+
+> **Permissions:** the transitions use the same team Jira credentials as issue
+> creation, so that Atlassian account must be allowed to **transition** issues in
+> the project (not just create them). Reconcile only **reads** status.
+
+---
+
 ## Where it lives in the code
 
 ```
 src/lib/plugins/
-  types.ts      RetroPlugin interface + context/result types
+  types.ts      RetroPlugin interface (+ optional getIssueDoneState / setIssueDone)
   registry.ts   list of available plugins + lookup helpers
-  jira.ts       the Jira plugin (REST call, error handling)
+  jira.ts       the Jira plugin: create issue, read status category, transition
+                (isDoneCategory / selectTransitionId are pure + unit-tested)
+
+src/lib/jira-sync.ts
+  pushActionDoneState(id, done)        app -> Jira on toggle (transition/reopen)
+  reconcileActionsForRetro(retroId)    Jira -> app on board open
+  reconcileAllLinkedActions()          Jira -> app on the Actions page
 
 src/app/actions.ts
   updateTeamJira(...)                 save a team's Jira config (token kept if blank)
   createExternalTaskForAction(id,plugin)  run a plugin for an action, persist link
+
+server.ts / actions page             call pushActionDoneState when an action toggles
+retro page / actions page            call the reconcile helpers on load
 
 Data layer (src/lib/db/*):
   Team:        jiraBaseUrl, jiraProjectKey, jiraEmail, jiraApiToken
@@ -151,5 +194,6 @@ the app needs no changes.
 - Resolve assignee names to Jira `accountId`s (via
   `/rest/api/3/user/search`) and set the real `assignee` field.
 - Configurable issue type / extra fields per team.
-- Two-way sync (reflect Jira status back onto the action) via webhooks or polling.
+- Real-time Jira → app updates via webhooks (today the pull side is poll-on-open;
+  the push side is already immediate).
 - OAuth instead of API tokens for tighter credential management.

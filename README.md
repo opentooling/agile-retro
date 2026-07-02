@@ -16,6 +16,16 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+> Note: the dev/start scripts run a custom `server.ts` (Next + Socket.IO) with
+> `--experimental-sqlite`. See the `package.json` scripts.
+
+## Documentation
+
+- [AUTHENTICATION.md](AUTHENTICATION.md) — auth providers (Google/Keycloak) and the authorization model.
+- [docs/KEYCLOAK_GROUPS.md](docs/KEYCLOAK_GROUPS.md) — team access control via identity-provider groups (member/admin groups, the `groups` claim, the optional picker).
+- [docs/JIRA_INTEGRATION.md](docs/JIRA_INTEGRATION.md) — linking action items to Jira and the two-way "done" sync.
+- [DEPLOY_OPENSHIFT.md](DEPLOY_OPENSHIFT.md) — deploying via the Helm chart in `charts/agile-retro`.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

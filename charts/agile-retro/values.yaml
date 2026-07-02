@@ -153,6 +153,16 @@ auth:
     existingSecret: "" # Optional: Name of existing secret for clientSecret
     existingSecretKey: "keycloak-client-secret" # Key in the existing secret
 
+    # OPTIONAL — only needed to power the team "Access groups" picker with your
+    # real Keycloak groups. Requires a confidential client with a service account
+    # holding realm-management roles `query-groups` and `view-realm`.
+    # Access control itself does NOT need this: without it, the group fields fall
+    # back to free-text entry. See docs/KEYCLOAK_GROUPS.md.
+    adminClientId: ""                 # -> KEYCLOAK_ADMIN_CLIENT_ID (falls back to clientId)
+    adminClientSecret: ""             # -> KEYCLOAK_ADMIN_CLIENT_SECRET
+    adminExistingSecret: ""           # Optional: existing secret for adminClientSecret
+    adminExistingSecretKey: "keycloak-admin-client-secret"
+
 openshift:
   route:
     enabled: true

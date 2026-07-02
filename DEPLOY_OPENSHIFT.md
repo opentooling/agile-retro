@@ -95,6 +95,24 @@ helm upgrade --install agile-retro ./charts/agile-retro \
   --set auth.google.clientSecret="YOUR_CLIENT_SECRET"
 ```
 
+Example enabling Keycloak (required for team access control via groups):
+
+```bash
+helm upgrade --install agile-retro ./charts/agile-retro \
+  --set auth.keycloak.enabled=true \
+  --set auth.keycloak.clientId="YOUR_CLIENT_ID" \
+  --set auth.keycloak.clientSecret="YOUR_CLIENT_SECRET" \
+  --set auth.keycloak.issuer="https://kc.example.com/realms/myrealm" \
+  # OPTIONAL — only to power the team group picker (service account with
+  # realm-management query-groups / view-realm); access control works without it:
+  --set auth.keycloak.adminClientId="retro-admin" \
+  --set auth.keycloak.adminClientSecret="YOUR_SERVICE_ACCOUNT_SECRET"
+```
+
+See [docs/KEYCLOAK_GROUPS.md](docs/KEYCLOAK_GROUPS.md) for the required Keycloak
+mappers (notably the `groups` claim in the ID token) and group-based access
+control.
+
 ## Troubleshooting
 
 ### Version Mismatch Error

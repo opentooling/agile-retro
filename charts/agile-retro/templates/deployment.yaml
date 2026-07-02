@@ -125,6 +125,19 @@ spec:
               {{- end }}
             - name: AUTH_KEYCLOAK_ISSUER
               value: {{ .Values.auth.keycloak.issuer | quote }}
+            {{- if .Values.auth.keycloak.adminClientId }}
+            - name: KEYCLOAK_ADMIN_CLIENT_ID
+              value: {{ .Values.auth.keycloak.adminClientId | quote }}
+            - name: KEYCLOAK_ADMIN_CLIENT_SECRET
+              {{- if .Values.auth.keycloak.adminExistingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.keycloak.adminExistingSecret }}
+                  key: {{ .Values.auth.keycloak.adminExistingSecretKey | default "keycloak-admin-client-secret" }}
+              {{- else }}
+              value: {{ .Values.auth.keycloak.adminClientSecret | quote }}
+              {{- end }}
+            {{- end }}
             {{- end }}
           livenessProbe:
             httpGet:
