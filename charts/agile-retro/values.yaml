@@ -138,10 +138,15 @@ auth:
   existingSecret: "" # Optional: Name of existing secret for AUTH_SECRET
   existingSecretKey: "auth-secret" # Key in the existing secret
 
+  # Token claim the user's groups are read from. Defaults to `user_roles`
+  # (falls back to `groups`). Set only if your IdP uses a different claim name.
+  # Rendered into the GROUPS_CLAIM env var. See docs/KEYCLOAK_GROUPS.md.
+  groupsClaim: ""   # e.g. "user_roles" or "groups"
+
   # Global-admin (super-user) access via identity-provider groups. Members of
   # any listed group are global admins, in addition to anyone holding the
   # Keycloak `admin` realm role. Rendered into the ADMIN_GROUPS env var.
-  # Requires the `groups` claim (Keycloak). See docs/KEYCLOAK_GROUPS.md.
+  # Matched against the groups claim above. See docs/KEYCLOAK_GROUPS.md.
   adminGroups: []
     # - /Eng/Retro-Admins
     # - Platform-Admins

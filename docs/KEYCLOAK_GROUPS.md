@@ -15,14 +15,15 @@ For the authorization *rules* themselves (who can view / manage / edit), see
 - Each **team** is bound to identity-provider groups in **Team settings**:
   - **Member groups** → can view and participate in the team's boards.
   - **Admin groups** → can manage the team's boards (team-admin).
-- The app reads the signed-in user's groups from the token's **`groups` claim**
-  and matches them against each team's bound groups **at request time**.
+- The app reads the signed-in user's groups from the token's **`user_roles`
+  claim** (configurable via `GROUPS_CLAIM`; falls back to `groups`) and matches
+  them against each team's bound groups **at request time**.
 - The team **creator** is always a team-admin of that team.
 - The global **`admin`** realm role is a super-user (everything, everywhere).
 - Groups are configured **at team creation and editable later**; editing a
   team's groups is restricted to that team's team-admins and global admins.
 - **Critical Keycloak step:** add a **Group Membership** mapper that puts the
-  `groups` claim **in the ID token**, or the app won't see any groups.
+  `user_roles` claim **in the ID token**, or the app won't see any groups.
 - Boards created **without a team** ("open boards") remain visible to any
   authenticated user — group rules only apply to team-aligned boards.
 
@@ -32,8 +33,8 @@ For the authorization *rules* themselves (who can view / manage / edit), see
 
 ```
 AD groups  ──(federation/sync)──►  Keycloak groups
-     └─(Group Membership mapper, ID token)─► token claim  groups: ["/Eng/Platform", ...]
-          └─ src/auth.ts reads profile.groups ──► session.groups
+     └─(Group Membership mapper, ID token)─► token claim  user_roles: ["/Eng/Platform", ...]
+          └─ src/auth.ts reads profile.user_roles (GROUPS_CLAIM) ──► session.groups
                └─ src/lib/authz.ts matches session.groups against the board's team:
                     • Team.memberGroups  → member (view/participate)
                     • Team.adminGroups   → team-admin (manage)
@@ -75,24 +76,29 @@ If your users come from Active Directory, federate AD into Keycloak (LDAP User
 Federation) and enable **group sync** (a Group LDAP mapper) so AD groups appear
 as Keycloak groups.
 
-### 2. Emit the `groups` claim in the ID token (the easy-to-miss step)
+### 2. Emit the groups claim in the ID token (the easy-to-miss step)
 
 NextAuth reads the **ID token / userinfo** (as `profile`), so the groups must be
-there:
+there. The app reads them from the **`user_roles`** claim by default (override
+with the `GROUPS_CLAIM` env var; it also falls back to a `groups` claim):
 
 1. Clients → your app's client → **Client scopes** → open the
    `<client>-dedicated` scope.
 2. **Add mapper → By configuration → Group Membership**.
 3. Set:
-   - **Name**: `groups`
-   - **Token Claim Name**: `groups`
+   - **Name**: `user_roles`
+   - **Token Claim Name**: `user_roles` (must match `GROUPS_CLAIM`; default `user_roles`)
    - **Full group path**: ON → claim values look like `/Eng/Platform`
      (recommended; the matcher also accepts last-segment names)
    - **Add to ID token**: **ON** ← required
    - **Add to userinfo**: ON (helpful fallback)
 
-Without this, `session.groups` is empty and every team-aligned board denies
-access to everyone except global admins.
+The claim may be a JSON array or a comma/newline-delimited string — both are
+accepted. Without this mapper, the groups list is empty and every team-aligned
+board denies access to everyone except global admins.
+
+> Using a different claim name? Set `GROUPS_CLAIM` (Helm: `auth.groupsClaim`) to
+> match, e.g. `GROUPS_CLAIM=groups`.
 
 ### 3. (Optional) Service account for the group picker
 
@@ -153,7 +159,7 @@ Global super-users can be granted two ways (either is sufficient):
 
 | Symptom | Likely cause |
 | --- | --- |
-| Everyone is denied team boards | `groups` claim missing from the **ID token** (step 2), so `session.groups` is empty. |
+| Everyone is denied team boards | groups claim (`user_roles`) missing from the **ID token** (step 2), or `GROUPS_CLAIM` doesn't match the mapper's claim name, so `session.groups` is empty. |
 | Groups appear in the access token but not the app | The app reads the ID token/userinfo, not the access token — configure the mapper for the ID token. |
 | A member is still denied | Configured value doesn't match the user's group path or last segment (check spelling; matching is case-insensitive). |
 | Picker shows nothing / free-text only | Service account not configured or lacks `query-groups`/`view-realm`; `/api/keycloak/groups` returns `configured: false`. |
@@ -164,7 +170,8 @@ Global super-users can be granted two ways (either is sufficient):
 
 ## Files involved
 
-- `src/auth.ts` — reads `profile.groups` into `session.groups`; keeps the global
+- `src/auth.ts` — reads the groups claim (`user_roles` by default, via
+  `GROUPS_CLAIM`) into `session.groups`; keeps the global
   `admin` realm role.
 - `src/lib/authz.ts` — `parseGroupsClaim()` and the permission helpers
   (`canViewBoard`, `canManageBoard`, `canEditItem`) that match groups against a

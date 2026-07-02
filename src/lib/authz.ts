@@ -65,10 +65,21 @@ function normGroup(s: string): string {
   return norm(s).replace(/^\/+/, "");
 }
 
-/** Parse a raw `groups` claim (array of strings) into a clean list. */
+/**
+ * Parse a raw groups claim into a clean list. Accepts either an array of strings
+ * (a multivalued claim like `user_roles` / `groups`) or a single delimited
+ * string (comma / newline / whitespace separated).
+ */
 export function parseGroupsClaim(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((g): g is string => typeof g === "string" && g.trim().length > 0);
+  if (Array.isArray(raw)) {
+    return raw.filter((g): g is string => typeof g === "string" && g.trim().length > 0);
+  }
+  if (typeof raw === "string") {
+    // Delimited string fallback: split on comma/newline only (group names may
+    // contain spaces, so don't split on arbitrary whitespace).
+    return raw.split(/[\n,]+/).map((g) => g.trim()).filter(Boolean);
+  }
+  return [];
 }
 
 /**

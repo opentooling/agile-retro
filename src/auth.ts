@@ -36,8 +36,10 @@ export const { handlers, signIn, signOut, auth } = (NextAuth as any)({
 
                 // Extract identity from the Keycloak profile:
                 //  - the global `admin` realm role (super-user), and
-                //  - the user's groups (the `groups` claim), which drive per-team
-                //    access via each team's configured member/admin groups. See
+                //  - the user's groups, which drive per-team access via each
+                //    team's configured member/admin groups. Groups are read from
+                //    the `user_roles` claim by default (override with the
+                //    GROUPS_CLAIM env var), falling back to `groups`. See
                 //    src/lib/authz.ts and docs/KEYCLOAK_GROUPS.md.
                 if (account.provider === 'keycloak' && profile) {
                     // Cast: these claims aren't in the standard Profile type.
@@ -46,7 +48,8 @@ export const { handlers, signIn, signOut, auth } = (NextAuth as any)({
                     if (Array.isArray(realmRoles) && realmRoles.includes('admin')) {
                         roles.push('admin')
                     }
-                    groups = parseGroupsClaim(keycloakProfile.groups)
+                    const claimName = process.env.GROUPS_CLAIM || 'user_roles'
+                    groups = parseGroupsClaim(keycloakProfile[claimName] ?? keycloakProfile.groups)
                 }
 
                 token.roles = roles

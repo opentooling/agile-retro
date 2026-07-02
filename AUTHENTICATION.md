@@ -115,17 +115,19 @@ the session cookie and checks each action server-side.
 
 **Global admins** are granted either by the Keycloak `admin` realm role, or by
 membership of a group listed in the `ADMIN_GROUPS` environment variable
-(comma-separated group paths/names, matched against the user's `groups` claim).
+(comma-separated group paths/names, matched against the user's groups claim —
+`user_roles` by default).
 `ADMIN_GROUPS` is set in the Helm chart via `auth.adminGroups`. Because it's read
 per request, changing it (and redeploying) takes effect without users needing to
 re-login.
 
 Member/admin groups are configured **per team in Team settings** and matched
-against the user's `groups` claim at request time. The full setup (Keycloak
+against the user's groups claim at request time. The full setup (Keycloak
 mappers, the optional group picker, AD federation) is documented in
 [`docs/KEYCLOAK_GROUPS.md`](docs/KEYCLOAK_GROUPS.md).
 
-> Group-based access requires Keycloak (the `groups` claim). Users signing in
+> Group-based access requires Keycloak (the groups claim, `user_roles` by
+> default). Users signing in
 > with Google receive only the `user` role, so they can use open boards but not
 > team-aligned ones.
 

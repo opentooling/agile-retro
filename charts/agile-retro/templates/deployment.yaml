@@ -98,6 +98,10 @@ spec:
               value: {{ .Values.auth.secret | quote }}
               {{- end }}
             {{- end }}
+            {{- if .Values.auth.groupsClaim }}
+            - name: GROUPS_CLAIM
+              value: {{ .Values.auth.groupsClaim | quote }}
+            {{- end }}
             {{- if .Values.auth.adminGroups }}
             - name: ADMIN_GROUPS
               value: {{ join "," .Values.auth.adminGroups | quote }}

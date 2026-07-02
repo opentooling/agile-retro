@@ -38,10 +38,16 @@ function makeUser(over: Partial<AuthUser> = {}): AuthUser {
 }
 
 describe('parseGroupsClaim', () => {
-  it('keeps only non-empty strings', () => {
+  it('keeps only non-empty strings from an array', () => {
     expect(parseGroupsClaim(['/a', ' ', 'b', 5, null])).toEqual(['/a', 'b'])
     expect(parseGroupsClaim(undefined)).toEqual([])
-    expect(parseGroupsClaim('nope')).toEqual([])
+    expect(parseGroupsClaim(42)).toEqual([])
+  })
+
+  it('splits a delimited string (comma/newline), not on spaces within names', () => {
+    expect(parseGroupsClaim('/Eng/Platform, Platform-Admins')).toEqual(['/Eng/Platform', 'Platform-Admins'])
+    expect(parseGroupsClaim('/a\n/b')).toEqual(['/a', '/b'])
+    expect(parseGroupsClaim('Retro Admins')).toEqual(['Retro Admins'])
   })
 })
 
