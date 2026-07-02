@@ -1,4 +1,4 @@
-import { isDoneCategory, selectTransitionId, type JiraTransition } from './jira'
+import { isDoneCategory, selectTransitionId, selectAssigneeUsername, type JiraTransition } from './jira'
 
 describe('isDoneCategory', () => {
   it('treats only the "done" category as done', () => {
@@ -35,5 +35,31 @@ describe('selectTransitionId', () => {
     expect(selectTransitionId(onlyDone, false)).toBeUndefined()
     const onlyOpen = transitions.filter((t) => t.to?.statusCategory?.key !== 'done')
     expect(selectTransitionId(onlyOpen, true)).toBeUndefined()
+  })
+})
+
+describe('selectAssigneeUsername', () => {
+  const users = [
+    { name: 'jsmith', displayName: 'John Smith', emailAddress: 'john.smith@corp.com' },
+    { name: 'jsmith2', displayName: 'John Smith', emailAddress: 'john.smith2@corp.com' },
+  ]
+
+  it('prefers an exact email match', () => {
+    expect(selectAssigneeUsername(users, 'john.smith@corp.com')).toBe('jsmith')
+    expect(selectAssigneeUsername(users, 'JOHN.SMITH@CORP.COM')).toBe('jsmith')
+  })
+
+  it('falls back to exact name / display name', () => {
+    expect(selectAssigneeUsername(users, 'jsmith2')).toBe('jsmith2')
+  })
+
+  it('uses a single result when unambiguous', () => {
+    expect(selectAssigneeUsername([{ name: 'solo', displayName: 'Solo', emailAddress: 'x@y.com' }], 'anything')).toBe('solo')
+  })
+
+  it('returns null on no/ambiguous match', () => {
+    expect(selectAssigneeUsername(users, 'nobody@corp.com')).toBeNull() // ambiguous displayName, no email match
+    expect(selectAssigneeUsername([], 'x')).toBeNull()
+    expect(selectAssigneeUsername(users, '')).toBeNull()
   })
 })

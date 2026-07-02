@@ -1,14 +1,15 @@
 /**
  * Jira plugin — creates a Jira issue from a retro action item via the Jira
- * Cloud REST API (v3).
+ * REST API v2 (Jira Server / Data Center).
  *
- * Auth is HTTP Basic with `email:apiToken` (Atlassian API tokens), configured
- * per team in Team settings. The team also supplies the base URL
- * (e.g. https://yourco.atlassian.net) and a project key (e.g. "PROJ").
+ * Auth is HTTP Basic with `email:apiToken`, configured per team in Team
+ * settings, along with the base URL and a project key (e.g. "PROJ").
  *
- * Assignee and due date are included in the issue description rather than as
- * structured fields, because Jira Cloud requires an accountId (not a display
- * name) to set the assignee, and we only have free-text names here.
+ * The action's assignee (an email like `firstname.lastname@domain`) is resolved
+ * to a Jira user and set as the real `assignee` field (`{ name: <username> }`
+ * for Server/DC). If it can't be resolved, it's left in the description instead,
+ * so issue creation never fails on assignee lookup. Due date and the source
+ * retro are also recorded in the description.
  */
 import type { Team } from "../db/types";
 import type { ActionPluginContext, ExternalTaskResult, RetroPlugin } from "./types";
@@ -47,9 +48,11 @@ export function selectTransitionId(
   return done ? pick("done") : pick("new") ?? pick("indeterminate");
 }
 
-function buildDescription(ctx: ActionPluginContext): string {
+function buildDescription(ctx: ActionPluginContext, includeAssignee = true): string {
   const lines = [ctx.action.content, ""];
-  if (ctx.action.assignee) lines.push(`Assignee: ${ctx.action.assignee}`);
+  // Only record the assignee in the description when it wasn't set as the real
+  // assignee field (i.e. couldn't be resolved to a Jira user).
+  if (includeAssignee && ctx.action.assignee) lines.push(`Assignee: ${ctx.action.assignee}`);
   if (ctx.action.dueDate) {
     lines.push(`Due: ${new Date(ctx.action.dueDate).toISOString().slice(0, 10)}`);
   }
@@ -57,16 +60,52 @@ function buildDescription(ctx: ActionPluginContext): string {
   return lines.join("\n");
 }
 
-/** Minimal Atlassian Document Format wrapper for a plain-text body. */
-function adf(text: string) {
-  return {
-    type: "doc",
-    version: 1,
-    content: text.split("\n").map((line) => ({
-      type: "paragraph",
-      content: line ? [{ type: "text", text: line }] : [],
-    })),
-  };
+export type JiraUser = { name?: string; key?: string; emailAddress?: string; displayName?: string };
+
+/**
+ * Pick the best-matching Jira username from user-search results for a query.
+ * Prefers an exact email match, then an exact name/display-name match, then a
+ * single unambiguous result. Returns null when nothing suitable is found.
+ */
+export function selectAssigneeUsername(users: JiraUser[], query: string): string | null {
+  if (!Array.isArray(users) || users.length === 0) return null;
+  const wanted = query.trim().toLowerCase();
+  if (!wanted) return null;
+
+  const byEmail = users.find((u) => (u.emailAddress ?? "").toLowerCase() === wanted);
+  if (byEmail?.name) return byEmail.name;
+  const byName = users.find(
+    (u) => (u.displayName ?? "").toLowerCase() === wanted || (u.name ?? "").toLowerCase() === wanted
+  );
+  if (byName?.name) return byName.name;
+  if (users.length === 1 && users[0].name) return users[0].name;
+  return null;
+}
+
+/**
+ * Resolve an action assignee (typically an email like firstname.lastname@domain)
+ * to a Jira Server/DC username via user search. The `username` search param
+ * matches against username, display name and email. Returns null when nothing
+ * suitable is found (caller then leaves the assignee in the description).
+ */
+async function resolveAssigneeName(
+  baseUrl: string,
+  authHeader: string,
+  assignee: string
+): Promise<string | null> {
+  const query = assignee.trim();
+  if (!query) return null;
+  try {
+    const res = await fetch(
+      `${baseUrl}/rest/api/2/user/search?username=${encodeURIComponent(query)}&maxResults=50`,
+      { headers: { Authorization: authHeader, Accept: "application/json" } }
+    );
+    if (!res.ok) return null;
+    const users = (await res.json()) as JiraUser[];
+    return selectAssigneeUsername(users, query);
+  } catch {
+    return null;
+  }
 }
 
 export const jiraPlugin: RetroPlugin = {
@@ -85,18 +124,26 @@ export const jiraPlugin: RetroPlugin = {
       throw new Error("Jira is not configured for this team.");
     }
 
-    const baseUrl = trimBaseUrl(team.jiraBaseUrl!);
-    const auth = Buffer.from(`${team.jiraEmail}:${team.jiraApiToken}`).toString("base64");
+    const { baseUrl, authHeader } = jiraAuth(team);
 
     // Keep the summary to a single line and within Jira's 255-char limit.
     const summary = ctx.action.content.replace(/\s+/g, " ").trim().slice(0, 254) || "Retro action";
+
+    // Resolve the assignee to a Jira username (best-effort). If unresolved, it
+    // stays in the description via buildDescription below.
+    let assigneeName: string | null = null;
+    if (ctx.action.assignee) {
+      assigneeName = await resolveAssigneeName(baseUrl, authHeader, ctx.action.assignee);
+    }
 
     const body = {
       fields: {
         project: { key: team.jiraProjectKey },
         summary,
-        description: adf(buildDescription(ctx)),
+        // REST v2 takes a plain-text (wiki) string, not ADF.
+        description: buildDescription(ctx, assigneeName === null),
         issuetype: { name: "Task" },
+        ...(assigneeName ? { assignee: { name: assigneeName } } : {}),
         ...(ctx.action.dueDate
           ? { duedate: new Date(ctx.action.dueDate).toISOString().slice(0, 10) }
           : {}),
@@ -105,10 +152,10 @@ export const jiraPlugin: RetroPlugin = {
 
     let res: Response;
     try {
-      res = await fetch(`${baseUrl}/rest/api/3/issue`, {
+      res = await fetch(`${baseUrl}/rest/api/2/issue`, {
         method: "POST",
         headers: {
-          Authorization: `Basic ${auth}`,
+          Authorization: authHeader,
           "Content-Type": "application/json",
           Accept: "application/json",
         },
@@ -155,7 +202,7 @@ export const jiraPlugin: RetroPlugin = {
       keys.map(async (key) => {
         try {
           const res = await fetch(
-            `${baseUrl}/rest/api/3/issue/${encodeURIComponent(key)}?fields=status`,
+            `${baseUrl}/rest/api/2/issue/${encodeURIComponent(key)}?fields=status`,
             { headers: { Authorization: authHeader, Accept: "application/json" } }
           );
           if (!res.ok) return; // 404 (deleted issue) etc. — skip.
@@ -186,7 +233,7 @@ export const jiraPlugin: RetroPlugin = {
 
     // 1. Read current status category; skip if already where we want it.
     const issueRes = await fetch(
-      `${baseUrl}/rest/api/3/issue/${encodeURIComponent(key)}?fields=status`,
+      `${baseUrl}/rest/api/2/issue/${encodeURIComponent(key)}?fields=status`,
       { headers: { Authorization: authHeader, Accept: "application/json" } }
     );
     if (!issueRes.ok) return;
@@ -201,7 +248,7 @@ export const jiraPlugin: RetroPlugin = {
     //    category. For "done" -> a Done-category status. For reopen -> prefer a
     //    "new" (To Do) status, otherwise "indeterminate" (In Progress).
     const transRes = await fetch(
-      `${baseUrl}/rest/api/3/issue/${encodeURIComponent(key)}/transitions`,
+      `${baseUrl}/rest/api/2/issue/${encodeURIComponent(key)}/transitions`,
       { headers: { Authorization: authHeader, Accept: "application/json" } }
     );
     if (!transRes.ok) return;
@@ -211,7 +258,7 @@ export const jiraPlugin: RetroPlugin = {
     const transitionId = selectTransitionId(transitions, done);
     if (!transitionId) return; // No suitable transition available from here.
 
-    await fetch(`${baseUrl}/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, {
+    await fetch(`${baseUrl}/rest/api/2/issue/${encodeURIComponent(key)}/transitions`, {
       method: "POST",
       headers,
       body: JSON.stringify({ transition: { id: transitionId } }),

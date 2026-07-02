@@ -30,9 +30,9 @@ Open **Teams**, expand **Jira integration** on a team card, and fill in:
 
 | Field | Example | Notes |
 | --- | --- | --- |
-| Base URL | `https://yourco.atlassian.net` | Your Jira Cloud site, no trailing slash needed |
+| Base URL | `https://jira.yourco.com` | Your Jira Server/Data Center host, no trailing slash needed |
 | Project key | `PROJ` | The key issues are created under |
-| Account email | `you@yourco.com` | The Atlassian account the token belongs to |
+| Account email | `you@yourco.com` | The account the token belongs to (used for Basic auth) |
 | API token | `ATATT3x…` | An Atlassian API token (see below) |
 
 The API token is **write-only from the UI**: it is stored server-side and never
@@ -40,24 +40,28 @@ sent back to the browser. To change other settings without re-entering it, leave
 the token field blank when saving — the existing token is kept. A team shows
 **Connected** once all four fields are present.
 
-### Creating an Atlassian API token
+### Creating an API token (Personal Access Token)
 
-1. Go to <https://id.atlassian.com/manage-profile/security/api-tokens>.
-2. **Create API token**, give it a label, copy the value.
+On Jira **Server / Data Center**, create a **Personal Access Token**:
+
+1. In Jira, open your **Profile → Personal Access Tokens**.
+2. **Create token**, give it a label, copy the value.
 3. Paste it into the team's **API token** field.
 
-The token inherits your Jira permissions, so the account must be able to create
-issues in the target project.
+The token inherits your Jira permissions, so the account must be able to **create
+issues** in the target project, **transition** them (for the done sync), and
+**browse users** (to resolve assignees).
 
 ---
 
 ## How a Jira issue is created
 
 When **Create in Jira** is clicked, the `createExternalTaskForAction` server
-action runs the Jira plugin, which calls the Jira Cloud REST API:
+action runs the Jira plugin, which calls the Jira **REST API v2** (Jira Server /
+Data Center):
 
 ```
-POST {baseUrl}/rest/api/3/issue
+POST {baseUrl}/rest/api/2/issue
 Authorization: Basic base64(email:apiToken)
 Content-Type: application/json
 
@@ -65,19 +69,26 @@ Content-Type: application/json
   "fields": {
     "project":   { "key": "PROJ" },
     "summary":   "<action text, single line, ≤254 chars>",
-    "description": "<action text + assignee + due date + source retro> (ADF)",
+    "description": "<action text + due date + source retro> (plain text)",
     "issuetype": { "name": "Task" },
-    "duedate":   "YYYY-MM-DD"        // only if the action has a due date
+    "assignee":  { "name": "<resolved username>" },  // only if resolved (see below)
+    "duedate":   "YYYY-MM-DD"                         // only if the action has a due date
   }
 }
 ```
 
-- **Auth** is HTTP Basic with `email:apiToken` (Atlassian's standard for API
-  tokens).
-- **Assignee** is written into the description rather than the structured
-  `assignee` field, because Jira Cloud requires an `accountId` (not a display
-  name) to assign, and the app only has free-text names. (See *Extending* below
-  for how to upgrade this.)
+- **Auth** is HTTP Basic with `email:apiToken`.
+- **Description** is a plain-text (wiki) string — v2 does not use ADF.
+- **Assignee** is set as the real `assignee` field. The action's assignee
+  (an email such as `firstname.lastname@domain`) is resolved to a Jira user via
+  `GET /rest/api/2/user/search?username=<value>`, choosing an exact **email**
+  match, then an exact name/display-name match, then a single unambiguous result.
+  The resolved **username** is used (`{ "name": "…" }`, the Server/DC form). If it
+  can't be resolved, the assignee is left in the **description** instead and the
+  issue is still created — assignee lookup never blocks creation.
+  - This requires the API-token account to hold the **Browse users and groups**
+    global permission; otherwise the search returns nothing and it falls back to
+    the description.
 - On success the issue **key** (e.g. `PROJ-123`) and a **browse URL**
   (`{baseUrl}/browse/PROJ-123`) are saved on the action item.
 - On failure the API's error messages are surfaced inline in the UI (e.g.
@@ -191,8 +202,8 @@ the app needs no changes.
 
 ## Possible improvements
 
-- Resolve assignee names to Jira `accountId`s (via
-  `/rest/api/3/user/search`) and set the real `assignee` field.
+- Jira **Cloud** support (this integration targets Server/Data Center REST v2;
+  Cloud uses `accountId` for assignee and ADF descriptions on `/rest/api/3`).
 - Configurable issue type / extra fields per team.
 - Real-time Jira → app updates via webhooks (today the pull side is poll-on-open;
   the push side is already immediate).
