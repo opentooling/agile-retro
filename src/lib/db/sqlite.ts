@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS "Team" (
     "createdBy" TEXT,
     "memberGroups" TEXT NOT NULL DEFAULT '[]',
     "adminGroups" TEXT NOT NULL DEFAULT '[]',
+    "imageData" TEXT,
     "jiraBaseUrl" TEXT,
     "jiraProjectKey" TEXT,
     "jiraEmail" TEXT,
@@ -127,6 +128,7 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE "Team" ADD COLUMN "createdBy" TEXT`,
   `ALTER TABLE "Team" ADD COLUMN "memberGroups" TEXT NOT NULL DEFAULT '[]'`,
   `ALTER TABLE "Team" ADD COLUMN "adminGroups" TEXT NOT NULL DEFAULT '[]'`,
+  `ALTER TABLE "Team" ADD COLUMN "imageData" TEXT`,
   `ALTER TABLE "Team" ADD COLUMN "jiraBaseUrl" TEXT`,
   `ALTER TABLE "Team" ADD COLUMN "jiraProjectKey" TEXT`,
   `ALTER TABLE "Team" ADD COLUMN "jiraEmail" TEXT`,
@@ -269,6 +271,7 @@ const mapTeam = (r: Row): Team => ({
   createdBy: r.createdBy ?? null,
   memberGroups: parseGroups(r.memberGroups),
   adminGroups: parseGroups(r.adminGroups),
+  imageData: r.imageData ?? null,
   jiraBaseUrl: r.jiraBaseUrl ?? null,
   jiraProjectKey: r.jiraProjectKey ?? null,
   jiraEmail: r.jiraEmail ?? null,
@@ -380,6 +383,12 @@ export function updateTeamGroups(id: string, groups: TeamGroups): Team {
     JSON.stringify(groups.adminGroups ?? []),
     id
   );
+  return mapTeam(db.prepare(`SELECT * FROM "Team" WHERE "id" = ?`).get(id) as Row);
+}
+
+export function updateTeamImage(id: string, imageData: string | null): Team {
+  const db = getDb();
+  db.prepare(`UPDATE "Team" SET "imageData" = ? WHERE "id" = ?`).run(imageData ?? null, id);
   return mapTeam(db.prepare(`SELECT * FROM "Team" WHERE "id" = ?`).get(id) as Row);
 }
 

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS "Team" (
     "createdBy" TEXT,
     "memberGroups" JSONB NOT NULL DEFAULT '[]',
     "adminGroups" JSONB NOT NULL DEFAULT '[]',
+    "imageData" TEXT,
     "jiraBaseUrl" TEXT,
     "jiraProjectKey" TEXT,
     "jiraEmail" TEXT,
@@ -111,6 +112,7 @@ ALTER TABLE "Retrospective" ALTER COLUMN "teamId" DROP NOT NULL;
 ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "createdBy" TEXT;
 ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "memberGroups" JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "adminGroups" JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "imageData" TEXT;
 `;
 
 // Cache the pool and the one-time schema init on globalThis so dev/HMR and
@@ -211,6 +213,7 @@ const mapTeam = (r: Row): Team => ({
   createdBy: r.createdBy ?? null,
   memberGroups: toGroups(r.memberGroups),
   adminGroups: toGroups(r.adminGroups),
+  imageData: r.imageData ?? null,
   jiraBaseUrl: r.jiraBaseUrl ?? null,
   jiraProjectKey: r.jiraProjectKey ?? null,
   jiraEmail: r.jiraEmail ?? null,
@@ -325,6 +328,14 @@ export async function updateTeamGroups(id: string, groups: TeamGroups): Promise<
      WHERE "id" = $1 RETURNING *`,
     [id, JSON.stringify(groups.memberGroups ?? []), JSON.stringify(groups.adminGroups ?? [])]
   );
+  return mapTeam(row as Row);
+}
+
+export async function updateTeamImage(id: string, imageData: string | null): Promise<Team> {
+  const row = await queryOne(`UPDATE "Team" SET "imageData" = $2 WHERE "id" = $1 RETURNING *`, [
+    id,
+    imageData ?? null,
+  ]);
   return mapTeam(row as Row);
 }
 

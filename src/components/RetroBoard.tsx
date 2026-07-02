@@ -38,6 +38,7 @@ type RetroData = {
   team?: {
     id: string
     name: string
+    imageData?: string | null
     jiraConfigured?: boolean
   } | null
   columns: {
@@ -656,8 +657,13 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-50">{retro.title}</h1>
                     {retro.team && (
-                        <div className="text-sm font-medium text-muted-foreground flex items-center gap-1">
-                            <Users className="w-4 h-4" />
+                        <div className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                            {retro.team.imageData ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={retro.team.imageData} alt="" className="w-5 h-5 rounded-full object-cover border" />
+                            ) : (
+                                <Users className="w-4 h-4" />
+                            )}
                             {retro.team.name}
                         </div>
                     )}

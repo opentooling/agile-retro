@@ -50,6 +50,7 @@ export const createTeam = bind("createTeam");
 export const updateTeam = bind("updateTeam");
 export const updateTeamJira = bind("updateTeamJira");
 export const updateTeamGroups = bind("updateTeamGroups");
+export const updateTeamImage = bind("updateTeamImage");
 export const getTeam = bind("getTeam");
 
 // Retrospectives

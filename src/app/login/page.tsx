@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { LogIn, KeyRound } from "lucide-react"
+import { LogIn, KeyRound, Coins } from "lucide-react"
 import { signIn, providerMap } from "@/auth"
 
 function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
@@ -48,8 +48,13 @@ export default function LoginPage() {
     <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">Welcome to Agile Retro</CardTitle>
-          <CardDescription>Sign in to create or join retrospective sessions</CardDescription>
+          <div className="flex justify-center mb-2">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+              <Coins className="h-7 w-7 text-primary" />
+            </div>
+          </div>
+          <CardTitle className="text-2xl font-bold">Welcome to LME Retro</CardTitle>
+          <CardDescription>London Metal Exchange · sign in to create or join retrospectives</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {Object.values(providerMap).map((provider) => (

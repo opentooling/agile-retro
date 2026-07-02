@@ -25,6 +25,8 @@ export type Team = {
   // global admins only (fail closed).
   memberGroups: string[];
   adminGroups: string[];
+  // Optional team logo, stored inline as a data URI (small images only).
+  imageData: string | null;
   // Jira integration, configured per team in Team settings. `jiraApiToken` is a
   // secret and must be stripped before a Team is sent to the client.
   jiraBaseUrl: string | null;
@@ -151,6 +153,7 @@ export interface DbApi {
   updateTeam(id: string, name: string): MaybePromise<Team>;
   updateTeamJira(id: string, config: TeamJiraConfig): MaybePromise<Team>;
   updateTeamGroups(id: string, groups: TeamGroups): MaybePromise<Team>;
+  updateTeamImage(id: string, imageData: string | null): MaybePromise<Team>;
   getTeam(id: string): MaybePromise<Team | null>;
 
   // Retrospectives

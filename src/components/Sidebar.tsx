@@ -5,7 +5,7 @@ import { ModeToggle } from "@/components/mode-toggle"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { LayoutDashboard, History, Filter, Tag, LogOut, LogIn, ChevronLeft, ChevronRight, Users, CheckSquare, HelpCircle, type LucideIcon } from "lucide-react"
+import { LayoutDashboard, History, Filter, Tag, LogOut, LogIn, ChevronLeft, ChevronRight, Users, CheckSquare, HelpCircle, Coins, type LucideIcon } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
@@ -137,7 +137,13 @@ export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
       "border-r bg-muted/20 h-screen sticky top-0 flex flex-col transition-all duration-300",
       isCollapsed ? "w-16 p-2" : "w-64 p-6"
     )}>
-      <div className="flex justify-end mb-4">
+      <div className={cn("flex mb-4", isCollapsed ? "justify-center" : "items-center justify-between")}>
+        {!isCollapsed && (
+          <div className="flex items-center gap-2 min-w-0">
+            <Coins className="w-6 h-6 text-primary shrink-0" />
+            <span className="text-lg font-bold tracking-tight truncate">LME Retro</span>
+          </div>
+        )}
         <Button variant="ghost" size="icon" onClick={() => setIsCollapsed(!isCollapsed)}>
           {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
         </Button>
@@ -227,7 +233,7 @@ export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
             <div className={cn("flex items-center mb-4", isCollapsed ? "justify-center flex-col gap-2" : "justify-between")}>
                 {!isCollapsed && (
                   <div className="flex items-center gap-3 overflow-hidden">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-600 to-amber-600 flex items-center justify-center text-white font-bold shrink-0">
                           {user?.name?.[0] || 'U'}
                       </div>
                       <div className="flex flex-col min-w-0">

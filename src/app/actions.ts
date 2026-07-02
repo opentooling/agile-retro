@@ -176,6 +176,32 @@ export async function updateTeam(id: string, name: string) {
     }
 }
 
+/**
+ * Set or clear a team's logo. The image is stored inline as a data URI, so it
+ * must be a `data:image/*` value and reasonably small (large logos should be
+ * resized client-side before upload). Pass null to remove.
+ */
+const MAX_TEAM_IMAGE_CHARS = 700_000 // ~500 KB once base64-encoded
+export async function updateTeamImage(id: string, imageData: string | null): Promise<SafeTeam> {
+    if (!id) throw new Error('Team ID is required')
+
+    let value: string | null = null
+    if (imageData) {
+        if (!/^data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);/i.test(imageData)) {
+            throw new Error('Image must be a PNG, JPEG, GIF, WEBP or SVG data URI')
+        }
+        if (imageData.length > MAX_TEAM_IMAGE_CHARS) {
+            throw new Error('Image is too large — please use a smaller logo (under ~500 KB)')
+        }
+        value = imageData
+    }
+
+    const team = await db.updateTeamImage(id, value)
+    revalidatePath('/teams')
+    revalidatePath('/')
+    return sanitizeTeam(team)
+}
+
 export async function getTeams(): Promise<SafeTeam[]> {
     const teams = await db.listTeams()
     return teams.map(sanitizeTeam)

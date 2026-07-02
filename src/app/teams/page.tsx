@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { createTeam, getTeams, updateTeam, updateTeamJira, updateTeamGroups } from '@/app/actions'
+import { useState, useEffect, useRef } from 'react'
+import { createTeam, getTeams, updateTeam, updateTeamJira, updateTeamGroups, updateTeamImage } from '@/app/actions'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Users, Plus, CheckCircle, AlertCircle, Pencil, Link2, Shield } from 'lucide-react'
+import { Users, Plus, CheckCircle, AlertCircle, Pencil, Link2, Shield, ImagePlus, Trash2 } from 'lucide-react'
 import { CreateRetroDialog } from "@/components/CreateRetroDialog"
 import { useSearchParams } from 'next/navigation'
 import { GroupsField, useKeycloakGroups } from "@/components/GroupsField"
@@ -18,6 +18,7 @@ type Team = {
     createdBy?: string | null
     memberGroups?: string[]
     adminGroups?: string[]
+    imageData?: string | null
     jiraBaseUrl?: string | null
     jiraProjectKey?: string | null
     jiraEmail?: string | null
@@ -190,9 +191,7 @@ function TeamCard({ team, onUpdate, groupSuggestions }: { team: Team, onUpdate: 
         <Card className="hover:shadow-md transition-shadow">
             <CardContent className="p-6 flex flex-col gap-4">
                 <div className="flex items-center gap-4">
-                    <div className="p-3 bg-primary/10 rounded-full">
-                        <Users className="w-6 h-6 text-primary" />
-                    </div>
+                    <TeamAvatar team={team} onUpdate={onUpdate} />
                     <div className="flex-1 min-w-0">
                         {isEditing ? (
                             <div className="flex gap-2 items-center w-full">
@@ -394,6 +393,108 @@ function JiraSettings({ team }: { team: Team }) {
                     </Button>
                 </div>
             )}
+        </div>
+    )
+}
+
+/** Downscale an image file to a small square-ish PNG data URI for storage. */
+async function fileToResizedDataUrl(file: File, max = 128): Promise<string> {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => reject(new Error('Could not read file'))
+        reader.readAsDataURL(file)
+    })
+    // SVGs are already tiny and vector — keep as-is.
+    if (file.type === 'image/svg+xml') return dataUrl
+
+    return new Promise<string>((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => {
+            const scale = Math.min(1, max / Math.max(img.width, img.height))
+            const w = Math.round(img.width * scale)
+            const h = Math.round(img.height * scale)
+            const canvas = document.createElement('canvas')
+            canvas.width = w
+            canvas.height = h
+            const ctx = canvas.getContext('2d')
+            if (!ctx) return reject(new Error('Canvas not supported'))
+            ctx.drawImage(img, 0, 0, w, h)
+            resolve(canvas.toDataURL('image/png'))
+        }
+        img.onerror = () => reject(new Error('Invalid image'))
+        img.src = dataUrl
+    })
+}
+
+/** Team logo with a sensible default icon when no image is set, plus upload/remove. */
+function TeamAvatar({ team, onUpdate }: { team: Team, onUpdate: () => void }) {
+    const inputRef = useRef<HTMLInputElement>(null)
+    const [busy, setBusy] = useState(false)
+    const [err, setErr] = useState<string | null>(null)
+
+    async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0]
+        e.target.value = '' // allow re-selecting the same file
+        if (!file) return
+        setErr(null)
+        setBusy(true)
+        try {
+            const dataUrl = await fileToResizedDataUrl(file)
+            await updateTeamImage(team.id, dataUrl)
+            onUpdate()
+        } catch (e2) {
+            setErr(e2 instanceof Error ? e2.message : 'Upload failed')
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    async function handleRemove() {
+        setBusy(true)
+        setErr(null)
+        try {
+            await updateTeamImage(team.id, null)
+            onUpdate()
+        } catch (e2) {
+            setErr(e2 instanceof Error ? e2.message : 'Failed to remove image')
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    return (
+        <div className="flex flex-col items-center gap-1">
+            <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                disabled={busy}
+                title="Upload team image"
+                className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-full border bg-primary/10 flex items-center justify-center"
+            >
+                {team.imageData ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={team.imageData} alt={`${team.name} logo`} className="h-full w-full object-cover" />
+                ) : (
+                    // Sensible default when no image is set.
+                    <Users className="h-6 w-6 text-primary" />
+                )}
+                <span className="absolute inset-0 hidden items-center justify-center bg-black/40 text-white group-hover:flex">
+                    <ImagePlus className="h-4 w-4" />
+                </span>
+            </button>
+            {team.imageData && (
+                <button
+                    type="button"
+                    onClick={handleRemove}
+                    disabled={busy}
+                    className="text-[10px] text-muted-foreground hover:text-destructive flex items-center gap-0.5"
+                >
+                    <Trash2 className="h-3 w-3" /> Remove
+                </button>
+            )}
+            <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+            {err && <span className="text-[10px] text-red-600 max-w-[80px] text-center">{err}</span>}
         </div>
     )
 }
