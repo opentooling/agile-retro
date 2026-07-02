@@ -138,6 +138,14 @@ auth:
   existingSecret: "" # Optional: Name of existing secret for AUTH_SECRET
   existingSecretKey: "auth-secret" # Key in the existing secret
 
+  # Global-admin (super-user) access via identity-provider groups. Members of
+  # any listed group are global admins, in addition to anyone holding the
+  # Keycloak `admin` realm role. Rendered into the ADMIN_GROUPS env var.
+  # Requires the `groups` claim (Keycloak). See docs/KEYCLOAK_GROUPS.md.
+  adminGroups: []
+    # - /Eng/Retro-Admins
+    # - Platform-Admins
+
   google:
     enabled: false
     clientId: ""

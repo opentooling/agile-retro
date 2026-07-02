@@ -98,6 +98,10 @@ spec:
               value: {{ .Values.auth.secret | quote }}
               {{- end }}
             {{- end }}
+            {{- if .Values.auth.adminGroups }}
+            - name: ADMIN_GROUPS
+              value: {{ join "," .Values.auth.adminGroups | quote }}
+            {{- end }}
             {{- if .Values.auth.google.enabled }}
             - name: AUTH_GOOGLE_ID
               value: {{ .Values.auth.google.clientId | quote }}

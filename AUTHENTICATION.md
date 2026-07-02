@@ -108,9 +108,17 @@ the session cookie and checks each action server-side.
 | Source                      | Meaning                                                                 |
 | --------------------------- | ---------------------------------------------------------------------- |
 | `admin` realm role          | Global super-user. Can view, manage and moderate **every** board.      |
+| `ADMIN_GROUPS` env          | Members of these IdP groups are also global super-users (see below).   |
 | Team's **member groups**    | Users in these IdP groups can view/participate in that team's boards.  |
 | Team's **admin groups**     | Users in these IdP groups can manage (team-admin) that team's boards.  |
 | Team **creator** (`createdBy`) | Always a team-admin of the team they created.                       |
+
+**Global admins** are granted either by the Keycloak `admin` realm role, or by
+membership of a group listed in the `ADMIN_GROUPS` environment variable
+(comma-separated group paths/names, matched against the user's `groups` claim).
+`ADMIN_GROUPS` is set in the Helm chart via `auth.adminGroups`. Because it's read
+per request, changing it (and redeploying) takes effect without users needing to
+re-login.
 
 Member/admin groups are configured **per team in Team settings** and matched
 against the user's `groups` claim at request time. The full setup (Keycloak

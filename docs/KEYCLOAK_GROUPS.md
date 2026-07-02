@@ -118,9 +118,25 @@ control itself; it only powers autocomplete.
 
 ### 4. Global admins
 
-Global super-users still come from the **`admin`** realm role (unchanged). Assign
-it directly or via a group's role mapping, and ensure the realm-roles mapper adds
-roles to the ID token (see `../AUTHENTICATION.md`).
+Global super-users can be granted two ways (either is sufficient):
+
+- The **`admin`** realm role — assign it directly or via a group's role mapping,
+  and ensure the realm-roles mapper adds roles to the ID token (see
+  `../AUTHENTICATION.md`).
+- The **`ADMIN_GROUPS`** environment variable — a comma-separated list of group
+  identifiers; any user in one of these `groups` is a global admin. This is the
+  no-Keycloak-role option: set it in the Helm chart via `auth.adminGroups`, e.g.
+
+  ```yaml
+  auth:
+    adminGroups:
+      - /Eng/Retro-Admins
+  ```
+
+  Group matching is the same as team groups (case-insensitive; full path or last
+  segment). It's read per request, so changing it takes effect on redeploy
+  without users re-logging in (their group membership itself still comes from the
+  token issued at login).
 
 ---
 

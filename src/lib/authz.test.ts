@@ -68,6 +68,35 @@ describe('authUserFromSession / authUserFromToken', () => {
   })
 })
 
+describe('global admin via ADMIN_GROUPS env', () => {
+  const prev = process.env.ADMIN_GROUPS
+  afterEach(() => {
+    if (prev === undefined) delete process.env.ADMIN_GROUPS
+    else process.env.ADMIN_GROUPS = prev
+  })
+
+  it('makes a user in an ADMIN_GROUPS group a global admin', () => {
+    process.env.ADMIN_GROUPS = '/Eng/Retro-Admins, Platform-Admins'
+    const u = authUserFromSession({ user: { name: 'Bob', email: 'bob@x.com' }, groups: ['/Eng/Retro-Admins'] })
+    expect(u?.isAdmin).toBe(true)
+    // And that admin can view/manage any team board.
+    expect(canViewBoard(u, teamBoard)).toBe(true)
+    expect(canManageBoard(u, teamBoard)).toBe(true)
+  })
+
+  it('does not grant admin to users outside the configured groups', () => {
+    process.env.ADMIN_GROUPS = '/Eng/Retro-Admins'
+    const u = authUserFromSession({ user: { name: 'Bob', email: 'bob@x.com' }, groups: ['/Eng/Other'] })
+    expect(u?.isAdmin).toBe(false)
+  })
+
+  it('still honors the admin realm role when ADMIN_GROUPS is unset', () => {
+    delete process.env.ADMIN_GROUPS
+    const u = authUserFromSession({ user: { name: 'Bob', email: 'bob@x.com' }, roles: ['admin'] })
+    expect(u?.isAdmin).toBe(true)
+  })
+})
+
 describe('canViewBoard', () => {
   it('lets any authenticated user view an open board', () => {
     expect(canViewBoard(makeUser(), openBoard)).toBe(true)

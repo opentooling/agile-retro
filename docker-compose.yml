@@ -48,6 +48,9 @@ services:
       # Access control works without it (group fields fall back to free-text).
       # KEYCLOAK_ADMIN_CLIENT_ID: ...
       # KEYCLOAK_ADMIN_CLIENT_SECRET: ...
+      # Optional: global admins by IdP group (comma-separated), in addition to the
+      # Keycloak `admin` realm role. See docs/KEYCLOAK_GROUPS.md.
+      # ADMIN_GROUPS: "/Eng/Retro-Admins,Platform-Admins"
 
 volumes:
   pgdata:

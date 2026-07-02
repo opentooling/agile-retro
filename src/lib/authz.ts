@@ -116,6 +116,22 @@ export function authUserFromToken(token: unknown): AuthUser | null {
   return buildUser(t.name ?? null, t.email ?? null, t.sub ?? null, t.roles, t.groups);
 }
 
+/**
+ * Global-admin groups configured via the ADMIN_GROUPS env var (comma / newline /
+ * whitespace separated identity-provider group identifiers). A user in any of
+ * these groups is a global admin, in addition to anyone holding the `admin`
+ * realm role. Read at call time so a deploy/env change takes effect without
+ * requiring users to re-login.
+ */
+export function adminGroupsFromEnv(): string[] {
+  const raw = process.env.ADMIN_GROUPS;
+  if (!raw) return [];
+  return raw
+    .split(/[\n,]+/)
+    .map((g) => g.trim())
+    .filter(Boolean);
+}
+
 function buildUser(
   name: string | null,
   email: string | null,
@@ -125,12 +141,16 @@ function buildUser(
 ): AuthUser | null {
   const id = norm(email) || norm(name) || norm(sub);
   if (!id) return null;
+  const userGroups = parseGroupsClaim(groups);
+  const hasAdminRole = Array.isArray(roles) && roles.includes("admin");
   return {
     id,
     name,
     email,
-    isAdmin: Array.isArray(roles) ? roles.includes("admin") : false,
-    groups: parseGroupsClaim(groups),
+    // Global admin = the `admin` realm role OR membership of a configured
+    // ADMIN_GROUPS group.
+    isAdmin: hasAdminRole || groupsMatch(userGroups, adminGroupsFromEnv()),
+    groups: userGroups,
   };
 }
 
