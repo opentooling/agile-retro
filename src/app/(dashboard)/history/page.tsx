@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import Link from 'next/link'
 import { formatDistanceToNow } from 'date-fns'
 import { auth } from '@/auth'
+import { TeamMark } from '@/components/TeamMark'
 
 export default async function HistoryPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const session = await auth()
@@ -58,7 +59,9 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
                     <div className="flex gap-4">
                         <span>Status: {retro.status}</span>
                         {retro.team && (
-                            <span className="font-semibold text-primary">Team: {retro.team.name}</span>
+                            <span className="inline-flex items-center gap-1.5 font-semibold text-primary">
+                                <TeamMark team={retro.team} size={18} /> {retro.team.name}
+                            </span>
                         )}
                     </div>
                     <span>Created by: {retro.creator}</span>

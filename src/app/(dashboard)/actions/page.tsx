@@ -6,6 +6,7 @@ import { auth } from '@/auth'
 import { revalidatePath } from 'next/cache'
 import { JiraActionButton } from "@/components/JiraActionButton"
 import { reconcileAllLinkedActions, pushActionDoneState } from '@/lib/jira-sync'
+import { TeamMark } from '@/components/TeamMark'
 
 import Link from 'next/link'
 
@@ -87,8 +88,9 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
                                     <span>Retro: {action.retrospective.title}</span>
                                 </Link>
                                 {team && (
-                                    <Link href={`/actions?teamId=${encodeURIComponent(team.name)}`} className="hover:underline hover:text-primary">
-                                        <span className="font-semibold text-primary">Team: {team.name}</span>
+                                    <Link href={`/actions?teamId=${encodeURIComponent(team.name)}`} className="inline-flex items-center gap-1.5 hover:underline hover:text-primary">
+                                        <TeamMark team={team} size={16} />
+                                        <span className="font-semibold text-primary">{team.name}</span>
                                     </Link>
                                 )}
                                 <Link href={`/actions?creator=${encodeURIComponent(action.retrospective.creator)}`} className="hover:underline hover:text-primary">

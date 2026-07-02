@@ -34,11 +34,12 @@ import {
 } from "@/components/ui/popover"
 
 import { useSession } from "next-auth/react"
+import { TeamMark } from "@/components/TeamMark"
 
 export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: string }) {
   const [open, setOpen] = useState(false)
   const [tags, setTags] = useState<string[]>([])
-  const [teams, setTeams] = useState<{id: string, name: string}[]>([])
+  const [teams, setTeams] = useState<{id: string, name: string, imageData?: string | null}[]>([])
   const [selectedTeamId, setSelectedTeamId] = useState<string>(preselectedTeamId || "")
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
@@ -162,7 +163,12 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                         aria-expanded={openTeamCombobox}
                         className="w-full justify-between"
                       >
-                        {selectedTeamId ? teams.find((team) => team.id === selectedTeamId)?.name : "No team (open board)"}
+                        <span className="flex items-center gap-2 min-w-0 truncate">
+                          {selectedTeamId && (
+                            <TeamMark team={teams.find((team) => team.id === selectedTeamId)} size={18} />
+                          )}
+                          {selectedTeamId ? teams.find((team) => team.id === selectedTeamId)?.name : "No team (open board)"}
+                        </span>
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
@@ -203,6 +209,7 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                                     selectedTeamId === team.id ? "opacity-100" : "opacity-0"
                                   )}
                                 />
+                                <TeamMark team={team} size={18} className="mr-2" />
                                 {team.name}
                               </CommandItem>
                             ))}

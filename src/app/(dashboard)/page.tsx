@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from 'next/link'
 import { formatDistanceToNow } from 'date-fns'
 import { CreateRetroDialog } from '@/components/CreateRetroDialog'
+import { TeamMark } from '@/components/TeamMark'
 import { LayoutDashboard, ListTodo, Users } from 'lucide-react'
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
@@ -101,8 +102,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
                     <span>{formatDistanceToNow(retro.createdAt, { addSuffix: true })}</span>
                   </div>
                   {retro.team && (
-                      <div className="text-xs font-semibold text-primary">
-                          Team: {retro.team.name}
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                          <TeamMark team={retro.team} size={18} />
+                          {retro.team.name}
                       </div>
                   )}
                   {retro.tags && (
