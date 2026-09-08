@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import RetroBoard from './RetroBoard'
 import { io } from 'socket.io-client'
  
@@ -130,6 +130,69 @@ describe('RetroBoard', () => {
   it('connects to socket on mount', () => {
     render(<RetroBoard initialData={mockRetroData} user={{ name: 'test-user' }} />)
     expect(io).toHaveBeenCalled()
+  })
+
+  describe('REVIEW phase', () => {
+    const reviewData = {
+      ...mockRetroData,
+      status: 'REVIEW',
+      columns: [
+        {
+          ...mockRetroData.columns[0],
+          items: [{ id: 'well-1', content: 'Pairing helped', summary: null, username: 'ana', votes: [{ userId: 'u1', count: 3 }], reactions: [] }],
+        },
+        {
+          ...mockRetroData.columns[1],
+          items: [
+            { id: 'bad-1', content: 'Flaky CI', summary: null, username: 'bo', votes: [{ userId: 'u1', count: 7 }], reactions: [] },
+            { id: 'bad-2', content: 'Nobody voted for this', summary: null, username: 'cy', votes: [], reactions: [] },
+          ],
+        },
+        { ...mockRetroData.columns[2], items: [] },
+      ],
+    }
+
+    const renderReview = () =>
+      render(<RetroBoard initialData={reviewData} user={{ name: 'test-user' }} />)
+
+    it('labels each item with the column it came from', () => {
+      renderReview()
+      // Column titles appear as per-item badges now that items are pooled.
+      expect(screen.getByText('Pairing helped')).toBeInTheDocument()
+      expect(screen.getByText('What went well')).toBeInTheDocument()
+      // Both "didn't go well" items carry the badge, so there are two.
+      expect(screen.getAllByText("What didn't go well")).toHaveLength(2)
+    })
+
+    it('orders items by votes, highest first', () => {
+      const { container } = renderReview()
+      const rendered = [...container.querySelectorAll('p, div')]
+        .map((el) => el.textContent?.trim())
+        .filter((t) => t === 'Flaky CI' || t === 'Pairing helped')
+      expect(rendered[0]).toBe('Flaky CI') // 7 votes beats 3
+    })
+
+    it('still shows items that received no votes, under their own heading', () => {
+      renderReview()
+      expect(screen.getByText('Nobody voted for this')).toBeInTheDocument()
+      expect(screen.getByText(/Also raised · 1 with no votes/)).toBeInTheDocument()
+    })
+
+    it('lets a viewer react to an item without spending a vote', () => {
+      renderReview()
+      const mockSocket = (io as jest.Mock).mock.results[0].value
+
+      // First card in the list is the highest-voted item ("Flaky CI").
+      const addReaction = screen.getAllByLabelText('Add reaction')[0]
+      fireEvent.click(addReaction)
+      fireEvent.click(within(addReaction.parentElement!).getByText('👍'))
+
+      expect(mockSocket.emit).toHaveBeenCalledWith('toggle-reaction', {
+        retroId: 'test-retro-id',
+        itemId: 'bad-1',
+        emoji: '👍',
+      })
+    })
   })
 
   it('renders anonymous mode correctly', () => {

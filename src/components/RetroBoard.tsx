@@ -1,13 +1,13 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users, Calendar, User as UserIcon, ExternalLink, Pencil, Check, X } from 'lucide-react'
+import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users, Calendar, User as UserIcon, ExternalLink, Pencil, Check, X, SmilePlus } from 'lucide-react'
 import { cn } from "@/lib/utils"
 import { ModeToggle } from "@/components/mode-toggle"
 import { MentionInput, MentionText } from "@/components/Mentions"
@@ -85,6 +85,217 @@ type ActionData = {
   externalKey?: string | null
 }
 
+/**
+ * Colour accent for a column type, so an item stays recognisable once it's
+ * lifted out of its column (the review list mixes all three together).
+ */
+function columnAccent(type: string): { badge: string; border: string } {
+  switch (type) {
+    case 'START':
+    case 'WHAT_WENT_WELL':
+      return {
+        badge: 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800',
+        border: 'border-l-green-500',
+      }
+    case 'STOP':
+    case 'WHAT_DIDNT_GO_WELL':
+      return {
+        badge: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800',
+        border: 'border-l-red-500',
+      }
+    case 'CONTINUE':
+    case 'WHAT_SHOULD_BE_IMPROVED':
+      return {
+        badge: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
+        border: 'border-l-blue-500',
+      }
+    default:
+      return { badge: 'bg-muted text-muted-foreground border-border', border: 'border-l-slate-400' }
+  }
+}
+
+/** Emoji offered for item reactions. Kept short so the row stays one line. */
+const REACTION_EMOJI = ['👍', '🎉', '🤔', '😟', '🔥'] as const
+
+/**
+ * Reaction row for an item. Only emoji that someone has actually used are
+ * shown; the palette is revealed on demand, so an item with no reactions costs
+ * a single small button of vertical space.
+ *
+ * Reactions are open to everyone who can see the board — unlike votes they
+ * aren't budgeted, so people who have run out of votes can still register an
+ * opinion during review.
+ */
+function ReactionBar({
+  reactions,
+  userId,
+  onToggle,
+  readOnly,
+}: {
+  reactions: { userId: string; emoji: string }[]
+  userId: string
+  onToggle: (emoji: string) => void
+  readOnly?: boolean
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false)
+
+  const used = useMemo(() => {
+    const counts = new Map<string, { count: number; mine: boolean }>()
+    for (const r of reactions) {
+      const entry = counts.get(r.emoji) ?? { count: 0, mine: false }
+      entry.count += 1
+      if (r.userId === userId) entry.mine = true
+      counts.set(r.emoji, entry)
+    }
+    return [...counts.entries()].sort((a, b) => b[1].count - a[1].count)
+  }, [reactions, userId])
+
+  if (readOnly && used.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {used.map(([emoji, { count, mine }]) => (
+        <button
+          key={emoji}
+          type="button"
+          disabled={readOnly}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => onToggle(emoji)}
+          className={cn(
+            'flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs leading-none transition-colors',
+            mine
+              ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300'
+              : 'border-transparent bg-muted hover:bg-accent',
+            readOnly && 'cursor-default'
+          )}
+          aria-label={`${emoji} ${count}`}
+          aria-pressed={mine}
+        >
+          <span>{emoji}</span>
+          <span className="font-medium tabular-nums">{count}</span>
+        </button>
+      ))}
+
+      {!readOnly && (
+        <div className="relative">
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setPickerOpen((o) => !o)}
+            className="flex items-center rounded-full border border-transparent bg-muted/60 px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label="Add reaction"
+            aria-expanded={pickerOpen}
+          >
+            <SmilePlus className="h-3.5 w-3.5" />
+          </button>
+          {pickerOpen && (
+            <div
+              className="absolute bottom-full left-0 z-30 mb-1 flex gap-0.5 rounded-md border bg-popover p-1 shadow-md"
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              {REACTION_EMOJI.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  className="rounded px-1.5 py-0.5 text-base leading-none hover:bg-accent"
+                  onClick={() => {
+                    onToggle(emoji)
+                    setPickerOpen(false)
+                  }}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Summary/notes editor for an item during review.
+ *
+ * Typing here used to send every keystroke straight to the server, which
+ * broadcast the whole board back and re-rendered this field from server state —
+ * resetting the caret to the end mid-sentence. So the draft is local, sends are
+ * debounced, and an incoming value is only adopted while the field is idle
+ * (not focused, nothing pending), which leaves the caret alone.
+ */
+export function SummaryEditor({
+  value,
+  onChange,
+  readOnly,
+}: {
+  value: string
+  onChange: (value: string) => void
+  readOnly?: boolean
+}) {
+  const [draft, setDraft] = useState(value)
+  const [focused, setFocused] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const textarea = useRef<HTMLTextAreaElement | null>(null)
+
+  // Grow with the content instead of reserving a fixed block of empty space.
+  const autoGrow = useCallback(() => {
+    const el = textarea.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 240)}px`
+  }, [])
+  useEffect(autoGrow, [draft, autoGrow])
+
+  useEffect(() => {
+    if (focused || timer.current) return
+    setDraft(value)
+  }, [value, focused])
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+
+  const edit = (next: string) => {
+    setDraft(next)
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      timer.current = null
+      onChange(next)
+    }, 500)
+  }
+
+  const flush = () => {
+    if (timer.current) {
+      clearTimeout(timer.current)
+      timer.current = null
+    }
+    if (draft !== value) onChange(draft)
+  }
+
+  if (readOnly) {
+    if (!value) return null
+    return (
+      <div className="whitespace-pre-wrap rounded-md bg-muted/50 px-2.5 py-1.5 text-xs leading-relaxed text-muted-foreground">
+        {value}
+      </div>
+    )
+  }
+
+  return (
+    <Textarea
+      ref={textarea}
+      rows={draft ? undefined : 1}
+      placeholder="Notes from the discussion…"
+      value={draft}
+      onChange={(e) => edit(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false)
+        flush()
+      }}
+      className="min-h-0 resize-none overflow-hidden bg-muted/40 px-2.5 py-1.5 text-xs leading-relaxed"
+    />
+  )
+}
+
 /** Compact input row for a new action item: content + assignee + due date. */
 function ActionComposer({
   suggestions,
@@ -108,10 +319,12 @@ function ActionComposer({
   return (
     <div className="flex flex-col gap-3 bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border">
       <MentionInput
+        multiline
         value={content}
         onChange={setContent}
         suggestions={suggestions}
-        placeholder="New action item... (use @ to mention)"
+        placeholder="New action item… (@ to mention · Shift+Enter for a new line)"
+        className="min-h-[60px] resize-y"
         onEnter={submit}
       />
       <div className="flex flex-wrap gap-2 items-center">
@@ -183,7 +396,10 @@ function ActionCard({
               onChange={onToggle}
             />
           )}
-          <span className={cn('font-medium', action.completed && 'line-through text-muted-foreground')}>
+          <span className={cn(
+            'whitespace-pre-wrap font-medium',
+            action.completed && 'line-through text-muted-foreground'
+          )}>
             <MentionText text={action.content} names={names} />
           </span>
         </div>
@@ -461,6 +677,11 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
   const handleUpdateStatus = (status: string) => {
     if (!socket) return
     socket.emit('update-status', { retroId: retro.id, status })
+  }
+
+  const handleToggleReaction = (itemId: string, emoji: string) => {
+    if (!socket) return
+    socket.emit('toggle-reaction', { retroId: retro.id, itemId, emoji })
   }
 
   const handleUpdateSummary = (itemId: string, summary: string) => {
@@ -808,46 +1029,88 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
 
 
             {retro.status === 'REVIEW' ? (
-            <div className="space-y-6 max-w-4xl mx-auto">
-                {retro.columns
-                .flatMap(col => col.items)
-                .sort((a, b) => {
-                    const votesA = a.votes.reduce((acc, v) => acc + v.count, 0)
-                    const votesB = b.votes.reduce((acc, v) => acc + v.count, 0)
-                    return votesB - votesA
-                })
-                .map((item) => {
-                    const totalVotes = item.votes.reduce((acc, v) => acc + v.count, 0)
-                    return (
-                    <Card key={item.id} className="shadow-sm hover:shadow-md transition-shadow duration-300 border-l-4 border-l-blue-500">
-                        <CardContent className="p-6">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="text-xl font-medium leading-relaxed"><MentionText text={item.content} names={mentionNames} /></div>
-                            <div className="flex items-center gap-1 text-yellow-500 font-bold bg-yellow-50 dark:bg-yellow-900/20 px-3 py-1 rounded-full">
-                            <Star className="w-5 h-5 fill-current" /> {totalVotes}
-                            </div>
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Summary / Notes</label>
-                            {canEditItem(item) ? (
-                            <Textarea
-                            placeholder="Add summary..."
-                            value={item.summary || ''}
-                            onChange={(e) => handleUpdateSummary(item.id, e.target.value)}
-                            className="min-h-[100px] resize-y"
-                            />
-                            ) : (
-                            <div className="min-h-[100px] rounded-md border bg-muted/40 p-3 text-sm whitespace-pre-wrap text-muted-foreground">
-                              {item.summary || 'No summary yet.'}
-                            </div>
-                            )}
-                        </div>
-                        </CardContent>
-                    </Card>
-                    )
-                })}
-            </div>
+            (() => {
+                // Everything is on one vote-sorted list so the highest-voted
+                // items lead the discussion — but nothing is dropped, and the
+                // items nobody voted for are grouped under their own heading so
+                // they're easy to pick up once the top of the list is done.
+                const entries = retro.columns
+                    .flatMap(col => col.items.map(item => ({ item, column: col })))
+                    .map(entry => ({
+                        ...entry,
+                        total: entry.item.votes.reduce((acc, v) => acc + v.count, 0),
+                    }))
+                    .sort((a, b) => b.total - a.total)
+                const voted = entries.filter(e => e.total > 0)
+                const unvoted = entries.filter(e => e.total === 0)
 
+                const renderEntry = ({ item, column, total }: (typeof entries)[number]) => {
+                    const accent = columnAccent(column.type)
+                    return (
+                        <Card key={item.id} className={cn('border-l-4 shadow-none', accent.border)}>
+                            <CardContent className="p-3 space-y-2">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0 flex-1 space-y-1">
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className={cn(
+                                                'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+                                                accent.badge
+                                            )}>
+                                                {column.title}
+                                            </span>
+                                            <span className="text-[11px] text-muted-foreground">
+                                                {retro.isAnonymous ? 'Anonymous' : item.username}
+                                            </span>
+                                        </div>
+                                        <div className="whitespace-pre-wrap text-sm font-medium leading-snug">
+                                            <MentionText text={item.content} names={mentionNames} />
+                                        </div>
+                                    </div>
+                                    <div className={cn(
+                                        'flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-sm font-bold',
+                                        total > 0
+                                            ? 'bg-yellow-50 text-yellow-600 dark:bg-yellow-900/20'
+                                            : 'text-muted-foreground'
+                                    )}>
+                                        <Star className={cn('h-3.5 w-3.5', total > 0 && 'fill-current')} /> {total}
+                                    </div>
+                                </div>
+                                <ReactionBar
+                                    reactions={item.reactions ?? []}
+                                    userId={userId}
+                                    onToggle={(emoji) => handleToggleReaction(item.id, emoji)}
+                                />
+                                <SummaryEditor
+                                    value={item.summary || ''}
+                                    onChange={(summary) => handleUpdateSummary(item.id, summary)}
+                                    readOnly={!canEditItem(item)}
+                                />
+                            </CardContent>
+                        </Card>
+                    )
+                }
+
+                return (
+                    <div className="mx-auto max-w-5xl space-y-2">
+                        {voted.map(renderEntry)}
+                        {unvoted.length > 0 && (
+                            <div className="flex items-center gap-3 pt-3 pb-1">
+                                <div className="h-px flex-1 bg-border" />
+                                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Also raised · {unvoted.length} with no votes
+                                </span>
+                                <div className="h-px flex-1 bg-border" />
+                            </div>
+                        )}
+                        {unvoted.map(renderEntry)}
+                        {entries.length === 0 && (
+                            <div className="rounded-lg border border-dashed p-6 text-center italic text-muted-foreground">
+                                No items were raised in this retro.
+                            </div>
+                        )}
+                    </div>
+                )
+            })()
             ) : retro.status === 'ACTIONS' ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <div className="space-y-6">
@@ -995,17 +1258,15 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[calc(100vh-180px)]">
             {retro.columns.map((column) => (
                 <Card key={column.id} className="h-full flex flex-col bg-slate-50/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 shadow-none">
-                <CardHeader className="pb-3 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-t-lg">
+                <CardHeader className="py-2 px-3 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-t-lg">
                     <CardTitle className={cn(
-                        "text-sm font-bold uppercase tracking-wider py-1 px-3 rounded-full w-fit border",
-                        (column.type === 'START' || column.type === 'WHAT_WENT_WELL') && "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800",
-                        (column.type === 'STOP' || column.type === 'WHAT_DIDNT_GO_WELL') && "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800",
-                        (column.type === 'CONTINUE' || column.type === 'WHAT_SHOULD_BE_IMPROVED') && "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800",
+                        "text-xs font-bold uppercase tracking-wider py-0.5 px-2.5 rounded-full w-fit border",
+                        columnAccent(column.type).badge
                     )}>
                         {column.title}
                     </CardTitle>
                 </CardHeader>
-                <CardContent className="flex-1 overflow-y-auto space-y-4 p-4">
+                <CardContent className="flex-1 overflow-y-auto space-y-2 p-2.5">
                     <SortableContext 
                         items={column.items.map(i => i.id)} 
                         strategy={verticalListSortingStrategy}
@@ -1019,7 +1280,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                         return (
                         <SortableItem key={item.id} id={item.id} disabled={retro.status !== 'INPUT'}>
                         <Card className="bg-white dark:bg-gray-800 shadow-sm hover:shadow-md transition-shadow duration-200 border-0">
-                            <CardContent className="p-4 space-y-3">
+                            <CardContent className="p-2.5 space-y-1.5">
                             {editingItems[item.id] !== undefined ? (
                               <div className="flex flex-col gap-2" onPointerDown={(e) => e.stopPropagation()}>
                                 <Textarea
@@ -1053,15 +1314,31 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                                 )}
                               </div>
                             )}
-                            <div className="flex flex-col gap-3 pt-2 border-t border-gray-100 dark:border-gray-700">
-                                <div className="text-xs font-medium text-muted-foreground bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full w-fit">
-                                    {retro.isAnonymous ? "Anonymous" : item.username}
+                            <div className="flex flex-col gap-1.5 pt-1.5 border-t border-gray-100 dark:border-gray-700">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="text-[11px] font-medium text-muted-foreground truncate">
+                                        {retro.isAnonymous ? "Anonymous" : item.username}
+                                    </div>
+                                    {retro.status !== 'INPUT' && retro.status !== 'VOTING' && (
+                                    <div className="flex shrink-0 items-center gap-1 text-xs font-bold text-yellow-600">
+                                        <Star className="w-3 h-3 fill-current" /> {totalItemVotes}
+                                    </div>
+                                    )}
                                 </div>
-                                
-                                {retro.status === 'VOTING' ? (
-                                <div className="flex flex-col gap-1 w-full">
+
+                                {retro.status !== 'INPUT' && (
+                                <ReactionBar
+                                    reactions={item.reactions ?? []}
+                                    userId={userId}
+                                    onToggle={(emoji) => handleToggleReaction(item.id, emoji)}
+                                    readOnly={retro.status === 'CLOSED'}
+                                />
+                                )}
+
+                                {retro.status === 'VOTING' && (
+                                <div className="flex flex-col gap-0.5 w-full">
                                     <span className="text-[10px] uppercase font-bold text-muted-foreground">Your Votes</span>
-                                    <div className="flex flex-wrap gap-1">
+                                    <div className="flex flex-wrap gap-0.5">
                                         {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((star) => (
                                             <button
                                                 key={star}
@@ -1085,10 +1362,6 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                                             </button>
                                         ))}
                                     </div>
-                                </div>
-                                ) : retro.status !== 'INPUT' && (
-                                <div className="flex items-center gap-1 text-sm font-bold text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 px-2 py-1 rounded-md w-fit">
-                                    <Star className="w-3 h-3 fill-current" /> {totalItemVotes}
                                 </div>
                                 )}
                             </div>
