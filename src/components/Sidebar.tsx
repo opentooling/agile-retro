@@ -26,6 +26,7 @@ interface SidebarProps {
     image?: string | null
   }
   keycloakIssuer?: string
+  keycloakClientId?: string
 }
 
 interface NavItemProps {
@@ -68,7 +69,7 @@ function NavItem({ href, icon: Icon, label, isActive, isCollapsed }: NavItemProp
 }
 
 
-export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
+export function Sidebar({ user, keycloakIssuer, keycloakClientId }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -119,14 +120,22 @@ export function Sidebar({ user, keycloakIssuer }: SidebarProps) {
   const handleSignOut = async () => {
     const customSession = session as any
     if (customSession?.provider === 'keycloak' && keycloakIssuer) {
-        const idToken = customSession.id_token
-        let logoutUrl = `${keycloakIssuer}/protocol/openid-connect/logout?post_logout_redirect_uri=${encodeURIComponent(window.location.origin)}`
-        
-        if (idToken) {
-            logoutUrl += `&id_token_hint=${idToken}`
-        }
-        
-        await signOut({ redirectTo: logoutUrl })
+        // RP-initiated logout: end the Keycloak SSO session too, not just ours.
+        // Keycloak only honours post_logout_redirect_uri when the request also
+        // identifies the client, via id_token_hint or (failing that) client_id.
+        const params = new URLSearchParams({ post_logout_redirect_uri: window.location.origin })
+        if (customSession.id_token) params.set('id_token_hint', customSession.id_token)
+        else if (keycloakClientId) params.set('client_id', keycloakClientId)
+        const logoutUrl = `${keycloakIssuer.replace(/\/$/, '')}/protocol/openid-connect/logout?${params}`
+
+        // Clear our session, then navigate to Keycloak ourselves. We can't hand
+        // this URL to signOut({ redirectTo }): Auth.js's default `redirect`
+        // callback discards any off-origin URL and returns the app's base URL
+        // instead, so the browser never reaches Keycloak and its SSO session
+        // survives — the next sign-in then silently re-authenticates with no
+        // prompt, which looks like logout not working at all.
+        await signOut({ redirect: false })
+        window.location.href = logoutUrl
     } else {
         await signOut()
     }

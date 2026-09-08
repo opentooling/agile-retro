@@ -1,5 +1,7 @@
 import {
   parseGroupsClaim,
+  claimsFromIdToken,
+  identityFromClaims,
   authUserFromSession,
   authUserFromToken,
   canViewBoard,
@@ -187,5 +189,88 @@ describe('canEditItem', () => {
 
   it('falls back to matching author by username for legacy items', () => {
     expect(canEditItem(makeUser(), teamBoard, { userId: 'legacy-id', username: 'Bob' })).toBe(true)
+  })
+})
+
+/** Build an unsigned JWT whose payload carries the given claims. */
+function fakeIdToken(claims: Record<string, unknown>): string {
+  const b64url = (o: unknown) =>
+    Buffer.from(JSON.stringify(o), 'utf8').toString('base64')
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return `${b64url({ alg: 'RS256' })}.${b64url(claims)}.signature`
+}
+
+describe('claimsFromIdToken', () => {
+  it('decodes the payload of a JWT, including non-ASCII group names', () => {
+    const token = fakeIdToken({ user_roles: ['/Eng/Plattform-Grün'], sub: 'abc' })
+    expect(claimsFromIdToken(token)).toEqual({ user_roles: ['/Eng/Plattform-Grün'], sub: 'abc' })
+  })
+
+  it('returns null for anything that is not a decodable JWT', () => {
+    expect(claimsFromIdToken(undefined)).toBeNull()
+    expect(claimsFromIdToken('not-a-jwt')).toBeNull()
+    expect(claimsFromIdToken('a.!!!not-base64!!!.c')).toBeNull()
+    expect(claimsFromIdToken(fakeIdToken('a string, not an object' as never))).toBeNull()
+  })
+})
+
+describe('identityFromClaims', () => {
+  it('reads the admin realm role and the configured groups claim', () => {
+    expect(
+      identityFromClaims({ realm_access: { roles: ['user', 'admin'] }, user_roles: ['/Eng/Platform'] })
+    ).toEqual({ isAdminRole: true, groups: ['/Eng/Platform'] })
+  })
+
+  it('falls back to the `groups` claim and defaults to empty', () => {
+    expect(identityFromClaims({ groups: ['/Eng/Platform'] }).groups).toEqual(['/Eng/Platform'])
+    expect(identityFromClaims(null)).toEqual({ isAdminRole: false, groups: [] })
+    expect(identityFromClaims({}).isAdminRole).toBe(false)
+  })
+
+  it('honours GROUPS_CLAIM', () => {
+    const prev = process.env.GROUPS_CLAIM
+    process.env.GROUPS_CLAIM = 'my_groups'
+    try {
+      expect(identityFromClaims({ my_groups: ['/Eng/Platform'] }).groups).toEqual(['/Eng/Platform'])
+    } finally {
+      if (prev === undefined) delete process.env.GROUPS_CLAIM
+      else process.env.GROUPS_CLAIM = prev
+    }
+  })
+})
+
+describe('recovering identity from a stored ID token', () => {
+  const idToken = fakeIdToken({
+    realm_access: { roles: ['admin'] },
+    user_roles: ['/Eng/Platform'],
+  })
+
+  it('recovers groups for a session that predates group support', () => {
+    // No `roles` / `groups` keys at all — what a pre-feature cookie looks like.
+    const u = authUserFromSession({ user: { name: 'Bob', email: 'bob@example.com' }, id_token: idToken })
+    expect(u?.groups).toEqual(['/Eng/Platform'])
+    expect(u?.isAdmin).toBe(true)
+    expect(canViewBoard(u, teamBoard)).toBe(true)
+  })
+
+  it('recovers groups on the socket path too', () => {
+    const u = authUserFromToken({ email: 'bob@example.com', roles: ['user'], id_token: idToken })
+    expect(u?.groups).toEqual(['/Eng/Platform'])
+  })
+
+  it('prefers groups already on the session over the ID token', () => {
+    const u = authUserFromSession({
+      user: { email: 'bob@example.com' },
+      groups: ['/Eng/Other'],
+      id_token: idToken,
+    })
+    expect(u?.groups).toEqual(['/Eng/Other'])
+  })
+
+  it('is a no-op when there is no ID token or it carries no groups', () => {
+    expect(authUserFromSession({ user: { email: 'bob@example.com' } })?.groups).toEqual([])
+    expect(
+      authUserFromSession({ user: { email: 'bob@example.com' }, id_token: fakeIdToken({ sub: 'x' }) })?.groups
+    ).toEqual([])
   })
 })

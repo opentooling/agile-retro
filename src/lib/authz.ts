@@ -82,6 +82,70 @@ export function parseGroupsClaim(raw: unknown): string[] {
   return [];
 }
 
+/** The token claim the user's groups are read from (GROUPS_CLAIM, default `user_roles`). */
+export function groupsClaimName(): string {
+  return process.env.GROUPS_CLAIM || "user_roles";
+}
+
+/**
+ * Base64url-decode a JWT segment. Built on `atob` + `decodeURIComponent` only:
+ * `Buffer` doesn't exist in the Edge runtime (where the middleware runs the
+ * auth callbacks) and `TextDecoder` isn't a global in the jsdom test
+ * environment, but these two are available everywhere this code runs.
+ */
+function base64UrlDecode(segment: string): string | null {
+  try {
+    const b64 = segment.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    // atob yields one latin1 char per byte; percent-encode those bytes and let
+    // decodeURIComponent read them back as UTF-8, so non-ASCII group names
+    // survive the round trip.
+    const bytes = atob(padded);
+    return decodeURIComponent(
+      Array.from(bytes, (c) => `%${c.charCodeAt(0).toString(16).padStart(2, "0")}`).join("")
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the claims out of a stored OIDC ID token without verifying it. Safe
+ * here because the token only ever reaches us inside our own AUTH_SECRET-
+ * encrypted session cookie — we are recovering claims we already trusted at
+ * sign-in, not accepting a token from a caller.
+ */
+export function claimsFromIdToken(idToken: unknown): Record<string, unknown> | null {
+  if (typeof idToken !== "string") return null;
+  const parts = idToken.split(".");
+  if (parts.length < 2) return null;
+  const json = base64UrlDecode(parts[1]);
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract the identity we care about from a set of OIDC claims — either a
+ * NextAuth `profile` or a decoded ID-token payload: the global `admin` realm
+ * role, and the user's groups (from GROUPS_CLAIM, falling back to `groups`).
+ */
+export function identityFromClaims(claims: Record<string, any> | null | undefined): {
+  isAdminRole: boolean;
+  groups: string[];
+} {
+  if (!claims) return { isAdminRole: false, groups: [] };
+  const realmRoles = claims.realm_access?.roles;
+  return {
+    isAdminRole: Array.isArray(realmRoles) && realmRoles.includes("admin"),
+    groups: parseGroupsClaim(claims[groupsClaimName()] ?? claims.groups),
+  };
+}
+
 /**
  * Does any of the user's groups satisfy the configured group list? A configured
  * value matches a user group when they are equal after normalization, or when
@@ -106,11 +170,16 @@ function groupsMatch(userGroups: string[], configured: string[] | undefined): bo
  */
 export function authUserFromSession(session: unknown): AuthUser | null {
   const s = session as
-    | { user?: { name?: string | null; email?: string | null }; roles?: string[]; groups?: string[] }
+    | {
+        user?: { name?: string | null; email?: string | null };
+        roles?: string[];
+        groups?: string[];
+        id_token?: string;
+      }
     | null
     | undefined;
   if (!s || !s.user) return null;
-  return buildUser(s.user.name ?? null, s.user.email ?? null, null, s.roles, s.groups);
+  return buildUser(s.user.name ?? null, s.user.email ?? null, null, s.roles, s.groups, s.id_token);
 }
 
 /**
@@ -120,11 +189,18 @@ export function authUserFromSession(session: unknown): AuthUser | null {
  */
 export function authUserFromToken(token: unknown): AuthUser | null {
   const t = token as
-    | { name?: string | null; email?: string | null; sub?: string | null; roles?: string[]; groups?: string[] }
+    | {
+        name?: string | null;
+        email?: string | null;
+        sub?: string | null;
+        roles?: string[];
+        groups?: string[];
+        id_token?: string;
+      }
     | null
     | undefined;
   if (!t) return null;
-  return buildUser(t.name ?? null, t.email ?? null, t.sub ?? null, t.roles, t.groups);
+  return buildUser(t.name ?? null, t.email ?? null, t.sub ?? null, t.roles, t.groups, t.id_token);
 }
 
 /**
@@ -148,12 +224,26 @@ function buildUser(
   email: string | null,
   sub: string | null,
   roles: unknown,
-  groups: unknown
+  groups: unknown,
+  idToken?: unknown
 ): AuthUser | null {
   const id = norm(email) || norm(name) || norm(sub);
   if (!id) return null;
-  const userGroups = parseGroupsClaim(groups);
-  const hasAdminRole = Array.isArray(roles) && roles.includes("admin");
+  let userGroups = parseGroupsClaim(groups);
+  let hasAdminRole = Array.isArray(roles) && roles.includes("admin");
+
+  // Recover identity from the stored ID token when the session carries no
+  // groups. Sessions minted before group support existed (and any sign-in
+  // whose `account` never reached the jwt callback) have no `groups` key at
+  // all, and the jwt callback only populates it on the sign-in call — so
+  // without this such a session would be permanently group-less until the
+  // user re-authenticated. The ID token has been stored on every session
+  // since the app's first release, so its claims are available here.
+  if (userGroups.length === 0 && idToken) {
+    const recovered = identityFromClaims(claimsFromIdToken(idToken));
+    userGroups = recovered.groups;
+    hasAdminRole = hasAdminRole || recovered.isAdminRole;
+  }
   return {
     id,
     name,

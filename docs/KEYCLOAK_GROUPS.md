@@ -165,6 +165,8 @@ Global super-users can be granted two ways (either is sufficient):
 | Picker shows nothing / free-text only | Service account not configured or lacks `query-groups`/`view-realm`; `/api/keycloak/groups` returns `configured: false`. |
 | Works for Keycloak users but not Google | Expected — group-based access needs Keycloak. Google logins get only the `user` role and can use open boards. |
 | Team is unexpectedly locked to admins | The team has no groups configured (fail-closed). Add member/admin groups in Team settings. |
+| Prod logs only ever show `JWT Callback: No account` | Expected for most requests — `account` is set only on the **sign-in** call, and the middleware re-runs the callback on every page/RSC request. If `Account present` never appears at all: users may still be on session cookies minted before a deploy (rotate `AUTH_SECRET` or have them sign out/in), the OAuth callback may be failing before it runs (grep the logs for `state cookie`, `PKCE`, `OAuthCallbackError`, `UntrustedHost` — usually a wrong `AUTH_URL` / missing `AUTH_TRUST_HOST` behind the route), or you may be reading logs from a different replica. |
+| Sign-in works but no groups | The pod logs a `Keycloak sign-in produced no groups` warning listing the claim names actually received — compare them against `GROUPS_CLAIM` (step 2). |
 
 ---
 
@@ -172,8 +174,13 @@ Global super-users can be granted two ways (either is sufficient):
 
 - `src/auth.ts` — reads the groups claim (`user_roles` by default, via
   `GROUPS_CLAIM`) into `session.groups`; keeps the global
-  `admin` realm role.
-- `src/lib/authz.ts` — `parseGroupsClaim()` and the permission helpers
+  `admin` realm role. Falls back to decoding the raw ID token when the profile
+  doesn't carry the claim, and warns (claim names only) when a Keycloak sign-in
+  yields no groups.
+- `src/lib/authz.ts` — `parseGroupsClaim()`, `claimsFromIdToken()` /
+  `identityFromClaims()` (which recover groups from the stored ID token when a
+  session carries none — e.g. one minted before group support existed), and the
+  permission helpers
   (`canViewBoard`, `canManageBoard`, `canEditItem`) that match groups against a
   team's `memberGroups` / `adminGroups` / `createdBy`.
 - `src/app/actions.ts` — `createTeam` (records the creator, sets initial groups)

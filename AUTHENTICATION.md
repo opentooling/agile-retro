@@ -94,6 +94,19 @@ To ensure **Federated Logout** works correctly (i.e., signing out of the app als
 2.  Add your application's URL (e.g., `http://localhost:3000` or `https://your-app.com`) or simply `+`.
 3.  Ensure **Front-Channel Logout** is enabled if applicable, though the app uses the OIDC logout endpoint directly.
 
+The sign-out button clears the app session and then sends the browser to
+Keycloak's `end_session` endpoint with `id_token_hint` (falling back to
+`client_id`), so the Keycloak SSO session ends too.
+
+> **Symptom to watch for:** if signing out returns you to the login page but
+> clicking "Sign in with Keycloak" logs you straight back in without a prompt,
+> the Keycloak SSO session survived. Either the post-logout redirect URI isn't
+> registered (step 2 above), or the browser never reached Keycloak at all —
+> note that `signOut({ redirectTo })` **cannot** be used for this, because
+> Auth.js's default `redirect` callback silently discards off-origin URLs and
+> returns the app's own base URL. See `handleSignOut` in
+> `src/components/Sidebar.tsx`.
+
 ## Authorization
 
 The application implements team-based authorization driven by identity-provider

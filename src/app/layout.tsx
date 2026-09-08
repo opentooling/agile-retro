@@ -47,6 +47,7 @@ export default async function RootLayout({
             <ClientLayout 
               session={session} 
               keycloakIssuer={process.env.AUTH_KEYCLOAK_ISSUER}
+              keycloakClientId={process.env.AUTH_KEYCLOAK_ID}
             >
               {children}
             </ClientLayout>
