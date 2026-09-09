@@ -70,6 +70,9 @@ export type Retrospective = {
   // items. Prevents the first few cards anchoring everyone else's thinking.
   // Enforced server-side — the hidden items never reach the other clients.
   blindInput: boolean;
+  // Optional retention: the board and everything in it is deleted once this
+  // passes. Null means keep indefinitely (the default).
+  expiresAt: Date | null;
 };
 
 export type Column = {
@@ -150,6 +153,7 @@ export type CreateRetroInput = {
   reviewDuration: number | null;
   isAnonymous: boolean;
   blindInput: boolean;
+  expiresAt: Date | null;
   phaseStartTime: Date;
 };
 
@@ -188,6 +192,10 @@ export interface DbApi {
   ): MaybePromise<Retrospective>;
   updateRetroStatus(id: string, status: string, phaseStartTime: Date): MaybePromise<RetroFull | null>;
   updateRetroDurations(id: string, durations: RetroDurations): MaybePromise<RetroFull | null>;
+  /** Delete a board and everything belonging to it (items, votes, actions…). */
+  deleteRetro(id: string): MaybePromise<void>;
+  /** Ids of boards whose retention has elapsed as of `now`. */
+  listExpiredRetroIds(now: Date): MaybePromise<string[]>;
   listRetrospectives(
     filter: RetroFilter,
     take?: number

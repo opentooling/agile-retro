@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS "Retrospective" (
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "isAnonymous" BOOLEAN NOT NULL DEFAULT false,
     "blindInput" BOOLEAN NOT NULL DEFAULT false,
+    "expiresAt" TIMESTAMPTZ,
     "inputDuration" INTEGER,
     "votingDuration" INTEGER,
     "reviewDuration" INTEGER,
@@ -124,6 +125,8 @@ ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "imageData" TEXT;
 ALTER TABLE "Retrospective" ADD COLUMN IF NOT EXISTS "blindInput" BOOLEAN NOT NULL DEFAULT false;
 -- Board formats other than the classic three columns need an explicit order.
 ALTER TABLE "Column" ADD COLUMN IF NOT EXISTS "order" INTEGER NOT NULL DEFAULT 0;
+-- Optional retention: boards are deleted once "expiresAt" passes.
+ALTER TABLE "Retrospective" ADD COLUMN IF NOT EXISTS "expiresAt" TIMESTAMPTZ;
 `;
 
 // Cache the pool and the one-time schema init on globalThis so dev/HMR and
@@ -190,8 +193,17 @@ async function pool(): Promise<Pool> {
   if (!globalForDb.__pgInit) {
     // When a migration Job owns DDL, the app must not attempt it — its database
     // user may not even be permitted to.
-    globalForDb.__pgInit =
+    const init =
       process.env.DB_SKIP_SCHEMA_BOOTSTRAP === "true" ? Promise.resolve() : applySchema();
+    // Never cache a *failed* init. The app and its database routinely start
+    // together, so the first query can land before Postgres is accepting
+    // connections; caching that rejection left the process permanently broken
+    // — every later query awaited the same rejected promise — until it was
+    // restarted. Clearing it lets the next caller try again.
+    globalForDb.__pgInit = init.catch((err) => {
+      globalForDb.__pgInit = undefined;
+      throw err;
+    });
   }
   await globalForDb.__pgInit;
   return p;
@@ -298,6 +310,7 @@ const mapRetro = (r: Row): Retrospective => ({
   createdAt: r.createdAt,
   isAnonymous: r.isAnonymous,
   blindInput: r.blindInput ?? false,
+  expiresAt: r.expiresAt ?? null,
   inputDuration: r.inputDuration,
   votingDuration: r.votingDuration,
   reviewDuration: r.reviewDuration,
@@ -502,9 +515,9 @@ export async function createRetrospectiveWithColumns(
   return withTransaction(async (client) => {
     const res = await client.query(
       `INSERT INTO "Retrospective"
-        ("id","title","status","tags","creator","isAnonymous","blindInput",
+        ("id","title","status","tags","creator","isAnonymous","blindInput","expiresAt",
          "inputDuration","votingDuration","reviewDuration","phaseStartTime","teamId")
-       VALUES ($1,$2,'INPUT',$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       VALUES ($1,$2,'INPUT',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        RETURNING *`,
       [
         id,
@@ -513,6 +526,7 @@ export async function createRetrospectiveWithColumns(
         data.creator,
         data.isAnonymous,
         data.blindInput,
+        data.expiresAt,
         data.inputDuration,
         data.votingDuration,
         data.reviewDuration,
@@ -833,6 +847,31 @@ export async function countOpenActions(retroFilter: RetroFilter): Promise<number
 // ---------------------------------------------------------------------------
 
 /** Delete all data. Used by the clean-db script. */
+/**
+ * Delete a board and everything belonging to it. The foreign keys are
+ * ON DELETE RESTRICT, so children go first, deepest first.
+ */
+export async function deleteRetro(id: string): Promise<void> {
+  await withTransaction(async (client) => {
+    const cols = `SELECT "id" FROM "Column" WHERE "retrospectiveId" = $1`;
+    const items = `SELECT "id" FROM "Item" WHERE "columnId" IN (${cols})`;
+    await client.query(`DELETE FROM "Reaction" WHERE "itemId" IN (${items})`, [id]);
+    await client.query(`DELETE FROM "Vote" WHERE "itemId" IN (${items})`, [id]);
+    await client.query(`DELETE FROM "Item" WHERE "columnId" IN (${cols})`, [id]);
+    await client.query(`DELETE FROM "Column" WHERE "retrospectiveId" = $1`, [id]);
+    await client.query(`DELETE FROM "ActionItem" WHERE "retrospectiveId" = $1`, [id]);
+    await client.query(`DELETE FROM "Retrospective" WHERE "id" = $1`, [id]);
+  });
+}
+
+export async function listExpiredRetroIds(now: Date): Promise<string[]> {
+  const rows = await query(
+    `SELECT "id" FROM "Retrospective" WHERE "expiresAt" IS NOT NULL AND "expiresAt" <= $1`,
+    [now]
+  );
+  return rows.map((r) => r.id as string);
+}
+
 export async function clearDatabase(): Promise<void> {
   await query(
     `TRUNCATE "Reaction","Vote","Item","Column","ActionItem","Retrospective","Team" RESTART IDENTITY CASCADE`

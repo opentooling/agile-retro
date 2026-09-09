@@ -8,6 +8,7 @@ const getToken = (NextAuthJwt as any).getToken as (opts: any) => Promise<any>;
 import * as db from "./src/lib/db";
 import { redactRetroFull, applyBlindInput } from "./src/lib/sanitize";
 import { pushActionDoneState } from "./src/lib/jira-sync";
+import { purgeExpiredRetros } from "./src/lib/purge";
 import {
     authUserFromToken,
     canViewBoard,
@@ -81,8 +82,32 @@ const port = 3000;
 const app = next({ dev, hostname, port });
 const handler = app.getRequestHandler();
 
+/**
+ * Retention sweep. Boards given a TTL at creation are deleted once it elapses;
+ * without this nothing would ever act on `expiresAt`. Runs on startup and then
+ * hourly — the exact moment of deletion doesn't matter, only that it happens.
+ */
+const PURGE_INTERVAL_MS = 60 * 60 * 1000;
+const PURGE_START_DELAY_MS = 30 * 1000;
+async function sweepExpiredBoards(): Promise<void> {
+    try {
+        const deleted = await purgeExpiredRetros();
+        if (deleted.length > 0) {
+            console.log(`Retention sweep: deleted ${deleted.length} expired board(s)`);
+        }
+    } catch (err) {
+        console.error("Retention sweep failed:", err);
+    }
+}
+
 app.prepare().then(() => {
     const httpServer = createServer(handler);
+
+    // Delay the first sweep: the database container often isn't accepting
+    // connections yet when this process starts, and an immediate sweep just
+    // logs a failure nobody needs to see.
+    setTimeout(() => void sweepExpiredBoards(), PURGE_START_DELAY_MS).unref();
+    setInterval(() => void sweepExpiredBoards(), PURGE_INTERVAL_MS).unref();
 
     const io = new Server(httpServer);
 

@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS "Retrospective" (
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "isAnonymous" BOOLEAN NOT NULL DEFAULT 0,
     "blindInput" BOOLEAN NOT NULL DEFAULT 0,
+    "expiresAt" DATETIME,
     "inputDuration" INTEGER,
     "votingDuration" INTEGER,
     "reviewDuration" INTEGER,
@@ -141,6 +142,7 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE "ActionItem" ADD COLUMN "externalKey" TEXT`,
   `ALTER TABLE "Retrospective" ADD COLUMN "blindInput" BOOLEAN NOT NULL DEFAULT 0`,
   `ALTER TABLE "Column" ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE "Retrospective" ADD COLUMN "expiresAt" DATETIME`,
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -182,6 +184,7 @@ function migrateRetroTeamIdNullable(db: DatabaseSync): void {
           "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           "isAnonymous" BOOLEAN NOT NULL DEFAULT 0,
           "blindInput" BOOLEAN NOT NULL DEFAULT 0,
+          "expiresAt" DATETIME,
           "inputDuration" INTEGER,
           "votingDuration" INTEGER,
           "reviewDuration" INTEGER,
@@ -190,9 +193,9 @@ function migrateRetroTeamIdNullable(db: DatabaseSync): void {
           CONSTRAINT "Retrospective_teamId_fkey" FOREIGN KEY ("teamId") REFERENCES "Team" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
       );
       INSERT INTO "Retrospective_new"
-        ("id","title","status","tags","creator","createdAt","isAnonymous","blindInput",
+        ("id","title","status","tags","creator","createdAt","isAnonymous","blindInput","expiresAt",
          "inputDuration","votingDuration","reviewDuration","phaseStartTime","teamId")
-        SELECT "id","title","status","tags","creator","createdAt","isAnonymous","blindInput",
+        SELECT "id","title","status","tags","creator","createdAt","isAnonymous","blindInput","expiresAt",
                "inputDuration","votingDuration","reviewDuration","phaseStartTime","teamId"
         FROM "Retrospective";
       DROP TABLE "Retrospective";
@@ -306,6 +309,7 @@ const mapRetro = (r: Row): Retrospective => ({
   createdAt: toDate(r.createdAt),
   isAnonymous: toBool(r.isAnonymous),
   blindInput: toBool(r.blindInput),
+  expiresAt: toDateOrNull(r.expiresAt),
   inputDuration: r.inputDuration ?? null,
   votingDuration: r.votingDuration ?? null,
   reviewDuration: r.reviewDuration ?? null,
@@ -490,9 +494,9 @@ export function createRetrospectiveWithColumns(
   return transaction(() => {
     db.prepare(
       `INSERT INTO "Retrospective"
-        ("id","title","status","tags","creator","createdAt","isAnonymous","blindInput",
+        ("id","title","status","tags","creator","createdAt","isAnonymous","blindInput","expiresAt",
          "inputDuration","votingDuration","reviewDuration","phaseStartTime","teamId")
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).run(
       id,
       data.title,
@@ -502,6 +506,7 @@ export function createRetrospectiveWithColumns(
       createdAt,
       data.isAnonymous ? 1 : 0,
       data.blindInput ? 1 : 0,
+      data.expiresAt ? dateToDb(data.expiresAt) : null,
       data.inputDuration,
       data.votingDuration,
       data.reviewDuration,
@@ -829,6 +834,32 @@ export function countOpenActions(retroFilter: RetroFilter): number {
 // ---------------------------------------------------------------------------
 
 /** Delete all data (respecting FK order). Used by the clean-db script. */
+/**
+ * Delete a board and everything belonging to it. The foreign keys are
+ * ON DELETE RESTRICT, so children go first, deepest first.
+ */
+export function deleteRetro(id: string): void {
+  const db = getDb();
+  transaction(() => {
+    const cols = `SELECT "id" FROM "Column" WHERE "retrospectiveId" = ?`;
+    const items = `SELECT "id" FROM "Item" WHERE "columnId" IN (${cols})`;
+    db.prepare(`DELETE FROM "Reaction" WHERE "itemId" IN (${items})`).run(id);
+    db.prepare(`DELETE FROM "Vote" WHERE "itemId" IN (${items})`).run(id);
+    db.prepare(`DELETE FROM "Item" WHERE "columnId" IN (${cols})`).run(id);
+    db.prepare(`DELETE FROM "Column" WHERE "retrospectiveId" = ?`).run(id);
+    db.prepare(`DELETE FROM "ActionItem" WHERE "retrospectiveId" = ?`).run(id);
+    db.prepare(`DELETE FROM "Retrospective" WHERE "id" = ?`).run(id);
+  });
+}
+
+export function listExpiredRetroIds(now: Date): string[] {
+  return (
+    getDb()
+      .prepare(`SELECT "id" FROM "Retrospective" WHERE "expiresAt" IS NOT NULL AND "expiresAt" <= ?`)
+      .all(dateToDb(now)) as Row[]
+  ).map((r) => r.id as string);
+}
+
 export function clearDatabase(): void {
   transaction(() => {
     const db = getDb();

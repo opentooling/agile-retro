@@ -9,6 +9,7 @@
     "db:clean": "NODE_OPTIONS=--experimental-sqlite tsx scripts/clean-db.ts",
     "diag:keycloak": "tsx scripts/diagnose-keycloak.ts",
     "db:migrate": "tsx scripts/migrate-postgres.ts",
+    "db:purge": "NODE_OPTIONS=--experimental-sqlite tsx scripts/purge-expired.ts",
     "lint": "eslint",
     "test": "jest"
   },

@@ -5,9 +5,11 @@ import type { Team } from '@/lib/db/types'
 import { getPlugin } from '@/lib/plugins/registry'
 import { pushActionDoneState } from '@/lib/jira-sync'
 import { auth } from '@/auth'
-import { authUserFromSession, isTeamAdmin, canViewBoard, type RetroRef } from '@/lib/authz'
+import { authUserFromSession, isTeamAdmin, canViewBoard, canManageBoard, type RetroRef } from '@/lib/authz'
 import { revalidatePath } from 'next/cache'
 import { templateById } from '@/lib/retro-templates'
+import { RETENTION_OPTIONS, expiryFromRetention } from '@/lib/retention'
+import { purgeExpiredRetros } from '@/lib/purge'
 
 /** Trim, drop empties and de-duplicate a list of group identifiers. */
 function sanitizeGroups(groups: string[] | undefined): string[] {
@@ -60,6 +62,9 @@ export async function createRetrospective(formData: FormData) {
     const reviewDuration = parseIntSafe(formData.get('reviewDuration'))
     const isAnonymous = formData.get('isAnonymous') === 'on'
     const blindInput = formData.get('blindInput') === 'on'
+    // Optional retention ("TTL"): the board deletes itself this long after
+    // creation. Absent or "never" keeps it indefinitely.
+    const expiresAt = expiryFromRetention(formData.get('retentionDays')?.toString(), new Date())
     // The format decides the board's starting columns; unknown ids fall back to
     // the classic three-column layout.
     const template = templateById(formData.get('template')?.toString())
@@ -87,6 +92,7 @@ export async function createRetrospective(formData: FormData) {
                 reviewDuration,
                 isAnonymous,
                 blindInput,
+                expiresAt,
                 phaseStartTime: new Date(), // Start input phase immediately
             },
             template.columns
@@ -347,6 +353,55 @@ export async function completeCarriedOverAction(actionId: string, completed: boo
     await db.updateActionCompleted(actionId, completed)
     await pushActionDoneState(actionId, completed)
     revalidatePath('/actions')
+}
+
+/**
+ * Delete a board and everything on it.
+ *
+ * Restricted to the people who are already trusted to run the board: its
+ * creator (the facilitator), a team-admin of its team, or a global admin.
+ * Deliberately not open to participants — this destroys other people's
+ * contributions and cannot be undone.
+ */
+export async function deleteRetrospective(retroId: string): Promise<void> {
+    if (!retroId) throw new Error('Retrospective id is required')
+
+    const retro = await db.getRetro(retroId)
+    if (!retro) throw new Error('Retrospective not found')
+
+    const team = retro.teamId ? await db.getTeam(retro.teamId) : null
+    const authUser = authUserFromSession(await auth())
+    const ref: RetroRef = { teamId: retro.teamId, creator: retro.creator, team }
+
+    // canManageBoard is exactly this policy: facilitator, team-admin or admin.
+    if (!canManageBoard(authUser, ref)) {
+        throw new Error('Only the board creator, a team admin or an admin can delete this board')
+    }
+
+    await db.deleteRetro(retroId)
+    revalidatePath('/')
+    revalidatePath('/history')
+    revalidatePath('/actions')
+}
+
+/**
+ * Delete every board whose retention has elapsed. Safe to call repeatedly. The
+ * sweep itself lives in lib/purge.ts so the Socket.IO server and the standalone
+ * script can run it too, without a Next.js request context.
+ */
+export async function purgeExpiredRetrospectives(): Promise<number> {
+    const deleted = await purgeExpiredRetros()
+    if (deleted.length > 0) {
+        revalidatePath('/')
+        revalidatePath('/history')
+        revalidatePath('/actions')
+    }
+    return deleted.length
+}
+
+/** Retention choices offered in the create dialog. */
+export async function getRetentionOptions() {
+    return RETENTION_OPTIONS
 }
 
 export async function getUniqueTags() {

@@ -36,6 +36,7 @@ import {
 import { useSession } from "next-auth/react"
 import { TeamMark } from "@/components/TeamMark"
 import { RETRO_TEMPLATES, DEFAULT_TEMPLATE_ID } from "@/lib/retro-templates"
+import { RETENTION_OPTIONS, DEFAULT_RETENTION } from "@/lib/retention"
 
 export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: string }) {
   const [open, setOpen] = useState(false)
@@ -48,6 +49,7 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
   const [openTeamCombobox, setOpenTeamCombobox] = useState(false)
   const [templateId, setTemplateId] = useState<string>(DEFAULT_TEMPLATE_ID)
   const [openTemplateCombobox, setOpenTemplateCombobox] = useState(false)
+  const [retention, setRetention] = useState<string>(DEFAULT_RETENTION)
   const [creator, setCreator] = useState("")
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
@@ -88,6 +90,7 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
     const formData = new FormData(event.currentTarget)
     formData.set('teamId', selectedTeamId)
     formData.set('template', templateId)
+    formData.set('retentionDays', retention)
     // Append selected tags to formData
     formData.set('tags', selectedTags.join(', '))
 
@@ -392,6 +395,28 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                     <Label htmlFor="isAnonymous" className="font-normal text-muted-foreground">
                         Hide usernames on cards
                     </Label>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-4 items-start gap-4">
+                <Label htmlFor="retentionDays" className="text-right pt-1">Retention</Label>
+                <div className="col-span-3 flex flex-col gap-1">
+                    <select
+                        id="retentionDays"
+                        name="retentionDays"
+                        value={retention}
+                        onChange={(e) => setRetention(e.target.value)}
+                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                    >
+                        {RETENTION_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground">
+                        {retention === 'never'
+                            ? 'The board is kept until someone deletes it.'
+                            : 'The board and everything on it is deleted automatically. This cannot be undone.'}
+                    </p>
                 </div>
             </div>
 
