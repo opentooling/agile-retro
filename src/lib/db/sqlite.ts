@@ -13,10 +13,11 @@
  */
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
+import { engagementFromRows, phaseDurationsFromRows } from "./aggregate";
 import type {
   Team, TeamJiraConfig, TeamGroups, TeamCreateOptions, Retrospective, Column, Vote, Reaction, Item, ActionItem,
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
-  CreateColumnInput, CreateRetroInput, ActionItemWithRetro,
+  CreateColumnInput, CreateRetroInput, ActionItemWithRetro, TeamAnalyticsRaw,
 } from "./types";
 import path from "node:path";
 import fs from "node:fs";
@@ -91,6 +92,14 @@ CREATE TABLE IF NOT EXISTS "Item" (
     CONSTRAINT "Item_columnId_fkey" FOREIGN KEY ("columnId") REFERENCES "Column" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS "PhaseEvent" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "retrospectiveId" TEXT NOT NULL,
+    "phase" TEXT NOT NULL,
+    "enteredAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "PhaseEvent_retrospectiveId_fkey" FOREIGN KEY ("retrospectiveId") REFERENCES "Retrospective" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS "Vote" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "itemId" TEXT NOT NULL,
@@ -117,6 +126,8 @@ CREATE TABLE IF NOT EXISTS "ActionItem" (
     "dueDate" DATETIME,
     "externalUrl" TEXT,
     "externalKey" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "completedAt" DATETIME,
     CONSTRAINT "ActionItem_retrospectiveId_fkey" FOREIGN KEY ("retrospectiveId") REFERENCES "Retrospective" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 `;
@@ -143,6 +154,8 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE "Retrospective" ADD COLUMN "blindInput" BOOLEAN NOT NULL DEFAULT 0`,
   `ALTER TABLE "Column" ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE "Retrospective" ADD COLUMN "expiresAt" DATETIME`,
+  `ALTER TABLE "ActionItem" ADD COLUMN "createdAt" DATETIME`,
+  `ALTER TABLE "ActionItem" ADD COLUMN "completedAt" DATETIME`,
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -299,6 +312,8 @@ const mapActionItem = (r: Row): ActionItem => ({
   dueDate: toDateOrNull(r.dueDate),
   externalUrl: r.externalUrl ?? null,
   externalKey: r.externalKey ?? null,
+  createdAt: toDateOrNull(r.createdAt),
+  completedAt: toDateOrNull(r.completedAt),
 });
 const mapRetro = (r: Row): Retrospective => ({
   id: r.id,
@@ -525,9 +540,13 @@ export function createRetrospectiveWithColumns(
 
 /** Update status (and reset phaseStartTime). Returns full nested retro. */
 export function updateRetroStatus(id: string, status: string, phaseStartTime: Date): RetroFull | null {
-  getDb()
-    .prepare(`UPDATE "Retrospective" SET "status" = ?, "phaseStartTime" = ? WHERE "id" = ?`)
+  const db = getDb();
+  db.prepare(`UPDATE "Retrospective" SET "status" = ?, "phaseStartTime" = ? WHERE "id" = ?`)
     .run(status, dateToDb(phaseStartTime), id);
+  // Log the transition: phaseStartTime is overwritten each time, so this is the
+  // only record of how long a board actually spent in each phase.
+  db.prepare(`INSERT INTO "PhaseEvent" ("id","retrospectiveId","phase","enteredAt") VALUES (?,?,?,?)`)
+    .run(randomUUID(), id, status, dateToDb(phaseStartTime));
   return getRetroFull(id);
 }
 
@@ -726,14 +745,15 @@ export function createActionItem(data: {
   const db = getDb();
   const id = randomUUID();
   db.prepare(
-    `INSERT INTO "ActionItem" ("id","content","completed","retrospectiveId","assignee","dueDate") VALUES (?,?,?,?,?,?)`
+    `INSERT INTO "ActionItem" ("id","content","completed","retrospectiveId","assignee","dueDate","createdAt") VALUES (?,?,?,?,?,?,?)`
   ).run(
     id,
     data.content,
     0,
     data.retrospectiveId,
     data.assignee ?? null,
-    dateToDb(data.dueDate ?? null)
+    dateToDb(data.dueDate ?? null),
+    dateToDb(new Date())
   );
   return mapActionItem(db.prepare(`SELECT * FROM "ActionItem" WHERE "id" = ?`).get(id) as Row);
 }
@@ -753,7 +773,10 @@ export function getActionItem(id: string): ActionItem | null {
 }
 
 export function updateActionCompleted(id: string, completed: boolean): void {
-  getDb().prepare(`UPDATE "ActionItem" SET "completed" = ? WHERE "id" = ?`).run(completed ? 1 : 0, id);
+  // Record when it closed, and clear it again if the action is reopened.
+  getDb()
+    .prepare(`UPDATE "ActionItem" SET "completed" = ?, "completedAt" = ? WHERE "id" = ?`)
+    .run(completed ? 1 : 0, completed ? dateToDb(new Date()) : null, id);
 }
 
 
@@ -848,6 +871,7 @@ export function deleteRetro(id: string): void {
     db.prepare(`DELETE FROM "Item" WHERE "columnId" IN (${cols})`).run(id);
     db.prepare(`DELETE FROM "Column" WHERE "retrospectiveId" = ?`).run(id);
     db.prepare(`DELETE FROM "ActionItem" WHERE "retrospectiveId" = ?`).run(id);
+    db.prepare(`DELETE FROM "PhaseEvent" WHERE "retrospectiveId" = ?`).run(id);
     db.prepare(`DELETE FROM "Retrospective" WHERE "id" = ?`).run(id);
   });
 }
@@ -858,6 +882,95 @@ export function listExpiredRetroIds(now: Date): string[] {
       .prepare(`SELECT "id" FROM "Retrospective" WHERE "expiresAt" IS NOT NULL AND "expiresAt" <= ?`)
       .all(dateToDb(now)) as Row[]
   ).map((r) => r.id as string);
+}
+
+/**
+ * Read-only aggregates for one team. Mirrors the Postgres implementation; the
+ * row-shaping is shared so the two cannot drift.
+ */
+export function teamAnalytics(teamId: string): TeamAnalyticsRaw {
+  const db = getDb();
+  const retros = db
+    .prepare(`SELECT "id", "createdAt", "isAnonymous" FROM "Retrospective" WHERE "teamId" = ? ORDER BY "createdAt"`)
+    .all(teamId) as Row[];
+
+  const empty: TeamAnalyticsRaw = {
+    retroDates: retros.map((r) => toDate(r.createdAt)),
+    itemsByColumnType: [],
+    actions: { open: 0, done: 0, overdue: 0, daysToClose: [] },
+    engagement: { totalItems: 0, itemsWithSummary: 0, retrosWithItems: 0, voteSpread: [], contributorsPerRetro: [] },
+    phaseDurations: [],
+  };
+  if (retros.length === 0) return empty;
+
+  // node:sqlite has no array binding, so the id list is expanded into
+  // placeholders. The ids are UUIDs we just read back, never user input.
+  const ids = retros.map((r) => r.id as string);
+  const holes = ids.map(() => "?").join(",");
+
+  const itemsByColumnType = (
+    db
+      .prepare(
+        `SELECT c."type" AS type, COUNT(i."id") AS items
+           FROM "Column" c JOIN "Item" i ON i."columnId" = c."id"
+          WHERE c."retrospectiveId" IN (${holes})
+          GROUP BY c."type"`
+      )
+      .all(...ids) as Row[]
+  ).map((r) => ({ type: r.type as string, items: Number(r.items) }));
+
+  const actionRows = db
+    .prepare(`SELECT "completed", "dueDate", "createdAt", "completedAt" FROM "ActionItem" WHERE "retrospectiveId" IN (${holes})`)
+    .all(...ids) as Row[];
+  const now = Date.now();
+  const actions = { open: 0, done: 0, overdue: 0, daysToClose: [] as number[] };
+  for (const a of actionRows) {
+    if (toBool(a.completed)) {
+      actions.done += 1;
+      const created = toDateOrNull(a.createdAt);
+      const closed = toDateOrNull(a.completedAt);
+      if (created && closed) actions.daysToClose.push((closed.getTime() - created.getTime()) / 86_400_000);
+    } else {
+      actions.open += 1;
+      const due = toDateOrNull(a.dueDate);
+      if (due && due.getTime() < now) actions.overdue += 1;
+    }
+  }
+
+  const itemRows = db
+    .prepare(
+      `SELECT c."retrospectiveId" AS retro, i."userId" AS userId,
+              (i."summary" IS NOT NULL AND i."summary" <> '') AS summarised
+         FROM "Column" c JOIN "Item" i ON i."columnId" = c."id"
+        WHERE c."retrospectiveId" IN (${holes})`
+    )
+    .all(...ids) as Row[];
+  const voteRows = db
+    .prepare(
+      `SELECT c."retrospectiveId" AS retro, v."itemId" AS item, SUM(v."count") AS votes
+         FROM "Column" c JOIN "Item" i ON i."columnId" = c."id" JOIN "Vote" v ON v."itemId" = i."id"
+        WHERE c."retrospectiveId" IN (${holes})
+        GROUP BY c."retrospectiveId", v."itemId"`
+    )
+    .all(...ids) as Row[];
+  const phaseRows = db
+    .prepare(
+      `SELECT "retrospectiveId" AS retro, "phase", "enteredAt"
+         FROM "PhaseEvent" WHERE "retrospectiveId" IN (${holes}) ORDER BY "retrospectiveId", "enteredAt"`
+    )
+    .all(...ids) as Row[];
+
+  return {
+    ...empty,
+    itemsByColumnType,
+    actions,
+    engagement: engagementFromRows(
+      retros.map((r) => ({ id: r.id, isAnonymous: toBool(r.isAnonymous) })),
+      itemRows,
+      voteRows
+    ),
+    phaseDurations: phaseDurationsFromRows(phaseRows),
+  };
 }
 
 export function clearDatabase(): void {

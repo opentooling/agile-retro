@@ -62,6 +62,7 @@ export const updateRetroStatus = bind("updateRetroStatus");
 export const updateRetroDurations = bind("updateRetroDurations");
 export const deleteRetro = bind("deleteRetro");
 export const listExpiredRetroIds = bind("listExpiredRetroIds");
+export const teamAnalytics = bind("teamAnalytics");
 export const listRetrospectives = bind("listRetrospectives");
 export const countRetrospectives = bind("countRetrospectives");
 export const getAllTagStrings = bind("getAllTagStrings");

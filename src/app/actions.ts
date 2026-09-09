@@ -10,6 +10,7 @@ import { revalidatePath } from 'next/cache'
 import { templateById } from '@/lib/retro-templates'
 import { RETENTION_OPTIONS, expiryFromRetention } from '@/lib/retention'
 import { purgeExpiredRetros } from '@/lib/purge'
+import { buildInsights, type TeamInsights } from '@/lib/analytics'
 
 /** Trim, drop empties and de-duplicate a list of group identifiers. */
 function sanitizeGroups(groups: string[] | undefined): string[] {
@@ -402,6 +403,28 @@ export async function purgeExpiredRetrospectives(): Promise<number> {
 /** Retention choices offered in the create dialog. */
 export async function getRetentionOptions() {
     return RETENTION_OPTIONS
+}
+
+/**
+ * Insights for one team.
+ *
+ * Gated by the same rule as the team's boards: if you can't open a board you
+ * can't read the aggregates drawn from it. Returns null rather than throwing
+ * when access is refused, so the page can say "pick another team" instead of
+ * erroring.
+ */
+export async function getTeamInsights(teamId: string): Promise<TeamInsights | null> {
+    if (!teamId) return null
+
+    const team = await db.getTeam(teamId)
+    if (!team) return null
+
+    const authUser = authUserFromSession(await auth())
+    // creator is empty: team access doesn't depend on any one board's creator.
+    const ref: RetroRef = { teamId, creator: '', team }
+    if (!canViewBoard(authUser, ref)) return null
+
+    return buildInsights(await db.teamAnalytics(teamId))
 }
 
 export async function getUniqueTags() {

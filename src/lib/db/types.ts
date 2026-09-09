@@ -102,12 +102,29 @@ export type ActionItem = {
   id: string;
   content: string;
   completed: boolean;
+  // When the action was agreed, and when it was ticked off. Without these the
+  // only answerable question is "how many are open right now" — never whether
+  // a team's follow-through is improving, or how long actions take to close.
+  createdAt: Date | null;
+  completedAt: Date | null;
   retrospectiveId: string;
   assignee: string | null;
   dueDate: Date | null;
   // Link to an external task created by a plugin (e.g. a Jira issue).
   externalUrl: string | null;
   externalKey: string | null;
+};
+
+/**
+ * A board entering a phase. `Retrospective.phaseStartTime` only holds the
+ * *current* phase's start — each transition overwrites it — so without this
+ * the time a board actually spent in each phase is unrecoverable.
+ */
+export type PhaseEvent = {
+  id: string;
+  retrospectiveId: string;
+  phase: string;
+  enteredAt: Date;
 };
 
 export type ColumnWithItems = Column & {
@@ -161,6 +178,34 @@ export type ActionItemWithRetro = ActionItem & {
   retrospective: Retrospective & { team: Team | null };
 };
 
+/**
+ * Raw aggregates for a team, straight from the database. Shaping into
+ * percentages and medians happens in lib/analytics.ts so it is testable
+ * without a database and identical across both backends.
+ */
+export type TeamAnalyticsRaw = {
+  retroDates: Date[];
+  itemsByColumnType: { type: string; items: number }[];
+  actions: {
+    open: number;
+    done: number;
+    overdue: number;
+    /** Days between creation and completion, for actions that have both. */
+    daysToClose: number[];
+  };
+  engagement: {
+    totalItems: number;
+    itemsWithSummary: number;
+    retrosWithItems: number;
+    /** Total votes per board, and the votes on that board's top three items. */
+    voteSpread: { total: number; topThree: number }[];
+    /** Distinct contributors per board, non-anonymous boards only. */
+    contributorsPerRetro: number[];
+  };
+  /** Seconds spent in each phase, per board, from the phase log. */
+  phaseDurations: { phase: string; seconds: number }[];
+};
+
 export type RetroDurations = {
   inputDuration?: number;
   votingDuration?: number;
@@ -196,6 +241,10 @@ export interface DbApi {
   deleteRetro(id: string): MaybePromise<void>;
   /** Ids of boards whose retention has elapsed as of `now`. */
   listExpiredRetroIds(now: Date): MaybePromise<string[]>;
+
+  // Analytics
+  /** Aggregates for one team's boards. Read-only; see lib/analytics.ts. */
+  teamAnalytics(teamId: string): MaybePromise<TeamAnalyticsRaw>;
   listRetrospectives(
     filter: RetroFilter,
     take?: number

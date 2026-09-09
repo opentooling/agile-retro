@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users, Calendar, User as UserIcon, ExternalLink, Pencil, Check, X, SmilePlus, EyeOff, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from "@/lib/utils"
+import { columnSentiment } from "@/lib/column-sentiment"
 import { MentionInput, MentionText } from "@/components/Mentions"
 import { createExternalTaskForAction, getCarriedOverActions, completeCarriedOverAction, type CarriedAction } from "@/app/actions"
 import {
@@ -116,27 +117,9 @@ const ACCENT_PALETTE = {
 } as const
 
 export function columnAccent(type: string): { badge: string; border: string } {
-  switch (type) {
-    case 'START':
-    case 'WHAT_WENT_WELL':
-      return ACCENT_PALETTE.positive
-    case 'STOP':
-    case 'WHAT_DIDNT_GO_WELL':
-      return ACCENT_PALETTE.negative
-    case 'CONTINUE':
-    case 'WHAT_SHOULD_BE_IMPROVED':
-      return ACCENT_PALETTE.improve
-  }
-
-  // Every other template encodes its sentiment as a suffix on the type (see
-  // lib/retro-templates.ts), so a new format gets sensible colours without a
-  // per-type entry here. retro-templates.test.ts asserts every shipped column
-  // resolves to a real accent, so a format can't silently render all-grey.
-  if (type.endsWith('_POSITIVE')) return ACCENT_PALETTE.positive
-  if (type.endsWith('_NEGATIVE')) return ACCENT_PALETTE.negative
-  if (type.endsWith('_IMPROVE')) return ACCENT_PALETTE.improve
-  if (type.endsWith('_RISK')) return ACCENT_PALETTE.risk
-  return ACCENT_PALETTE.neutral
+  // Sentiment lives in lib/column-sentiment.ts so analytics buckets a column
+  // exactly the way the board colours it.
+  return ACCENT_PALETTE[columnSentiment(type)]
 }
 
 /** Board phases in order, with the labels people actually say out loud. */

@@ -16,11 +16,12 @@
  * below, which is the single definition of the schema.
  */
 import { Pool, type PoolClient } from "pg";
+import { engagementFromRows, phaseDurationsFromRows } from "./aggregate";
 import { randomUUID } from "node:crypto";
 import type {
   Team, TeamJiraConfig, TeamGroups, TeamCreateOptions, Retrospective, Column, Vote, Reaction, Item, ActionItem,
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
-  CreateColumnInput, CreateRetroInput, ActionItemWithRetro,
+  CreateColumnInput, CreateRetroInput, ActionItemWithRetro, TeamAnalyticsRaw,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -102,8 +103,18 @@ CREATE TABLE IF NOT EXISTS "ActionItem" (
     "assignee" TEXT,
     "dueDate" TIMESTAMPTZ,
     "externalUrl" TEXT,
-    "externalKey" TEXT
+    "externalKey" TEXT,
+    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "completedAt" TIMESTAMPTZ
 );
+
+CREATE TABLE IF NOT EXISTS "PhaseEvent" (
+    "id" TEXT PRIMARY KEY,
+    "retrospectiveId" TEXT NOT NULL REFERENCES "Retrospective" ("id"),
+    "phase" TEXT NOT NULL,
+    "enteredAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "PhaseEvent_retro_idx" ON "PhaseEvent" ("retrospectiveId", "enteredAt");
 
 -- Idempotent column additions for databases created before these columns
 -- existed (CREATE TABLE IF NOT EXISTS never alters an existing table).
@@ -127,6 +138,11 @@ ALTER TABLE "Retrospective" ADD COLUMN IF NOT EXISTS "blindInput" BOOLEAN NOT NU
 ALTER TABLE "Column" ADD COLUMN IF NOT EXISTS "order" INTEGER NOT NULL DEFAULT 0;
 -- Optional retention: boards are deleted once "expiresAt" passes.
 ALTER TABLE "Retrospective" ADD COLUMN IF NOT EXISTS "expiresAt" TIMESTAMPTZ;
+-- Action follow-through over time needs both ends of an action's life.
+-- Existing rows get a creation date but no completion date: their close times
+-- are simply unknown, rather than being invented.
+ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "completedAt" TIMESTAMPTZ;
 `;
 
 // Cache the pool and the one-time schema init on globalThis so dev/HMR and
@@ -300,6 +316,8 @@ const mapActionItem = (r: Row): ActionItem => ({
   dueDate: r.dueDate ?? null,
   externalUrl: r.externalUrl ?? null,
   externalKey: r.externalKey ?? null,
+  createdAt: r.createdAt ?? null,
+  completedAt: r.completedAt ?? null,
 });
 const mapRetro = (r: Row): Retrospective => ({
   id: r.id,
@@ -554,6 +572,12 @@ export async function updateRetroStatus(
     `UPDATE "Retrospective" SET "status" = $2, "phaseStartTime" = $3 WHERE "id" = $1`,
     [id, status, phaseStartTime]
   );
+  // Log the transition: phaseStartTime is overwritten each time, so this is the
+  // only record of how long a board actually spent in each phase.
+  await query(
+    `INSERT INTO "PhaseEvent" ("id","retrospectiveId","phase","enteredAt") VALUES ($1,$2,$3,$4)`,
+    [randomUUID(), id, status, phaseStartTime]
+  );
   return getRetroFull(id);
 }
 
@@ -767,7 +791,12 @@ export async function getActionItem(id: string): Promise<ActionItem | null> {
 }
 
 export async function updateActionCompleted(id: string, completed: boolean): Promise<void> {
-  await query(`UPDATE "ActionItem" SET "completed" = $2 WHERE "id" = $1`, [id, completed]);
+  // Record when it closed, and clear it again if the action is reopened, so
+  // "time to close" always reflects the completion it belongs to.
+  await query(
+    `UPDATE "ActionItem" SET "completed" = $2, "completedAt" = $3 WHERE "id" = $1`,
+    [id, completed, completed ? new Date() : null]
+  );
 }
 
 
@@ -860,6 +889,7 @@ export async function deleteRetro(id: string): Promise<void> {
     await client.query(`DELETE FROM "Item" WHERE "columnId" IN (${cols})`, [id]);
     await client.query(`DELETE FROM "Column" WHERE "retrospectiveId" = $1`, [id]);
     await client.query(`DELETE FROM "ActionItem" WHERE "retrospectiveId" = $1`, [id]);
+    await client.query(`DELETE FROM "PhaseEvent" WHERE "retrospectiveId" = $1`, [id]);
     await client.query(`DELETE FROM "Retrospective" WHERE "id" = $1`, [id]);
   });
 }
@@ -872,8 +902,88 @@ export async function listExpiredRetroIds(now: Date): Promise<string[]> {
   return rows.map((r) => r.id as string);
 }
 
+/**
+ * Read-only aggregates for one team. Returns raw counts and samples; the
+ * shaping into rates and medians lives in lib/analytics.ts so it is testable
+ * without a database and identical on both backends.
+ */
+export async function teamAnalytics(teamId: string): Promise<TeamAnalyticsRaw> {
+  const retros = await query(
+    `SELECT "id", "createdAt", "isAnonymous" FROM "Retrospective" WHERE "teamId" = $1 ORDER BY "createdAt"`,
+    [teamId]
+  );
+  const retroIds = retros.map((r) => r.id as string);
+  const empty: TeamAnalyticsRaw = {
+    retroDates: retros.map((r) => r.createdAt as Date),
+    itemsByColumnType: [],
+    actions: { open: 0, done: 0, overdue: 0, daysToClose: [] },
+    engagement: { totalItems: 0, itemsWithSummary: 0, retrosWithItems: 0, voteSpread: [], contributorsPerRetro: [] },
+    phaseDurations: [],
+  };
+  if (retroIds.length === 0) return empty;
+
+  const itemsByColumnType = (
+    await query(
+      `SELECT c."type" AS type, COUNT(i."id")::int AS items
+         FROM "Column" c JOIN "Item" i ON i."columnId" = c."id"
+        WHERE c."retrospectiveId" = ANY($1)
+        GROUP BY c."type"`,
+      [retroIds]
+    )
+  ).map((r) => ({ type: r.type as string, items: Number(r.items) }));
+
+  const actionRows = await query(
+    `SELECT "completed", "dueDate", "createdAt", "completedAt"
+       FROM "ActionItem" WHERE "retrospectiveId" = ANY($1)`,
+    [retroIds]
+  );
+  const now = Date.now();
+  const actions = { open: 0, done: 0, overdue: 0, daysToClose: [] as number[] };
+  for (const a of actionRows) {
+    if (a.completed) {
+      actions.done += 1;
+      if (a.createdAt && a.completedAt) {
+        actions.daysToClose.push(
+          (new Date(a.completedAt as Date).getTime() - new Date(a.createdAt as Date).getTime()) / 86_400_000
+        );
+      }
+    } else {
+      actions.open += 1;
+      if (a.dueDate && new Date(a.dueDate as Date).getTime() < now) actions.overdue += 1;
+    }
+  }
+
+  const itemRows = await query(
+    `SELECT c."retrospectiveId" AS retro, i."id" AS item, i."userId" AS "userId",
+            (i."summary" IS NOT NULL AND i."summary" <> '') AS summarised
+       FROM "Column" c JOIN "Item" i ON i."columnId" = c."id"
+      WHERE c."retrospectiveId" = ANY($1)`,
+    [retroIds]
+  );
+  const voteRows = await query(
+    `SELECT c."retrospectiveId" AS retro, v."itemId" AS item, SUM(v."count")::int AS votes
+       FROM "Column" c JOIN "Item" i ON i."columnId" = c."id" JOIN "Vote" v ON v."itemId" = i."id"
+      WHERE c."retrospectiveId" = ANY($1)
+      GROUP BY c."retrospectiveId", v."itemId"`,
+    [retroIds]
+  );
+  const phaseRows = await query(
+    `SELECT "retrospectiveId" AS retro, "phase", "enteredAt"
+       FROM "PhaseEvent" WHERE "retrospectiveId" = ANY($1) ORDER BY "retrospectiveId", "enteredAt"`,
+    [retroIds]
+  );
+
+  return {
+    ...empty,
+    itemsByColumnType,
+    actions,
+    engagement: engagementFromRows(retros, itemRows, voteRows),
+    phaseDurations: phaseDurationsFromRows(phaseRows),
+  };
+}
+
 export async function clearDatabase(): Promise<void> {
   await query(
-    `TRUNCATE "Reaction","Vote","Item","Column","ActionItem","Retrospective","Team" RESTART IDENTITY CASCADE`
+    `TRUNCATE "Reaction","Vote","Item","Column","ActionItem","PhaseEvent","Retrospective","Team" RESTART IDENTITY CASCADE`
   );
 }
