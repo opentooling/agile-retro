@@ -3,7 +3,11 @@ import { SummaryEditor } from './RetroBoard'
 
 // RetroBoard pulls in server actions and dnd-kit at module load; stub them so
 // this test can import the one component it cares about.
-jest.mock('@/app/actions', () => ({ createExternalTaskForAction: jest.fn() }))
+jest.mock('@/app/actions', () => ({
+  createExternalTaskForAction: jest.fn(),
+  getCarriedOverActions: jest.fn(() => Promise.resolve([])),
+  completeCarriedOverAction: jest.fn(() => Promise.resolve()),
+}))
 jest.mock('socket.io-client', () => ({ io: jest.fn() }))
 jest.mock('next/link', () => ({ children }: { children: React.ReactNode }) => children)
 jest.mock('@dnd-kit/core', () => ({

@@ -6,8 +6,14 @@
  * DATABASE_URL (postgres://user:pass@host:port/db).
  *
  * The schema is embedded below and applied with `CREATE TABLE IF NOT EXISTS` the
- * first time a connection is used, so there is no separate migration step. This
- * is safe to run concurrently across replicas.
+ * first time a connection is used, so no separate migration step is required.
+ * This is safe to run concurrently across replicas (it takes an advisory lock).
+ *
+ * Deployments that would rather gate DDL behind a controlled step — a Helm
+ * migration Job, or an app database user without DDL rights — can run
+ * `scripts/migrate-postgres.ts` and set `DB_SKIP_SCHEMA_BOOTSTRAP=true` on the
+ * app so it never issues DDL itself. Both paths execute the same `SCHEMA_SQL`
+ * below, which is the single definition of the schema.
  */
 import { Pool, type PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
@@ -21,7 +27,7 @@ import type {
 // Connection + schema bootstrap
 // ---------------------------------------------------------------------------
 
-const SCHEMA_SQL = `
+export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS "Team" (
     "id" TEXT PRIMARY KEY,
     "name" TEXT NOT NULL,
@@ -45,6 +51,7 @@ CREATE TABLE IF NOT EXISTS "Retrospective" (
     "creator" TEXT NOT NULL DEFAULT 'Anonymous',
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "isAnonymous" BOOLEAN NOT NULL DEFAULT false,
+    "blindInput" BOOLEAN NOT NULL DEFAULT false,
     "inputDuration" INTEGER,
     "votingDuration" INTEGER,
     "reviewDuration" INTEGER,
@@ -56,6 +63,7 @@ CREATE TABLE IF NOT EXISTS "Column" (
     "id" TEXT PRIMARY KEY,
     "title" TEXT NOT NULL,
     "type" TEXT NOT NULL,
+    "order" INTEGER NOT NULL DEFAULT 0,
     "retrospectiveId" TEXT NOT NULL REFERENCES "Retrospective" ("id")
 );
 
@@ -113,6 +121,9 @@ ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "createdBy" TEXT;
 ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "memberGroups" JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "adminGroups" JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "imageData" TEXT;
+ALTER TABLE "Retrospective" ADD COLUMN IF NOT EXISTS "blindInput" BOOLEAN NOT NULL DEFAULT false;
+-- Board formats other than the classic three columns need an explicit order.
+ALTER TABLE "Column" ADD COLUMN IF NOT EXISTS "order" INTEGER NOT NULL DEFAULT 0;
 `;
 
 // Cache the pool and the one-time schema init on globalThis so dev/HMR and
@@ -121,6 +132,14 @@ const globalForDb = globalThis as unknown as {
   __pgPool?: Pool;
   __pgInit?: Promise<unknown>;
 };
+
+/**
+ * Advisory-lock key that serialises schema application. Replicas starting
+ * together (or a migration Job racing a rolling update) would otherwise run the
+ * DDL concurrently, and not every statement here is safe under that —
+ * `ALTER TABLE ... DROP NOT NULL` has no `IF EXISTS` guard.
+ */
+const SCHEMA_LOCK_ID = 8274531;
 
 function getPool(): Pool {
   if (!globalForDb.__pgPool) {
@@ -135,11 +154,44 @@ function getPool(): Pool {
   return globalForDb.__pgPool;
 }
 
+/**
+ * Create/upgrade the schema. Exported so the standalone migration script runs
+ * exactly the SQL the app would have run — the DDL has one definition, not a
+ * copy that can drift out of step with the code that depends on it.
+ */
+export async function applySchema(): Promise<void> {
+  const client = await getPool().connect();
+  try {
+    await client.query("SELECT pg_advisory_lock($1)", [SCHEMA_LOCK_ID]);
+    await client.query(SCHEMA_SQL);
+  } finally {
+    try {
+      await client.query("SELECT pg_advisory_unlock($1)", [SCHEMA_LOCK_ID]);
+    } catch {
+      // A broken connection releases the lock on its own; don't mask the
+      // original failure with the unlock's.
+    }
+    client.release();
+  }
+}
+
+/** Close the pool so a short-lived script can exit. */
+export async function closePool(): Promise<void> {
+  if (globalForDb.__pgPool) {
+    await globalForDb.__pgPool.end();
+    globalForDb.__pgPool = undefined;
+    globalForDb.__pgInit = undefined;
+  }
+}
+
 /** Returns the pool, ensuring the schema has been created exactly once. */
 async function pool(): Promise<Pool> {
   const p = getPool();
   if (!globalForDb.__pgInit) {
-    globalForDb.__pgInit = p.query(SCHEMA_SQL);
+    // When a migration Job owns DDL, the app must not attempt it — its database
+    // user may not even be permitted to.
+    globalForDb.__pgInit =
+      process.env.DB_SKIP_SCHEMA_BOOTSTRAP === "true" ? Promise.resolve() : applySchema();
   }
   await globalForDb.__pgInit;
   return p;
@@ -221,6 +273,7 @@ const mapTeam = (r: Row): Team => ({
 });
 const mapColumn = (r: Row): Column => ({
   id: r.id, title: r.title, type: r.type, retrospectiveId: r.retrospectiveId,
+  order: r.order ?? 0,
 });
 const mapVote = (r: Row): Vote => ({ id: r.id, itemId: r.itemId, userId: r.userId, count: r.count });
 const mapReaction = (r: Row): Reaction => ({
@@ -244,6 +297,7 @@ const mapRetro = (r: Row): Retrospective => ({
   creator: r.creator,
   createdAt: r.createdAt,
   isAnonymous: r.isAnonymous,
+  blindInput: r.blindInput ?? false,
   inputDuration: r.inputDuration,
   votingDuration: r.votingDuration,
   reviewDuration: r.reviewDuration,
@@ -263,9 +317,10 @@ const mapItem = (r: Row): Item => ({
   reactions: [],
 });
 
-// Stable column ordering (Postgres has no implicit row order). Mirrors the
-// order columns are created in actions.ts.
-const COLUMN_ORDER_SQL = `ORDER BY CASE "type"
+// Stable column ordering (Postgres has no implicit row order). Boards created
+// since formats were introduced carry an explicit "order"; boards predating it
+// have 0 across the board, so the classic-type CASE still sorts them correctly.
+const COLUMN_ORDER_SQL = `ORDER BY "order", CASE "type"
     WHEN 'WHAT_WENT_WELL' THEN 0
     WHEN 'WHAT_DIDNT_GO_WELL' THEN 1
     WHEN 'WHAT_SHOULD_BE_IMPROVED' THEN 2
@@ -447,9 +502,9 @@ export async function createRetrospectiveWithColumns(
   return withTransaction(async (client) => {
     const res = await client.query(
       `INSERT INTO "Retrospective"
-        ("id","title","status","tags","creator","isAnonymous",
+        ("id","title","status","tags","creator","isAnonymous","blindInput",
          "inputDuration","votingDuration","reviewDuration","phaseStartTime","teamId")
-       VALUES ($1,$2,'INPUT',$3,$4,$5,$6,$7,$8,$9,$10)
+       VALUES ($1,$2,'INPUT',$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING *`,
       [
         id,
@@ -457,6 +512,7 @@ export async function createRetrospectiveWithColumns(
         data.tags,
         data.creator,
         data.isAnonymous,
+        data.blindInput,
         data.inputDuration,
         data.votingDuration,
         data.reviewDuration,
@@ -464,10 +520,10 @@ export async function createRetrospectiveWithColumns(
         data.teamId,
       ]
     );
-    for (const c of columns) {
+    for (const [index, c] of columns.entries()) {
       await client.query(
-        `INSERT INTO "Column" ("id","title","type","retrospectiveId") VALUES ($1,$2,$3,$4)`,
-        [randomUUID(), c.title, c.type, id]
+        `INSERT INTO "Column" ("id","title","type","order","retrospectiveId") VALUES ($1,$2,$3,$4,$5)`,
+        [randomUUID(), c.title, c.type, index, id]
       );
     }
     return mapRetro(res.rows[0]);
@@ -721,6 +777,12 @@ export async function listActionItems(filter: ActionFilter): Promise<ActionItemW
   if (filter.teamNameContains) {
     needsTeamJoin = true;
     clauses.push(`t."name" ILIKE $${params.push(`%${filter.teamNameContains}%`)}`);
+  }
+  if (filter.teamId) {
+    clauses.push(`r."teamId" = $${params.push(filter.teamId)}`);
+  }
+  if (filter.excludeRetrospectiveId) {
+    clauses.push(`a."retrospectiveId" <> $${params.push(filter.excludeRetrospectiveId)}`);
   }
 
   const teamJoin = needsTeamJoin ? `JOIN "Team" t ON t."id" = r."teamId"` : "";

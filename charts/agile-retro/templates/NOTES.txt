@@ -1,9 +1,9 @@
-{{- if .Values.route.enabled }}
+{{- if .Values.openshift.route.enabled }}
 1. Get the application URL by running these commands:
-  {{- if .Values.route.tls.enabled }}
-  echo "https://{{ .Values.route.host }}"
+  {{- if .Values.openshift.route.host }}
+  echo "https://{{ .Values.openshift.route.host }}"
   {{- else }}
-  echo "http://{{ .Values.route.host }}"
+  oc get route {{ include "agile-retro.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{"https://"}{.spec.host}{"\n"}'
   {{- end }}
 {{- else }}
 1. Get the application URL by running these commands:
@@ -19,7 +19,20 @@
   - DB file: {{ .Values.sqlite.mountPath }}/{{ .Values.sqlite.fileName }}
     (persistence {{ if .Values.sqlite.persistence.enabled }}enabled, {{ .Values.sqlite.persistence.size }}{{ else }}DISABLED — data lost on restart{{ end }})
   {{- else }}
+  {{- if .Values.migration.enabled }}
+  - The application uses PostgreSQL (schema applied by the migration Job
+    {{ include "agile-retro.fullname" . }}-migrate{{ if .Values.migration.checkOnly }}, running in --check mode: it reports drift but changes nothing{{ end }}).
+    {{- if .Values.migration.skipAppBootstrap }}
+  - DB_SKIP_SCHEMA_BOOTSTRAP=true: the app will NOT create its own schema, so
+    the migration Job must succeed before the app can serve requests.
+    {{- end }}
+
+  # Migration Job logs
+  kubectl logs job/{{ include "agile-retro.fullname" . }}-migrate -n {{ .Release.Namespace }}
+  {{- else }}
   - The application uses PostgreSQL (schema auto-created on first connection).
+  - Set migration.enabled=true to apply it from a Helm-hook Job instead.
+  {{- end }}
   {{- if .Values.postgresql.enabled }}
   - Bundled Postgres: deployment/{{ include "agile-retro.fullname" . }}-postgres
     (persistence {{ if .Values.postgresql.persistence.enabled }}enabled, {{ .Values.postgresql.persistence.size }}{{ else }}DISABLED — data lost on restart{{ end }})

@@ -133,6 +133,27 @@ env:
 envFromSecret: ""
 # envFromSecret: "my-app-secret"
 
+# Database schema migration.
+#
+# The app applies its schema on first connect, so this is optional. Enable it to
+# make schema changes an explicit, auditable step: the Job runs the same DDL as
+# a Helm hook, so a failure fails the release instead of surfacing as errors on
+# the first request. Ignored when sqlite.enabled (SQLite migrates on open).
+migration:
+  enabled: false
+  # Also set DB_SKIP_SCHEMA_BOOTSTRAP=true on the app, so it never issues DDL
+  # itself. Lets the app run with a database user that has no DDL rights —
+  # but then the Job MUST succeed before the app can work.
+  skipAppBootstrap: false
+  # Report drift and fail without changing anything. Useful for gating an
+  # upgrade, or for a dry run before enabling the real thing.
+  checkOnly: false
+  # Seconds the Job waits for the database to accept connections.
+  waitSeconds: 60
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  resources: {}
+
 auth:
   secret: "change-me-in-production" # AUTH_SECRET
   existingSecret: "" # Optional: Name of existing secret for AUTH_SECRET

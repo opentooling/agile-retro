@@ -60,22 +60,13 @@ spec:
               value: {{ $value | quote }}
             {{- end }}
             # Database connection. src/lib/db.ts picks the backend from the scheme.
-            - name: DATABASE_URL
-              {{- if .Values.sqlite.enabled }}
-              value: "file:{{ .Values.sqlite.mountPath }}/{{ .Values.sqlite.fileName }}"
-              {{- else if .Values.postgresql.enabled }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "agile-retro.fullname" . }}-postgres
-                  key: database-url
-              {{- else if .Values.externalDatabase.existingSecret }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.externalDatabase.existingSecret }}
-                  key: {{ .Values.externalDatabase.existingSecretKey | default "database-url" }}
-              {{- else }}
-              value: {{ required "Set sqlite.enabled=true, or postgresql.enabled=true, or provide externalDatabase.url / externalDatabase.existingSecret" .Values.externalDatabase.url | quote }}
-              {{- end }}
+            {{- include "agile-retro.databaseUrlEnv" . | nindent 12 }}
+            {{- if and .Values.migration.enabled .Values.migration.skipAppBootstrap (not .Values.sqlite.enabled) }}
+            # The migration Job owns DDL, so the app must not issue any itself
+            # (its database user may not be permitted to).
+            - name: DB_SKIP_SCHEMA_BOOTSTRAP
+              value: "true"
+            {{- end }}
             {{- if .Values.app.url }}
             # Public URL of the app, so Auth.js builds correct OAuth redirect URIs
             # (e.g. <app.url>/api/auth/callback/keycloak) behind a proxy/route.

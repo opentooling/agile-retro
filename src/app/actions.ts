@@ -5,8 +5,9 @@ import type { Team } from '@/lib/db/types'
 import { getPlugin } from '@/lib/plugins/registry'
 import { pushActionDoneState } from '@/lib/jira-sync'
 import { auth } from '@/auth'
-import { authUserFromSession, isTeamAdmin, type RetroRef } from '@/lib/authz'
+import { authUserFromSession, isTeamAdmin, canViewBoard, type RetroRef } from '@/lib/authz'
 import { revalidatePath } from 'next/cache'
+import { templateById } from '@/lib/retro-templates'
 
 /** Trim, drop empties and de-duplicate a list of group identifiers. */
 function sanitizeGroups(groups: string[] | undefined): string[] {
@@ -58,6 +59,10 @@ export async function createRetrospective(formData: FormData) {
     const votingDuration = parseIntSafe(formData.get('votingDuration'))
     const reviewDuration = parseIntSafe(formData.get('reviewDuration'))
     const isAnonymous = formData.get('isAnonymous') === 'on'
+    const blindInput = formData.get('blindInput') === 'on'
+    // The format decides the board's starting columns; unknown ids fall back to
+    // the classic three-column layout.
+    const template = templateById(formData.get('template')?.toString())
 
     console.log("Data:", { title, tags, creator, teamId, inputDuration, votingDuration, reviewDuration, isAnonymous })
 
@@ -81,13 +86,10 @@ export async function createRetrospective(formData: FormData) {
                 votingDuration,
                 reviewDuration,
                 isAnonymous,
+                blindInput,
                 phaseStartTime: new Date(), // Start input phase immediately
             },
-            [
-                { title: 'What went well', type: 'WHAT_WENT_WELL' },
-                { title: "What didn't go well", type: 'WHAT_DIDNT_GO_WELL' },
-                { title: 'What should be improved', type: 'WHAT_SHOULD_BE_IMPROVED' },
-            ]
+            template.columns
         )
         revalidatePath('/')
         revalidatePath('/history')
@@ -271,6 +273,80 @@ export async function createExternalTaskForAction(
     revalidatePath('/actions')
     revalidatePath(`/retro/${retro.id}`)
     return result
+}
+
+/**
+ * Open action items carried over from a team's earlier retros.
+ *
+ * Retros lose their credibility when actions are agreed and then quietly
+ * forgotten, so a board surfaces whatever its team still owes from last time.
+ * Scoped to the board's own team and excluding the board itself; an open board
+ * (no team) has no history to draw on and gets an empty list.
+ *
+ * Access is gated by the same policy as the board itself — these actions come
+ * from the team's other boards, so anyone who can't view this one can't read
+ * them either.
+ */
+export type CarriedAction = {
+    id: string
+    content: string
+    assignee: string | null
+    dueDate: string | null
+    externalUrl: string | null
+    externalKey: string | null
+    retroId: string
+    retroTitle: string
+    retroCreatedAt: string
+}
+
+export async function getCarriedOverActions(retroId: string): Promise<CarriedAction[]> {
+    if (!retroId) return []
+
+    const retro = await db.getRetro(retroId)
+    if (!retro?.teamId) return []
+
+    const team = await db.getTeam(retro.teamId)
+    const authUser = authUserFromSession(await auth())
+    const ref: RetroRef = { teamId: retro.teamId, creator: retro.creator, team }
+    if (!canViewBoard(authUser, ref)) return []
+
+    const actions = await db.listActionItems({
+        completed: false,
+        teamId: retro.teamId,
+        excludeRetrospectiveId: retroId,
+    })
+
+    return actions.map((a) => ({
+        id: a.id,
+        content: a.content,
+        assignee: a.assignee,
+        dueDate: a.dueDate ? a.dueDate.toISOString() : null,
+        externalUrl: a.externalUrl,
+        externalKey: a.externalKey,
+        retroId: a.retrospectiveId,
+        retroTitle: a.retrospective.title,
+        retroCreatedAt: a.retrospective.createdAt.toISOString(),
+    }))
+}
+
+/** Mark a carried-over action done from the board that surfaced it. */
+export async function completeCarriedOverAction(actionId: string, completed: boolean): Promise<void> {
+    if (!actionId) throw new Error('Action id is required')
+
+    const action = await db.getActionItem(actionId)
+    if (!action) throw new Error('Action not found')
+
+    const retro = await db.getRetro(action.retrospectiveId)
+    if (!retro) throw new Error('Retrospective not found')
+
+    const team = retro.teamId ? await db.getTeam(retro.teamId) : null
+    const authUser = authUserFromSession(await auth())
+    const ref: RetroRef = { teamId: retro.teamId, creator: retro.creator, team }
+    if (!canViewBoard(authUser, ref)) throw new Error('Unauthorized')
+
+    await db.updateActionCompleted(actionId, completed)
+    await pushActionDoneState(actionId, completed)
+    revalidatePath('/actions')
 }
 
 export async function getUniqueTags() {

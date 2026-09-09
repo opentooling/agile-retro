@@ -33,3 +33,30 @@ export function redactRetroFull<T extends { team: Team | null } | null>(
   if (!retro) return null as any;
   return { ...retro, team: redactTeam(retro.team) } as any;
 }
+
+/**
+ * Apply "blind input" for one viewer: during the INPUT phase of a board with
+ * `blindInput` on, drop everyone else's items so nobody's thinking is anchored
+ * by what has already been written.
+ *
+ * This runs on the server for every payload — the initial page render and each
+ * socket broadcast — so hidden items are never sent to the browser at all. The
+ * per-column count of what's withheld is kept, so the UI can show that other
+ * people are contributing without revealing what.
+ *
+ * A no-op outside the input phase, so items become visible to all as soon as
+ * the phase advances.
+ */
+export function applyBlindInput<T extends ClientRetroFull | null>(
+  retro: T,
+  viewerId: string | null | undefined
+): T {
+  if (!retro || !retro.blindInput || retro.status !== "INPUT") return retro;
+  return {
+    ...retro,
+    columns: retro.columns.map((column) => {
+      const mine = column.items.filter((item) => !!viewerId && item.userId === viewerId);
+      return { ...column, items: mine, hiddenItemCount: column.items.length - mine.length };
+    }),
+  } as T;
+}

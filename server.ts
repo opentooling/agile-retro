@@ -6,7 +6,7 @@ import { Server } from "socket.io";
 import * as NextAuthJwt from "next-auth/jwt";
 const getToken = (NextAuthJwt as any).getToken as (opts: any) => Promise<any>;
 import * as db from "./src/lib/db";
-import { redactRetroFull } from "./src/lib/sanitize";
+import { redactRetroFull, applyBlindInput } from "./src/lib/sanitize";
 import { pushActionDoneState } from "./src/lib/jira-sync";
 import {
     authUserFromToken,
@@ -42,6 +42,28 @@ async function getSocketUser(cookie: string | undefined): Promise<AuthUser | nul
         }
     }
     return null;
+}
+
+/**
+ * Broadcast the board to everyone in the room.
+ *
+ * Normally that's a single payload for the whole room. Under "blind input"
+ * during the INPUT phase each participant must see only their own items, so the
+ * payload differs per viewer and we emit once per socket — the hidden items
+ * never leave the server. The cheap room-wide path is kept for every other
+ * case, which is the overwhelming majority of broadcasts.
+ */
+async function broadcastRetro(io: Server, retroId: string, retro: any): Promise<void> {
+    const payload = redactRetroFull(retro);
+    if (!payload || !payload.blindInput || payload.status !== "INPUT") {
+        io.to(retroId).emit("retro-updated", payload);
+        return;
+    }
+    const sockets = await io.in(retroId).fetchSockets();
+    for (const s of sockets) {
+        const viewer = (s.data as { user?: AuthUser }).user;
+        s.emit("retro-updated", applyBlindInput(payload, viewer?.id));
+    }
 }
 
 /** Lightweight board reference (team + creator) used for authorization checks. */
@@ -167,7 +189,7 @@ app.prepare().then(() => {
                 // Fetch updated retro
                 const updatedRetro = await db.getRetroFull(retroId);
 
-                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
+                await broadcastRetro(io, retroId, updatedRetro);
             } catch (error) {
                 console.error("Error adding item:", error);
             }
@@ -189,7 +211,7 @@ app.prepare().then(() => {
                 await db.updateItemContent(itemId, trimmed);
 
                 const updatedRetro = await db.getRetroFull(retroId);
-                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
+                await broadcastRetro(io, retroId, updatedRetro);
             } catch (error) {
                 console.error("Error editing item:", error);
             }
@@ -216,7 +238,7 @@ app.prepare().then(() => {
                 // Fetch updated retro and emit
                 const updatedRetro = await db.getRetroFull(retroId);
 
-                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
+                await broadcastRetro(io, retroId, updatedRetro);
             } catch (error) {
                 console.error("Error voting:", error);
             }
@@ -237,7 +259,7 @@ app.prepare().then(() => {
                     io.to(retroId).emit("participants-updated", Object.values(participants[retroId]));
                 }
 
-                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
+                await broadcastRetro(io, retroId, updatedRetro);
             } catch (error) {
                 console.error("Error updating status:", error);
             }
@@ -256,7 +278,7 @@ app.prepare().then(() => {
                 await db.updateItemSummary(itemId, summary);
 
                 const updatedRetro = await db.getRetroFull(retroId);
-                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
+                await broadcastRetro(io, retroId, updatedRetro);
             } catch (error) {
                 console.error("Error updating summary:", error);
             }
@@ -273,7 +295,7 @@ app.prepare().then(() => {
                 });
 
                 const updatedRetro = await db.getRetroFull(retroId);
-                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
+                await broadcastRetro(io, retroId, updatedRetro);
             } catch (error) {
                 console.error("Error adding action item:", error);
             }
@@ -288,7 +310,7 @@ app.prepare().then(() => {
                     await db.updateActionCompleted(actionId, newCompleted);
 
                     const updatedRetro = await db.getRetroFull(retroId);
-                    io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
+                    await broadcastRetro(io, retroId, updatedRetro);
 
                     // Mirror the new state to the linked Jira issue (best-effort).
                     await pushActionDoneState(actionId, newCompleted);
@@ -311,7 +333,7 @@ app.prepare().then(() => {
                 }
 
                 const updatedRetro = await db.getRetroFull(retroId);
-                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
+                await broadcastRetro(io, retroId, updatedRetro);
             } catch (error) {
                 console.error("Error toggling reaction:", error);
             }
@@ -346,7 +368,7 @@ app.prepare().then(() => {
                 await db.reorderItems(otherItems.map((item) => item.id));
 
                 const updatedRetro = await db.getRetroFull(retroId);
-                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
+                await broadcastRetro(io, retroId, updatedRetro);
             } catch (error) {
                 console.error("Error moving item:", error);
             }
@@ -372,7 +394,7 @@ app.prepare().then(() => {
                 }
 
                 const updatedRetro = await db.updateRetroDurations(retroId, updateData);
-                io.to(retroId).emit("retro-updated", redactRetroFull(updatedRetro));
+                await broadcastRetro(io, retroId, updatedRetro);
             } catch (error) {
                 console.error("Error extending timer:", error);
             }

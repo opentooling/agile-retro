@@ -35,6 +35,7 @@ import {
 
 import { useSession } from "next-auth/react"
 import { TeamMark } from "@/components/TeamMark"
+import { RETRO_TEMPLATES, DEFAULT_TEMPLATE_ID } from "@/lib/retro-templates"
 
 export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: string }) {
   const [open, setOpen] = useState(false)
@@ -45,6 +46,8 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
   const [tagInput, setTagInput] = useState('')
   const [openCombobox, setOpenCombobox] = useState(false)
   const [openTeamCombobox, setOpenTeamCombobox] = useState(false)
+  const [templateId, setTemplateId] = useState<string>(DEFAULT_TEMPLATE_ID)
+  const [openTemplateCombobox, setOpenTemplateCombobox] = useState(false)
   const [creator, setCreator] = useState("")
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
@@ -84,6 +87,7 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
     // access-controlled (only team members / team-admins / admins).
     const formData = new FormData(event.currentTarget)
     formData.set('teamId', selectedTeamId)
+    formData.set('template', templateId)
     // Append selected tags to formData
     formData.set('tags', selectedTags.join(', '))
 
@@ -228,6 +232,64 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label className="text-right">
+                Format
+              </Label>
+              <div className="col-span-3">
+                <Popover open={openTemplateCombobox} onOpenChange={setOpenTemplateCombobox}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={openTemplateCombobox}
+                      className="w-full justify-between"
+                    >
+                      <span className="truncate">
+                        {RETRO_TEMPLATES.find((t) => t.id === templateId)?.name}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="p-0">
+                    <Command>
+                      <CommandList>
+                        <CommandGroup>
+                          {RETRO_TEMPLATES.map((template) => (
+                            <CommandItem
+                              key={template.id}
+                              value={template.name.toLowerCase()}
+                              onSelect={() => {
+                                setTemplateId(template.id)
+                                setOpenTemplateCombobox(false)
+                              }}
+                              className="items-start"
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 mt-0.5 h-4 w-4 shrink-0",
+                                  templateId === template.id ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              <span className="flex flex-col gap-0.5">
+                                <span className="font-medium">{template.name}</span>
+                                <span className="text-xs text-muted-foreground">{template.description}</span>
+                              </span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                <input type="hidden" name="template" value={templateId} />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {RETRO_TEMPLATES.find((t) => t.id === templateId)?.columns.length} columns ·
+                  {' '}{RETRO_TEMPLATES.find((t) => t.id === templateId)?.columns.map((c) => c.title).join(', ')}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">
                 Tags
               </Label>
               <div className="col-span-3 flex flex-col gap-2">
@@ -330,6 +392,21 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                     <Label htmlFor="isAnonymous" className="font-normal text-muted-foreground">
                         Hide usernames on cards
                     </Label>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-4 items-start gap-4">
+                <Label htmlFor="blindInput" className="text-right pt-1">Blind input</Label>
+                <div className="col-span-3 flex flex-col gap-1">
+                    <div className="flex items-center space-x-2">
+                        <Switch id="blindInput" name="blindInput" />
+                        <Label htmlFor="blindInput" className="font-normal text-muted-foreground">
+                            Hide others&apos; cards until input ends
+                        </Label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                        Stops the first few cards from anchoring everyone else&apos;s thinking.
+                    </p>
                 </div>
             </div>
 

@@ -1,0 +1,93 @@
+{{- if and .Values.migration.enabled (not .Values.sqlite.enabled) }}
+{{/*
+Schema migration Job.
+
+Runs `npm run db:migrate`, which applies the same SCHEMA_SQL the application
+would apply on first connect (src/lib/db/postgres.ts). Every statement is
+idempotent and application is serialised by a Postgres advisory lock, so a
+re-run — or an overlap with starting app pods — is safe.
+
+Hook timing depends on where the database lives:
+
+  * external database  -> pre-install,pre-upgrade. The database already exists,
+    so migrating before the app rolls out is the correct order.
+  * bundled postgresql -> post-install,pre-upgrade. Helm creates hook resources
+    before ordinary ones, so a pre-install hook would sit waiting for a database
+    Deployment that has not been created yet and deadlock until it fails. On
+    install we therefore migrate afterwards (the app also self-bootstraps unless
+    migration.skipAppBootstrap is set); on upgrade the database is already up,
+    so pre-upgrade behaves normally.
+
+Only omitted for SQLite, which migrates itself when the file is opened and has
+no server to connect to.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "agile-retro.fullname" . }}-migrate
+  labels:
+    {{- include "agile-retro.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    {{- if .Values.postgresql.enabled }}
+    "helm.sh/hook": post-install,pre-upgrade
+    {{- else }}
+    "helm.sh/hook": pre-install,pre-upgrade
+    {{- end }}
+    "helm.sh/hook-weight": "-5"
+    # Keep a failed Job so its logs can be read; replace it on the next attempt.
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  {{- with .Values.migration.activeDeadlineSeconds }}
+  activeDeadlineSeconds: {{ . }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "agile-retro.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "agile-retro.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              npm run db:migrate{{ if .Values.migration.checkOnly }} -- --check{{ end }}
+          {{- if .Values.envFromSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.envFromSecret }}
+          {{- end }}
+          env:
+            {{- include "agile-retro.databaseUrlEnv" . | nindent 12 }}
+            # How long to wait for the database to accept connections.
+            - name: MIGRATE_WAIT_SECONDS
+              value: {{ .Values.migration.waitSeconds | quote }}
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

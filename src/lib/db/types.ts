@@ -66,9 +66,21 @@ export type Retrospective = {
   reviewDuration: number | null;
   phaseStartTime: Date | null;
   teamId: string | null;
+  // "Blind input": during the INPUT phase each participant sees only their own
+  // items. Prevents the first few cards anchoring everyone else's thinking.
+  // Enforced server-side — the hidden items never reach the other clients.
+  blindInput: boolean;
 };
 
-export type Column = { id: string; title: string; type: string; retrospectiveId: string };
+export type Column = {
+  id: string;
+  title: string;
+  type: string;
+  retrospectiveId: string;
+  // Position within the board, from the template's column order. Needed because
+  // formats other than the classic three have no inherent ordering to infer.
+  order: number;
+};
 export type Vote = { id: string; itemId: string; userId: string; count: number };
 export type Reaction = { id: string; emoji: string; userId: string; itemId: string; createdAt: Date };
 export type Item = {
@@ -95,7 +107,12 @@ export type ActionItem = {
   externalKey: string | null;
 };
 
-export type ColumnWithItems = Column & { items: Item[] };
+export type ColumnWithItems = Column & {
+  items: Item[];
+  // Set only on a client payload under blind input: how many of this column's
+  // items were withheld from this viewer. Never persisted.
+  hiddenItemCount?: number;
+};
 export type RetroFull = Retrospective & {
   columns: ColumnWithItems[];
   actions: ActionItem[];
@@ -116,6 +133,10 @@ export type ActionFilter = {
   creatorContains?: string;
   assigneeContains?: string;
   retrospectiveId?: string;
+  /** Exact team match — used to carry a team's open actions into its next retro. */
+  teamId?: string;
+  /** Exclude one retro, so a board doesn't list its own actions as carried over. */
+  excludeRetrospectiveId?: string;
 };
 
 export type CreateColumnInput = { title: string; type: string };
@@ -128,6 +149,7 @@ export type CreateRetroInput = {
   votingDuration: number | null;
   reviewDuration: number | null;
   isAnonymous: boolean;
+  blindInput: boolean;
   phaseStartTime: Date;
 };
 

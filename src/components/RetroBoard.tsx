@@ -7,11 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users, Calendar, User as UserIcon, ExternalLink, Pencil, Check, X, SmilePlus } from 'lucide-react'
+import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users, Calendar, User as UserIcon, ExternalLink, Pencil, Check, X, SmilePlus, EyeOff } from 'lucide-react'
 import { cn } from "@/lib/utils"
 import { ModeToggle } from "@/components/mode-toggle"
 import { MentionInput, MentionText } from "@/components/Mentions"
-import { createExternalTaskForAction } from "@/app/actions"
+import { createExternalTaskForAction, getCarriedOverActions, completeCarriedOverAction, type CarriedAction } from "@/app/actions"
 import {
   DndContext, 
   closestCorners,
@@ -45,6 +45,9 @@ type RetroData = {
     id: string
     title: string
     type: string
+    // Set by the server under blind input: how many of this column's items are
+    // withheld from this viewer.
+    hiddenItemCount?: number
     items: {
       id: string
       content: string
@@ -69,6 +72,7 @@ type RetroData = {
   reviewDuration?: number | null
   phaseStartTime?: string | null // Dates come as strings from JSON
   isAnonymous: boolean
+  blindInput?: boolean
 }
 
 
@@ -296,6 +300,120 @@ export function SummaryEditor({
   )
 }
 
+/**
+ * Open actions this team still owes from its previous retros.
+ *
+ * Agreeing actions and never revisiting them is the main way retros lose their
+ * credibility, so the board opens with whatever is outstanding and lets anyone
+ * tick items off in place. Collapsed by default once there's nothing overdue to
+ * shout about; hidden entirely for open boards, which have no team history.
+ */
+function CarriedOverPanel({ retroId, names }: { retroId: string; names: string[] }) {
+  const [actions, setActions] = useState<CarriedAction[] | null>(null)
+  const [collapsed, setCollapsed] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getCarriedOverActions(retroId)
+      .then((rows) => { if (!cancelled) setActions(rows) })
+      .catch(() => { if (!cancelled) setActions([]) })
+    return () => { cancelled = true }
+  }, [retroId])
+
+  const complete = async (id: string) => {
+    setBusy(id)
+    try {
+      await completeCarriedOverAction(id, true)
+      setActions((prev) => prev?.filter((a) => a.id !== id) ?? null)
+    } catch {
+      // Leave the row in place; the server rejected it.
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (!actions || actions.length === 0) return null
+
+  const overdue = actions.filter((a) => a.dueDate && new Date(a.dueDate) < new Date()).length
+
+  return (
+    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/20">
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-2 text-left"
+      >
+        <span className="flex items-center gap-2 text-sm font-semibold text-amber-800 dark:text-amber-300">
+          <ListTodo className="h-4 w-4" />
+          {actions.length} open action{actions.length === 1 ? '' : 's'} from previous retros
+          {overdue > 0 && (
+            <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+              {overdue} overdue
+            </span>
+          )}
+        </span>
+        <span className="text-xs font-medium text-amber-700 dark:text-amber-400">
+          {collapsed ? 'Show' : 'Hide'}
+        </span>
+      </button>
+
+      {!collapsed && (
+        <ul className="space-y-1 px-3 pb-3">
+          {actions.map((action) => {
+            const isOverdue = action.dueDate ? new Date(action.dueDate) < new Date() : false
+            return (
+              <li
+                key={action.id}
+                className="flex items-start gap-2 rounded-md bg-white/70 px-2.5 py-1.5 dark:bg-slate-900/50"
+              >
+                <input
+                  type="checkbox"
+                  checked={false}
+                  disabled={busy === action.id}
+                  onChange={() => complete(action.id)}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-green-600"
+                  aria-label={`Mark "${action.content}" done`}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="whitespace-pre-wrap text-sm leading-snug">
+                    <MentionText text={action.content} names={names} />
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                    <Link href={`/retro/${action.retroId}`} className="hover:underline">
+                      {action.retroTitle}
+                    </Link>
+                    {action.assignee && (
+                      <span className="flex items-center gap-1">
+                        <UserIcon className="h-3 w-3" /> {action.assignee}
+                      </span>
+                    )}
+                    {action.dueDate && (
+                      <span className={cn('flex items-center gap-1', isOverdue && 'font-semibold text-red-600 dark:text-red-400')}>
+                        <Calendar className="h-3 w-3" /> Due {new Date(action.dueDate).toLocaleDateString()}
+                      </span>
+                    )}
+                    {action.externalUrl && action.externalKey && (
+                      <a
+                        href={action.externalUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-blue-600 hover:underline"
+                      >
+                        <ExternalLink className="h-3 w-3" /> {action.externalKey}
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 /** Compact input row for a new action item: content + assignee + due date. */
 function ActionComposer({
   suggestions,
@@ -317,7 +435,7 @@ function ActionComposer({
   }
 
   return (
-    <div className="flex flex-col gap-3 bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border">
+    <div className="flex flex-col gap-2 bg-white dark:bg-gray-900 p-3 rounded-xl shadow-sm border">
       <MentionInput
         multiline
         value={content}
@@ -385,8 +503,8 @@ function ActionCard({
   }
 
   return (
-    <Card className="border-l-4 border-l-green-500 shadow-sm">
-      <CardContent className="p-4 flex flex-col gap-2">
+    <Card className="gap-0 border-l-4 border-l-green-500 py-0 shadow-sm">
+      <CardContent className="p-3 flex flex-col gap-1.5">
         <div className="flex items-start gap-3">
           {onToggle && (
             <input
@@ -498,10 +616,21 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
-  // Reset warning dismissal on phase change
+  // Re-arm the extend prompt on a phase change, and again each time the
+  // deadline moves — extending is a snooze, so it should warn again as the new
+  // deadline approaches.
+  const phaseDeadline = useMemo(() => {
+    const duration =
+      retro.status === 'INPUT' ? retro.inputDuration :
+      retro.status === 'VOTING' ? retro.votingDuration :
+      retro.status === 'REVIEW' ? retro.reviewDuration : null
+    if (!duration || !retro.phaseStartTime) return null
+    return new Date(retro.phaseStartTime).getTime() + duration * 60 * 1000
+  }, [retro.status, retro.inputDuration, retro.votingDuration, retro.reviewDuration, retro.phaseStartTime])
+
   useEffect(() => {
     setIsWarningDismissed(false)
-  }, [retro.status])
+  }, [retro.status, phaseDeadline])
 
   useEffect(() => {
     // Identity: when authenticated, use the server-side viewer id so votes and
@@ -581,41 +710,20 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
     return () => clearInterval(interval)
   }, [])
 
-  // Auto-advance logic
-  const hasAutoAdvancedRef = useMemo(() => ({ current: false }), [retro.status]) // Reset on status change
+  /**
+   * Timing for the current phase.
+   *
+   * The clock deliberately keeps running past the deadline rather than moving
+   * the board on by itself: a phase ends when the facilitator says it does, so
+   * a discussion in full flow isn't cut off mid-sentence. `remaining` goes
+   * negative once the phase is in overtime.
+   */
+  const remainingSeconds = useMemo(
+    () => (phaseDeadline === null || now === null ? null : Math.ceil((phaseDeadline - now) / 1000)),
+    [phaseDeadline, now]
+  )
 
-  useEffect(() => {
-      if (!isJoined || !retro.phaseStartTime || !now) return
-
-      const currentDuration = 
-          retro.status === 'INPUT' ? retro.inputDuration :
-          retro.status === 'VOTING' ? retro.votingDuration :
-          retro.status === 'REVIEW' ? retro.reviewDuration : null;
-
-      if (currentDuration) {
-          const startTime = new Date(retro.phaseStartTime).getTime();
-          const endTime = startTime + currentDuration * 60 * 1000;
-          const diff = Math.ceil((endTime - now) / 1000);
-          
-          if (diff <= 0 && !hasAutoAdvancedRef.current) {
-              // Time is up!
-              // Only a manager (facilitator / team-admin / admin) triggers the
-              // advance to avoid race conditions.
-              if (viewer ? viewer.canManage : retro.creator === username) {
-                  hasAutoAdvancedRef.current = true;
-                  
-                  let nextStatus = '';
-                  if (retro.status === 'INPUT') nextStatus = 'VOTING';
-                  else if (retro.status === 'VOTING') nextStatus = 'REVIEW';
-                  else if (retro.status === 'REVIEW') nextStatus = 'ACTIONS';
-                  
-                  if (nextStatus && socket) {
-                      socket.emit('update-status', { retroId: retro.id, status: nextStatus });
-                  }
-              }
-          }
-      }
-  }, [now, retro, username, isJoined, socket, hasAutoAdvancedRef])
+  const isOvertime = remainingSeconds !== null && remainingSeconds < 0
 
   const handleAddItem = (columnId: string) => {
     const content = newItemContent[columnId]
@@ -866,17 +974,33 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex">
       {/* Main Board Area */}
-      <div className="flex-1 p-8 overflow-y-auto">
+      <div className="flex-1 p-4 lg:p-6 overflow-y-auto">
         <div className="max-w-7xl mx-auto">
             {accessDenied && (
               <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
                 That action wasn&apos;t permitted. You may not have the right access on this board.
               </div>
             )}
-            <div className="flex justify-between items-center mb-8 bg-white dark:bg-slate-900 p-6 rounded-lg shadow-sm border border-slate-200 dark:border-slate-800">
+            {/* Open actions the team still owes from earlier retros. */}
+            {retro.team && retro.status !== 'CLOSED' && (
+              <CarriedOverPanel retroId={retro.id} names={mentionNames} />
+            )}
+
+            {retro.blindInput && retro.status === 'INPUT' && (
+              <div className="mb-4 flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50/60 px-4 py-2.5 text-sm dark:border-indigo-900 dark:bg-indigo-950/20">
+                <EyeOff className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                <p className="text-indigo-900 dark:text-indigo-200">
+                  <span className="font-semibold">Blind input.</span>{' '}
+                  You can only see your own cards until the input phase ends — so nobody&apos;s
+                  thinking is anchored by what has already been written.
+                </p>
+              </div>
+            )}
+
+            <div className="flex justify-between items-center gap-4 mb-4 bg-white dark:bg-slate-900 px-5 py-3 rounded-lg shadow-sm border border-slate-200 dark:border-slate-800">
             <div className="flex items-center gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-50">{retro.title}</h1>
+                    <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{retro.title}</h1>
                     {retro.team && (
                         <div className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
                             {retro.team.imageData ? (
@@ -897,80 +1021,68 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                     <span className="text-lg font-bold">{retro.status}</span>
                 </div>
                 
-                {/* Timer Display */}
-                {(() => {
-                    const currentDuration = 
-                        retro.status === 'INPUT' ? retro.inputDuration :
-                        retro.status === 'VOTING' ? retro.votingDuration :
-                        retro.status === 'REVIEW' ? retro.reviewDuration : null;
-                    
-                    if (currentDuration && retro.phaseStartTime && now) {
-                        const startTime = new Date(retro.phaseStartTime).getTime();
-                        const endTime = startTime + currentDuration * 60 * 1000;
-                        const diff = Math.max(0, Math.ceil((endTime - now) / 1000));
-                        
-                        const minutes = Math.floor(diff / 60);
-                        const seconds = diff % 60;
-                        const isLowTime = diff < 60 && diff > 0;
-                        const isTimeUp = diff === 0;
+                {/* Timer. Runs past zero into overtime; only the facilitator
+                    moves the phase on. */}
+                {remainingSeconds !== null && (() => {
+                    const over = remainingSeconds < 0
+                    const abs = Math.abs(remainingSeconds)
+                    const minutes = Math.floor(abs / 60)
+                    const seconds = abs % 60
+                    const isLowTime = !over && remainingSeconds < 60
+                    // Doubles as a snooze: dismissing hides it until the
+                    // deadline moves, extending pushes the deadline out 5 min.
+                    const showPrompt = isOwner && (isLowTime || over) && !isWarningDismissed
 
-                        // Auto-advance logic for owner
-                        if (isOwner && isTimeUp && retro.status !== 'ACTIONS' && retro.status !== 'CLOSED') {
-                             // Logic handled in useEffect
-                        }
-
-                        return (
-                            <div className="flex flex-col items-end relative">
-                                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Time Remaining</span>
-                                <span className={cn(
-                                    "text-2xl font-black font-mono",
-                                    isLowTime ? "text-red-500 animate-pulse" : 
-                                    isTimeUp ? "text-red-600" : "text-gray-700 dark:text-gray-300"
-                                )}>
-                                    {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
-                                </span>
-                                {isOwner && isLowTime && !isWarningDismissed && (
-                                    <div className="absolute top-full mt-4 right-0 w-80 bg-white dark:bg-slate-900 p-6 rounded-xl shadow-2xl border-2 border-red-200 dark:border-red-900 z-50 animate-in fade-in slide-in-from-top-4 zoom-in-95">
-                                        <div className="flex justify-between items-start mb-4">
-                                            <div className="flex items-center gap-2">
-                                                <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-full">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                                </div>
-                                                <p className="text-lg font-bold text-red-600 dark:text-red-400">Time is running out!</p>
-                                            </div>
-                                            <button 
-                                                onClick={() => setIsWarningDismissed(true)}
-                                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
-                                            >
-                                                <span className="sr-only">Dismiss</span>
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 18 12"/></svg>
-                                            </button>
-                                        </div>
-                                        <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
-                                            Less than 1 minute remaining in this phase. Would you like to extend the time?
+                    return (
+                        <div className="flex flex-col items-end relative">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                {over ? 'Overtime' : 'Time Remaining'}
+                            </span>
+                            <span className={cn(
+                                "text-2xl font-black font-mono tabular-nums",
+                                over ? "text-red-600 dark:text-red-400" :
+                                isLowTime ? "text-red-500 animate-pulse" : "text-gray-700 dark:text-gray-300"
+                            )}>
+                                {over ? '-' : ''}{String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
+                            </span>
+                            {showPrompt && (
+                                <div className="absolute top-full right-0 z-50 mt-2 w-72 rounded-lg border border-red-200 bg-white p-4 shadow-xl dark:border-red-900 dark:bg-slate-900 animate-in fade-in slide-in-from-top-2">
+                                    <div className="mb-2 flex items-start justify-between gap-2">
+                                        <p className="font-semibold text-red-600 dark:text-red-400">
+                                            {over ? 'This phase is in overtime' : 'Less than a minute left'}
                                         </p>
-                                        <Button 
-                                            size="lg" 
-                                            variant="destructive"
-                                            className="w-full h-12 text-base font-bold shadow-md hover:shadow-lg transition-all"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                if (socket) {
-                                                    socket.emit('extend-timer', { retroId: retro.id });
-                                                    setIsWarningDismissed(true); // Dismiss after extending
-                                                }
-                                            }}
+                                        <button
+                                            onClick={() => setIsWarningDismissed(true)}
+                                            className="-mr-1 -mt-1 rounded-full p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
                                         >
-                                            Extend by 5 Minutes
-                                        </Button>
+                                            <span className="sr-only">Dismiss</span>
+                                            <X className="h-4 w-4" />
+                                        </button>
                                     </div>
-                                )}
-                            </div>
-                        );
-                    }
-                    return null;
+                                    <p className="mb-3 text-sm leading-relaxed text-muted-foreground">
+                                        {over
+                                            ? 'The board stays here until you move it on. Snooze for another 5 minutes if the discussion needs it.'
+                                            : 'The board will stay on this phase when the time runs out — you decide when to move on.'}
+                                    </p>
+                                    <Button
+                                        variant="outline"
+                                        className="w-full font-semibold"
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            if (socket) {
+                                                socket.emit('extend-timer', { retroId: retro.id })
+                                                setIsWarningDismissed(true)
+                                            }
+                                        }}
+                                    >
+                                        Snooze 5 minutes
+                                    </Button>
+                                </div>
+                            )}
+                        </div>
+                    )
                 })()}
-                
+
                 {retro.status === 'VOTING' && (
                 <div className="flex flex-col items-end">
                     <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Votes Remaining</span>
@@ -992,7 +1104,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                             {isReady ? "I'm Ready!" : "Mark as Ready"}
                         </Button>
                         {isOwner && (
-                            <Button onClick={() => handleUpdateStatus('VOTING')} className="bg-blue-600 hover:bg-blue-700 gap-2">
+                            <Button onClick={() => handleUpdateStatus('VOTING')} className={cn('bg-blue-600 hover:bg-blue-700 gap-2', isOvertime && 'ring-2 ring-red-400 ring-offset-2 dark:ring-offset-slate-900')}>
                                 <Play className="w-4 h-4" /> Start Voting
                             </Button>
                         )}
@@ -1008,14 +1120,14 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                             {isReady ? "I'm Ready!" : "Mark as Ready"}
                         </Button>
                         {isOwner && (
-                            <Button onClick={() => handleUpdateStatus('REVIEW')} className="bg-blue-600 hover:bg-blue-700 gap-2">
+                            <Button onClick={() => handleUpdateStatus('REVIEW')} className={cn('bg-blue-600 hover:bg-blue-700 gap-2', isOvertime && 'ring-2 ring-red-400 ring-offset-2 dark:ring-offset-slate-900')}>
                                 <Eye className="w-4 h-4" /> Start Review
                             </Button>
                         )}
                     </div>
                 )}
                 {retro.status === 'REVIEW' && isOwner && (
-                <Button onClick={() => handleUpdateStatus('ACTIONS')} className="bg-blue-600 hover:bg-blue-700 gap-2">
+                <Button onClick={() => handleUpdateStatus('ACTIONS')} className={cn('bg-blue-600 hover:bg-blue-700 gap-2', isOvertime && 'ring-2 ring-red-400 ring-offset-2 dark:ring-offset-slate-900')}>
                     <ListTodo className="w-4 h-4" /> Start Actions
                 </Button>
                 )}
@@ -1047,7 +1159,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                 const renderEntry = ({ item, column, total }: (typeof entries)[number]) => {
                     const accent = columnAccent(column.type)
                     return (
-                        <Card key={item.id} className={cn('border-l-4 shadow-none', accent.border)}>
+                        <Card key={item.id} className={cn('gap-0 border-l-4 py-0 shadow-none', accent.border)}>
                             <CardContent className="p-3 space-y-2">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0 flex-1 space-y-1">
@@ -1130,8 +1242,8 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                     .map((item) => {
                     const totalVotes = item.votes.reduce((acc, v) => acc + v.count, 0)
                     return (
-                        <Card key={item.id} className="border-l-4 border-l-yellow-500 shadow-sm">
-                        <CardContent className="p-5">
+                        <Card key={item.id} className="gap-0 border-l-4 border-l-yellow-500 py-0 shadow-sm">
+                        <CardContent className="p-3">
                             <div className="flex justify-between items-start">
                             <div className="font-medium text-lg"><MentionText text={item.content} names={mentionNames} /></div>
                             <div className="flex items-center gap-1 text-yellow-600 font-bold">
@@ -1228,8 +1340,8 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                         .map((item) => {
                             const totalVotes = item.votes.reduce((acc, v) => acc + v.count, 0)
                             return (
-                            <Card key={item.id}>
-                                <CardContent className="p-4">
+                            <Card key={item.id} className="gap-0 py-0">
+                                <CardContent className="p-3">
                                 <div className="flex justify-between items-start">
                                     <div className="font-medium"><MentionText text={item.content} names={mentionNames} /></div>
                                     <div className="flex items-center gap-1 text-yellow-600 font-bold">
@@ -1255,10 +1367,15 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                 collisionDetection={closestCorners}
                 onDragEnd={handleDragEnd}
             >
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[calc(100vh-180px)]">
+            <div className={cn(
+                "grid grid-cols-1 gap-4 h-[calc(100vh-150px)]",
+                retro.columns.length >= 4
+                    ? "md:grid-cols-2 xl:grid-cols-4"
+                    : "md:grid-cols-3"
+            )}>
             {retro.columns.map((column) => (
-                <Card key={column.id} className="h-full flex flex-col bg-slate-50/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 shadow-none">
-                <CardHeader className="py-2 px-3 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-t-lg">
+                <Card key={column.id} className="h-full flex flex-col gap-0 py-0 bg-slate-50/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 shadow-none">
+                <CardHeader className="py-2 px-3 [.border-b]:pb-2 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-t-lg">
                     <CardTitle className={cn(
                         "text-xs font-bold uppercase tracking-wider py-0.5 px-2.5 rounded-full w-fit border",
                         columnAccent(column.type).badge
@@ -1279,7 +1396,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
 
                         return (
                         <SortableItem key={item.id} id={item.id} disabled={retro.status !== 'INPUT'}>
-                        <Card className="bg-white dark:bg-gray-800 shadow-sm hover:shadow-md transition-shadow duration-200 border-0">
+                        <Card className="gap-0 py-0 bg-white dark:bg-gray-800 shadow-sm hover:shadow-md transition-shadow duration-200 border-0">
                             <CardContent className="p-2.5 space-y-1.5">
                             {editingItems[item.id] !== undefined ? (
                               <div className="flex flex-col gap-2" onPointerDown={(e) => e.stopPropagation()}>
@@ -1373,6 +1490,13 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                     })}
                     </SortableContext>
                     
+                    {retro.blindInput && retro.status === 'INPUT' && (column.hiddenItemCount ?? 0) > 0 && (
+                        <div className="flex items-center justify-center gap-1.5 rounded-md border border-dashed border-indigo-300 bg-indigo-50/50 py-1.5 text-xs font-medium text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/20 dark:text-indigo-300">
+                            <EyeOff className="h-3.5 w-3.5" />
+                            {column.hiddenItemCount} hidden card{column.hiddenItemCount === 1 ? '' : 's'} from others
+                        </div>
+                    )}
+
                     {retro.status === 'INPUT' && (
                         <div className="pt-2">
                         <div className="relative">

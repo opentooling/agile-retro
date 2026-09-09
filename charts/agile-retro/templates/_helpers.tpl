@@ -60,3 +60,28 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+DATABASE_URL environment entry.
+
+Shared by the app Deployment and the migration Job so the two can never end up
+pointed at different databases.
+*/}}
+{{- define "agile-retro.databaseUrlEnv" -}}
+- name: DATABASE_URL
+  {{- if .Values.sqlite.enabled }}
+  value: "file:{{ .Values.sqlite.mountPath }}/{{ .Values.sqlite.fileName }}"
+  {{- else if .Values.postgresql.enabled }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "agile-retro.fullname" . }}-postgres
+      key: database-url
+  {{- else if .Values.externalDatabase.existingSecret }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.externalDatabase.existingSecret }}
+      key: {{ .Values.externalDatabase.existingSecretKey | default "database-url" }}
+  {{- else }}
+  value: {{ required "Set sqlite.enabled=true, or postgresql.enabled=true, or provide externalDatabase.url / externalDatabase.existingSecret" .Values.externalDatabase.url | quote }}
+  {{- end }}
+{{- end }}

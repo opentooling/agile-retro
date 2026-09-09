@@ -113,6 +113,70 @@ See [docs/KEYCLOAK_GROUPS.md](docs/KEYCLOAK_GROUPS.md) for the required Keycloak
 mappers (notably the `groups` claim in the ID token) and group-based access
 control.
 
+## Database schema migrations
+
+The application creates and upgrades its own schema the first time it connects,
+so **no migration step is required** — deploying a new image is enough. Every
+statement is idempotent (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT
+EXISTS`) and application is serialised with a Postgres advisory lock, so
+concurrent replicas are safe.
+
+Enable the optional migration Job when you would rather make schema changes an
+explicit step:
+
+```yaml
+migration:
+  enabled: true
+```
+
+The Job runs as a Helm hook before the app rolls out, executing the same DDL the
+app would have run — `SCHEMA_SQL` in `src/lib/db/postgres.ts` is the single
+definition, so there is no second copy to drift. What you gain:
+
+- a failed migration **fails the Helm release**, loudly, instead of surfacing as
+  errors on the first request;
+- the Job's logs record exactly which tables and columns were added;
+- with `migration.skipAppBootstrap: true`, the app runs with
+  `DB_SKIP_SCHEMA_BOOTSTRAP=true` and never issues DDL — so its database user
+  does not need DDL rights at all. Note this makes the Job **required**: if it
+  fails, the app cannot serve requests.
+
+### Checking for drift without changing anything
+
+```yaml
+migration:
+  enabled: true
+  checkOnly: true
+```
+
+The Job reports any missing tables/columns and fails the release, changing
+nothing. Useful as a gate, or as a dry run before switching the real thing on.
+
+You can run the same check by hand against any database:
+
+```bash
+DATABASE_URL='postgres://…' npm run db:migrate -- --check
+```
+
+### Hook timing
+
+| Database | Hook | Why |
+| --- | --- | --- |
+| External (`externalDatabase.*`) | `pre-install,pre-upgrade` | The database already exists, so migrating before the app rolls out is the right order. |
+| Bundled (`postgresql.enabled`) | `post-install,pre-upgrade` | Helm creates hook resources *before* ordinary ones, so a `pre-install` hook would wait for a database Deployment that does not exist yet and deadlock. On install the app self-bootstraps; on upgrade the database is already up, so `pre-upgrade` behaves normally. |
+
+The Job waits up to `migration.waitSeconds` (default 60) for the database to
+accept connections, so it tolerates being scheduled slightly early.
+
+SQLite migrates itself when the file is opened, so the Job is never rendered
+when `sqlite.enabled`.
+
+### Reading the logs
+
+```bash
+kubectl logs job/<release>-agile-retro-migrate
+```
+
 ## Troubleshooting
 
 ### Version Mismatch Error

@@ -2,7 +2,7 @@ import * as db from '@/lib/db'
 import RetroBoard from '@/components/RetroBoard'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { redactRetroFull } from '@/lib/sanitize'
+import { redactRetroFull, applyBlindInput } from '@/lib/sanitize'
 import { authUserFromSession, canViewBoard, canManageBoard, type RetroRef } from '@/lib/authz'
 import { reconcileActionsForRetro } from '@/lib/jira-sync'
 
@@ -49,7 +49,7 @@ export default async function RetroPage({ params }: { params: Promise<{ id: stri
   // Strip the Jira API token before handing the retro to the client component.
   return (
     <RetroBoard
-      initialData={redactRetroFull(retro) as any}
+      initialData={applyBlindInput(redactRetroFull(retro), authUser?.id) as any}
       user={session?.user}
       viewer={{
         id: authUser?.id ?? '',

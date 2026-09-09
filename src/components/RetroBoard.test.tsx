@@ -1,6 +1,7 @@
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react'
 import RetroBoard from './RetroBoard'
 import { io } from 'socket.io-client'
+import { getCarriedOverActions, completeCarriedOverAction } from '@/app/actions'
  
 // Mock socket.io-client
 jest.mock('socket.io-client', () => {
@@ -23,6 +24,8 @@ jest.mock('next-themes', () => ({
 // so the component renders without pulling in the server-only data layer.
 jest.mock('@/app/actions', () => ({
   createExternalTaskForAction: jest.fn(),
+  getCarriedOverActions: jest.fn(() => Promise.resolve([])),
+  completeCarriedOverAction: jest.fn(() => Promise.resolve()),
 }))
  
 // Mock next/link
@@ -104,6 +107,13 @@ const mockRetroData = {
   isAnonymous: false,
 }
  
+// The carried-over-actions panel resolves a promise on mount, so let pending
+// microtasks settle before a test ends — otherwise its state update lands
+// outside act() and React warns.
+afterEach(async () => {
+  await act(async () => {})
+})
+
 describe('RetroBoard', () => {
   beforeEach(() => {
     jest.clearAllMocks()
@@ -130,6 +140,147 @@ describe('RetroBoard', () => {
   it('connects to socket on mount', () => {
     render(<RetroBoard initialData={mockRetroData} user={{ name: 'test-user' }} />)
     expect(io).toHaveBeenCalled()
+  })
+
+  describe('blind input', () => {
+    const blindData = {
+      ...mockRetroData,
+      blindInput: true,
+      columns: [
+        {
+          ...mockRetroData.columns[0],
+          hiddenItemCount: 3,
+          items: [{ id: 'mine', content: 'My own card', summary: null, userId: 'test-user-id', username: 'test-user', votes: [], reactions: [] }],
+        },
+        ...mockRetroData.columns.slice(1),
+      ],
+    }
+
+    it('tells the viewer why the board looks empty', () => {
+      render(<RetroBoard initialData={blindData} user={{ name: 'test-user' }} />)
+      expect(screen.getByText(/Blind input/)).toBeInTheDocument()
+      expect(screen.getByText('My own card')).toBeInTheDocument()
+    })
+
+    it('shows how many cards others have written without revealing them', () => {
+      render(<RetroBoard initialData={blindData} user={{ name: 'test-user' }} />)
+      expect(screen.getByText(/3 hidden cards from others/)).toBeInTheDocument()
+    })
+
+    it('drops the banner once the phase moves on', () => {
+      render(<RetroBoard initialData={{ ...blindData, status: 'VOTING' }} user={{ name: 'test-user' }} />)
+      expect(screen.queryByText(/Blind input/)).toBeNull()
+    })
+
+    it('says nothing on a board that did not opt in', () => {
+      render(<RetroBoard initialData={mockRetroData} user={{ name: 'test-user' }} />)
+      expect(screen.queryByText(/Blind input/)).toBeNull()
+    })
+  })
+
+  describe('carried-over actions', () => {
+    const teamData = { ...mockRetroData, team: { id: 't1', name: 'Platform' } }
+
+    it('surfaces open actions from the team\'s previous retros', async () => {
+      ;(getCarriedOverActions as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'a1', content: 'Fix the flaky pipeline', assignee: 'bo',
+          dueDate: null, externalUrl: null, externalKey: null,
+          retroId: 'r0', retroTitle: 'Sprint 41 Retro', retroCreatedAt: new Date().toISOString(),
+        },
+      ])
+      render(<RetroBoard initialData={teamData} user={{ name: 'test-user' }} />)
+
+      expect(await screen.findByText('Fix the flaky pipeline')).toBeInTheDocument()
+      expect(screen.getByText(/1 open action from previous retros/)).toBeInTheDocument()
+      expect(screen.getByText('Sprint 41 Retro')).toBeInTheDocument()
+    })
+
+    it('lets anyone tick one off, and drops it from the list', async () => {
+      ;(getCarriedOverActions as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'a1', content: 'Fix the flaky pipeline', assignee: null,
+          dueDate: null, externalUrl: null, externalKey: null,
+          retroId: 'r0', retroTitle: 'Sprint 41 Retro', retroCreatedAt: new Date().toISOString(),
+        },
+      ])
+      render(<RetroBoard initialData={teamData} user={{ name: 'test-user' }} />)
+
+      const checkbox = await screen.findByLabelText('Mark "Fix the flaky pipeline" done')
+      fireEvent.click(checkbox)
+
+      await waitFor(() => expect(completeCarriedOverAction).toHaveBeenCalledWith('a1', true))
+      await waitFor(() => expect(screen.queryByText('Fix the flaky pipeline')).toBeNull())
+    })
+
+    it('shows nothing on an open board, which has no team history', async () => {
+      render(<RetroBoard initialData={mockRetroData} user={{ name: 'test-user' }} />)
+      await waitFor(() => expect(getCarriedOverActions).not.toHaveBeenCalled())
+    })
+  })
+
+  describe('phase timer', () => {
+    // A phase that started 6 minutes ago with a 5 minute budget: 1 minute over.
+    const overtimeData = {
+      ...mockRetroData,
+      status: 'INPUT',
+      inputDuration: 5,
+      phaseStartTime: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+    }
+
+    const renderAsOwner = (data: typeof mockRetroData) =>
+      render(
+        <RetroBoard
+          initialData={data}
+          user={{ name: 'test-user' }}
+          viewer={{ id: 'test-user-id', name: 'test-user', isAdmin: false, canManage: true }}
+        />
+      )
+
+    it('never advances the phase on its own once the time runs out', () => {
+      renderAsOwner(overtimeData)
+      const mockSocket = (io as jest.Mock).mock.results[0].value
+      const statusEmits = mockSocket.emit.mock.calls.filter((c: unknown[]) => c[0] === 'update-status')
+      expect(statusEmits).toHaveLength(0)
+    })
+
+    it('counts into negative time instead of stopping at zero', () => {
+      renderAsOwner(overtimeData)
+      expect(screen.getByText('Overtime')).toBeInTheDocument()
+      expect(screen.getByText(/^-0[01]:\d{2}$/)).toBeInTheDocument()
+      expect(screen.queryByText('Time Remaining')).toBeNull()
+    })
+
+    it('still counts down normally before the deadline', () => {
+      renderAsOwner({
+        ...mockRetroData,
+        phaseStartTime: new Date(Date.now() - 60 * 1000).toISOString(),
+      })
+      expect(screen.getByText('Time Remaining')).toBeInTheDocument()
+      expect(screen.queryByText('Overtime')).toBeNull()
+    })
+
+    it('offers the facilitator a snooze while in overtime', () => {
+      renderAsOwner(overtimeData)
+      const mockSocket = (io as jest.Mock).mock.results[0].value
+
+      fireEvent.click(screen.getByRole('button', { name: /Snooze 5 minutes/ }))
+
+      expect(mockSocket.emit).toHaveBeenCalledWith('extend-timer', { retroId: 'test-retro-id' })
+    })
+
+    it('does not offer the snooze to a non-facilitator', () => {
+      render(
+        <RetroBoard
+          initialData={overtimeData}
+          user={{ name: 'someone-else' }}
+          viewer={{ id: 'other', name: 'someone-else', isAdmin: false, canManage: false }}
+        />
+      )
+      expect(screen.queryByRole('button', { name: /Snooze 5 minutes/ })).toBeNull()
+      // …but the clock is still visible to everyone.
+      expect(screen.getByText('Overtime')).toBeInTheDocument()
+    })
   })
 
   describe('REVIEW phase', () => {

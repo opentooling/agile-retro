@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS "Retrospective" (
     "creator" TEXT NOT NULL DEFAULT 'Anonymous',
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "isAnonymous" BOOLEAN NOT NULL DEFAULT 0,
+    "blindInput" BOOLEAN NOT NULL DEFAULT 0,
     "inputDuration" INTEGER,
     "votingDuration" INTEGER,
     "reviewDuration" INTEGER,
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS "Column" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "title" TEXT NOT NULL,
     "type" TEXT NOT NULL,
+    "order" INTEGER NOT NULL DEFAULT 0,
     "retrospectiveId" TEXT NOT NULL,
     CONSTRAINT "Column_retrospectiveId_fkey" FOREIGN KEY ("retrospectiveId") REFERENCES "Retrospective" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
@@ -137,6 +139,8 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE "ActionItem" ADD COLUMN "dueDate" DATETIME`,
   `ALTER TABLE "ActionItem" ADD COLUMN "externalUrl" TEXT`,
   `ALTER TABLE "ActionItem" ADD COLUMN "externalKey" TEXT`,
+  `ALTER TABLE "Retrospective" ADD COLUMN "blindInput" BOOLEAN NOT NULL DEFAULT 0`,
+  `ALTER TABLE "Column" ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0`,
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -177,6 +181,7 @@ function migrateRetroTeamIdNullable(db: DatabaseSync): void {
           "creator" TEXT NOT NULL DEFAULT 'Anonymous',
           "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           "isAnonymous" BOOLEAN NOT NULL DEFAULT 0,
+          "blindInput" BOOLEAN NOT NULL DEFAULT 0,
           "inputDuration" INTEGER,
           "votingDuration" INTEGER,
           "reviewDuration" INTEGER,
@@ -185,9 +190,9 @@ function migrateRetroTeamIdNullable(db: DatabaseSync): void {
           CONSTRAINT "Retrospective_teamId_fkey" FOREIGN KEY ("teamId") REFERENCES "Team" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
       );
       INSERT INTO "Retrospective_new"
-        ("id","title","status","tags","creator","createdAt","isAnonymous",
+        ("id","title","status","tags","creator","createdAt","isAnonymous","blindInput",
          "inputDuration","votingDuration","reviewDuration","phaseStartTime","teamId")
-        SELECT "id","title","status","tags","creator","createdAt","isAnonymous",
+        SELECT "id","title","status","tags","creator","createdAt","isAnonymous","blindInput",
                "inputDuration","votingDuration","reviewDuration","phaseStartTime","teamId"
         FROM "Retrospective";
       DROP TABLE "Retrospective";
@@ -277,7 +282,7 @@ const mapTeam = (r: Row): Team => ({
   jiraEmail: r.jiraEmail ?? null,
   jiraApiToken: r.jiraApiToken ?? null,
 });
-const mapColumn = (r: Row): Column => ({ id: r.id, title: r.title, type: r.type, retrospectiveId: r.retrospectiveId });
+const mapColumn = (r: Row): Column => ({ id: r.id, title: r.title, type: r.type, retrospectiveId: r.retrospectiveId, order: r.order ?? 0 });
 const mapVote = (r: Row): Vote => ({ id: r.id, itemId: r.itemId, userId: r.userId, count: r.count });
 const mapReaction = (r: Row): Reaction => ({
   id: r.id, emoji: r.emoji, userId: r.userId, itemId: r.itemId, createdAt: toDate(r.createdAt),
@@ -300,6 +305,7 @@ const mapRetro = (r: Row): Retrospective => ({
   creator: r.creator,
   createdAt: toDate(r.createdAt),
   isAnonymous: toBool(r.isAnonymous),
+  blindInput: toBool(r.blindInput),
   inputDuration: r.inputDuration ?? null,
   votingDuration: r.votingDuration ?? null,
   reviewDuration: r.reviewDuration ?? null,
@@ -439,7 +445,16 @@ export function getRetroFull(id: string): RetroFull | null {
   const retro = mapRetro(retroRow);
 
   const columns = db
-    .prepare(`SELECT * FROM "Column" WHERE "retrospectiveId" = ?`)
+    .prepare(
+      // Explicit ordering, mirroring the Postgres backend. Boards predating
+      // formats have "order" 0 throughout, so the classic-type CASE orders them.
+      `SELECT * FROM "Column" WHERE "retrospectiveId" = ?
+       ORDER BY "order", CASE "type"
+         WHEN 'WHAT_WENT_WELL' THEN 0
+         WHEN 'WHAT_DIDNT_GO_WELL' THEN 1
+         WHEN 'WHAT_SHOULD_BE_IMPROVED' THEN 2
+         ELSE 3 END, "title"`
+    )
     .all(id)
     .map(mapColumn);
 
@@ -475,9 +490,9 @@ export function createRetrospectiveWithColumns(
   return transaction(() => {
     db.prepare(
       `INSERT INTO "Retrospective"
-        ("id","title","status","tags","creator","createdAt","isAnonymous",
+        ("id","title","status","tags","creator","createdAt","isAnonymous","blindInput",
          "inputDuration","votingDuration","reviewDuration","phaseStartTime","teamId")
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
     ).run(
       id,
       data.title,
@@ -486,6 +501,7 @@ export function createRetrospectiveWithColumns(
       data.creator,
       createdAt,
       data.isAnonymous ? 1 : 0,
+      data.blindInput ? 1 : 0,
       data.inputDuration,
       data.votingDuration,
       data.reviewDuration,
@@ -493,10 +509,10 @@ export function createRetrospectiveWithColumns(
       data.teamId
     );
     const colStmt = db.prepare(
-      `INSERT INTO "Column" ("id","title","type","retrospectiveId") VALUES (?,?,?,?)`
+      `INSERT INTO "Column" ("id","title","type","order","retrospectiveId") VALUES (?,?,?,?,?)`
     );
-    for (const c of columns) {
-      colStmt.run(randomUUID(), c.title, c.type, id);
+    for (const [index, c] of columns.entries()) {
+      colStmt.run(randomUUID(), c.title, c.type, index, id);
     }
     return mapRetro(db.prepare(`SELECT * FROM "Retrospective" WHERE "id" = ?`).get(id) as Row);
   });
@@ -761,6 +777,14 @@ export function listActionItems(filter: ActionFilter): ActionItemWithRetro[] {
     needsTeamJoin = true;
     clauses.push(`t."name" LIKE ?`);
     params.push(`%${filter.teamNameContains}%`);
+  }
+  if (filter.teamId) {
+    clauses.push(`r."teamId" = ?`);
+    params.push(filter.teamId);
+  }
+  if (filter.excludeRetrospectiveId) {
+    clauses.push(`a."retrospectiveId" <> ?`);
+    params.push(filter.excludeRetrospectiveId);
   }
 
   const teamJoin = needsTeamJoin ? `JOIN "Team" t ON t."id" = r."teamId"` : "";
