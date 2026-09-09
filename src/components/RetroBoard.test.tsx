@@ -142,6 +142,61 @@ describe('RetroBoard', () => {
     expect(io).toHaveBeenCalled()
   })
 
+  describe('voting', () => {
+    const votingData = {
+      ...mockRetroData,
+      status: 'VOTING',
+      columns: [
+        {
+          ...mockRetroData.columns[0],
+          items: [{ id: 'item-1', content: 'Flaky CI', summary: null, userId: 'test-user-id', username: 'test-user', votes: [{ userId: 'test-user-id', count: 2 }], reactions: [] }],
+        },
+        ...mockRetroData.columns.slice(1),
+      ],
+    }
+
+    it('sets the vote count from the star you click', () => {
+      render(<RetroBoard initialData={votingData} user={{ name: 'test-user' }} />)
+      const mockSocket = (io as jest.Mock).mock.results[0].value
+
+      // Starting at 2 votes, clicking the 5th star should ask for 3 more.
+      fireEvent.click(screen.getByLabelText('Give 5 votes'))
+      expect(mockSocket.emit).toHaveBeenCalledWith('vote', expect.objectContaining({ itemId: 'item-1', delta: 3 }))
+    })
+
+    it('steps back down when you click the star you are already on', () => {
+      // Otherwise there is no way to reach zero with a row of stars.
+      render(<RetroBoard initialData={votingData} user={{ name: 'test-user' }} />)
+      const mockSocket = (io as jest.Mock).mock.results[0].value
+
+      fireEvent.click(screen.getByLabelText('Reduce to 1 votes'))
+      expect(mockSocket.emit).toHaveBeenCalledWith('vote', expect.objectContaining({ itemId: 'item-1', delta: -1 }))
+    })
+
+    it('gives every star a 24px hit target', () => {
+      // A bare 16px icon is below the WCAG 2.5.8 minimum, and these get used
+      // under time pressure in a narrow column.
+      render(<RetroBoard initialData={votingData} user={{ name: 'test-user' }} />)
+      expect(screen.getByLabelText('Give 5 votes').className).toMatch(/h-6 w-6/)
+    })
+
+    it('disables stars the viewer cannot afford', () => {
+      const spent = {
+        ...votingData,
+        columns: [
+          {
+            ...votingData.columns[0],
+            items: [{ ...votingData.columns[0].items[0], votes: [{ userId: 'test-user-id', count: 10 }] }],
+          },
+          ...votingData.columns.slice(1),
+        ],
+      }
+      render(<RetroBoard initialData={spent} user={{ name: 'test-user' }} />)
+      // All 10 votes spent on this item, so nothing above it is reachable…
+      expect(screen.getByLabelText('Reduce to 9 votes')).not.toBeDisabled()
+    })
+  })
+
   describe('blind input', () => {
     const blindData = {
       ...mockRetroData,
@@ -305,6 +360,17 @@ describe('RetroBoard', () => {
 
     const renderReview = () =>
       render(<RetroBoard initialData={reviewData} user={{ name: 'test-user' }} />)
+
+    it('lets the cards fill the available width', () => {
+      // The review list is a flex item, and a flex item with auto cross-axis
+      // margins shrinks to its content instead of stretching. Without an
+      // explicit width the cards collapse to the width of the shortest card's
+      // text, which is what happened when the board became a flex column.
+      const { container } = renderReview()
+      const list = container.querySelector('.max-w-5xl')
+      expect(list).not.toBeNull()
+      expect(list!.className).toMatch(/\bw-full\b/)
+    })
 
     it('labels each item with the column it came from', () => {
       renderReview()

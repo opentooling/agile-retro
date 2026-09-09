@@ -7,9 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users, Calendar, User as UserIcon, ExternalLink, Pencil, Check, X, SmilePlus, EyeOff } from 'lucide-react'
+import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users, Calendar, User as UserIcon, ExternalLink, Pencil, Check, X, SmilePlus, EyeOff, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from "@/lib/utils"
-import { ModeToggle } from "@/components/mode-toggle"
 import { MentionInput, MentionText } from "@/components/Mentions"
 import { createExternalTaskForAction, getCarriedOverActions, completeCarriedOverAction, type CarriedAction } from "@/app/actions"
 import {
@@ -93,29 +92,98 @@ type ActionData = {
  * Colour accent for a column type, so an item stays recognisable once it's
  * lifted out of its column (the review list mixes all three together).
  */
-function columnAccent(type: string): { badge: string; border: string } {
+const ACCENT_PALETTE = {
+  positive: {
+    badge: 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800',
+    border: 'border-l-green-500',
+  },
+  negative: {
+    badge: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800',
+    border: 'border-l-red-500',
+  },
+  improve: {
+    badge: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
+    border: 'border-l-blue-500',
+  },
+  risk: {
+    badge: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800',
+    border: 'border-l-amber-500',
+  },
+  neutral: {
+    badge: 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+    border: 'border-l-slate-400',
+  },
+} as const
+
+export function columnAccent(type: string): { badge: string; border: string } {
   switch (type) {
     case 'START':
     case 'WHAT_WENT_WELL':
-      return {
-        badge: 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800',
-        border: 'border-l-green-500',
-      }
+      return ACCENT_PALETTE.positive
     case 'STOP':
     case 'WHAT_DIDNT_GO_WELL':
-      return {
-        badge: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800',
-        border: 'border-l-red-500',
-      }
+      return ACCENT_PALETTE.negative
     case 'CONTINUE':
     case 'WHAT_SHOULD_BE_IMPROVED':
-      return {
-        badge: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
-        border: 'border-l-blue-500',
-      }
-    default:
-      return { badge: 'bg-muted text-muted-foreground border-border', border: 'border-l-slate-400' }
+      return ACCENT_PALETTE.improve
   }
+
+  // Every other template encodes its sentiment as a suffix on the type (see
+  // lib/retro-templates.ts), so a new format gets sensible colours without a
+  // per-type entry here. retro-templates.test.ts asserts every shipped column
+  // resolves to a real accent, so a format can't silently render all-grey.
+  if (type.endsWith('_POSITIVE')) return ACCENT_PALETTE.positive
+  if (type.endsWith('_NEGATIVE')) return ACCENT_PALETTE.negative
+  if (type.endsWith('_IMPROVE')) return ACCENT_PALETTE.improve
+  if (type.endsWith('_RISK')) return ACCENT_PALETTE.risk
+  return ACCENT_PALETTE.neutral
+}
+
+/** Board phases in order, with the labels people actually say out loud. */
+const PHASES = [
+  { id: 'INPUT', label: 'Input' },
+  { id: 'VOTING', label: 'Voting' },
+  { id: 'REVIEW', label: 'Review' },
+  { id: 'ACTIONS', label: 'Actions' },
+] as const
+
+/**
+ * Where the board is, and what comes next. Replaces a raw status enum in the
+ * header — in a live retro this is the fact the whole room is looking for, and
+ * it needs to be readable from the back of a room on a projector.
+ */
+function PhaseStepper({ status }: { status: string }) {
+  if (status === 'CLOSED') {
+    return (
+      <span className="rounded-full bg-muted px-3 py-1 text-sm font-semibold text-muted-foreground">
+        Closed
+      </span>
+    )
+  }
+  const current = PHASES.findIndex((p) => p.id === status)
+  return (
+    <ol className="flex items-center gap-1" aria-label="Retrospective phase">
+      {PHASES.map((phase, i) => {
+        const state = i < current ? 'done' : i === current ? 'current' : 'upcoming'
+        return (
+          <li key={phase.id} className="flex items-center gap-1">
+            {i > 0 && <span aria-hidden className="h-px w-3 bg-border sm:w-4" />}
+            <span
+              aria-current={state === 'current' ? 'step' : undefined}
+              className={cn(
+                'rounded-full px-2.5 py-1 text-sm font-semibold transition-colors sm:px-3',
+                state === 'current' && 'bg-primary text-primary-foreground',
+                state === 'done' && 'text-muted-foreground',
+                state === 'upcoming' && 'text-muted-foreground/50'
+              )}
+            >
+              {phase.label}
+            </span>
+          </li>
+        )
+      })}
+    </ol>
+  )
 }
 
 /** Emoji offered for item reactions. Kept short so the row stays one line. */
@@ -372,7 +440,7 @@ function CarriedOverPanel({ retroId, names }: { retroId: string; names: string[]
                   checked={false}
                   disabled={busy === action.id}
                   onChange={() => complete(action.id)}
-                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-green-600"
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-green-700 dark:text-green-400"
                   aria-label={`Mark "${action.content}" done`}
                 />
                 <div className="min-w-0 flex-1">
@@ -435,7 +503,7 @@ function ActionComposer({
   }
 
   return (
-    <div className="flex flex-col gap-2 bg-white dark:bg-gray-900 p-3 rounded-xl shadow-sm border">
+    <div className="flex flex-col gap-2 bg-card p-3 rounded-xl shadow-sm border">
       <MentionInput
         multiline
         value={content}
@@ -510,7 +578,7 @@ function ActionCard({
             <input
               type="checkbox"
               checked={action.completed}
-              className="mt-1 w-5 h-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
+              className="mt-1 w-5 h-5 rounded border-gray-300 text-green-700 dark:text-green-400 focus:ring-green-500"
               onChange={onToggle}
             />
           )}
@@ -610,6 +678,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
   const [participants, setParticipants] = useState<{ userId: string, username: string, isReady: boolean }[]>([])
   const [isReady, setIsReady] = useState(false)
   const [isWarningDismissed, setIsWarningDismissed] = useState(false)
+  const [participantsCollapsed, setParticipantsCollapsed] = useState(false)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -955,7 +1024,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                 />
               </div>
               <Button 
-                className="h-11 bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                className="h-11 bg-primary text-primary-foreground hover:bg-primary/90 text-white transition-colors"
                 disabled={!username.trim()}
                 onClick={() => {
                   localStorage.setItem('retro-username', username)
@@ -972,10 +1041,10 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex">
+    <div className="flex h-dvh bg-background">
       {/* Main Board Area */}
-      <div className="flex-1 p-4 lg:p-6 overflow-y-auto">
-        <div className="max-w-7xl mx-auto">
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto p-4 lg:p-6">
+        <div className="mx-auto flex w-full min-h-0 max-w-7xl flex-1 flex-col">
             {accessDenied && (
               <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
                 That action wasn&apos;t permitted. You may not have the right access on this board.
@@ -1013,13 +1082,9 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                         </div>
                     )}
                 </div>
-                <ModeToggle />
             </div>
             <div className="flex items-center gap-6">
-                <div className="flex flex-col items-end">
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</span>
-                    <span className="text-lg font-bold">{retro.status}</span>
-                </div>
+                <PhaseStepper status={retro.status} />
                 
                 {/* Timer. Runs past zero into overtime; only the facilitator
                     moves the phase on. */}
@@ -1039,7 +1104,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                                 {over ? 'Overtime' : 'Time Remaining'}
                             </span>
                             <span className={cn(
-                                "text-2xl font-black font-mono tabular-nums",
+                                "font-mono text-3xl font-black tabular-nums leading-none sm:text-4xl",
                                 over ? "text-red-600 dark:text-red-400" :
                                 isLowTime ? "text-red-500 animate-pulse" : "text-gray-700 dark:text-gray-300"
                             )}>
@@ -1104,7 +1169,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                             {isReady ? "I'm Ready!" : "Mark as Ready"}
                         </Button>
                         {isOwner && (
-                            <Button onClick={() => handleUpdateStatus('VOTING')} className={cn('bg-blue-600 hover:bg-blue-700 gap-2', isOvertime && 'ring-2 ring-red-400 ring-offset-2 dark:ring-offset-slate-900')}>
+                            <Button onClick={() => handleUpdateStatus('VOTING')} className={cn('bg-primary text-primary-foreground hover:bg-primary/90 gap-2', isOvertime && 'ring-2 ring-red-400 ring-offset-2 dark:ring-offset-slate-900')}>
                                 <Play className="w-4 h-4" /> Start Voting
                             </Button>
                         )}
@@ -1120,14 +1185,14 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                             {isReady ? "I'm Ready!" : "Mark as Ready"}
                         </Button>
                         {isOwner && (
-                            <Button onClick={() => handleUpdateStatus('REVIEW')} className={cn('bg-blue-600 hover:bg-blue-700 gap-2', isOvertime && 'ring-2 ring-red-400 ring-offset-2 dark:ring-offset-slate-900')}>
+                            <Button onClick={() => handleUpdateStatus('REVIEW')} className={cn('bg-primary text-primary-foreground hover:bg-primary/90 gap-2', isOvertime && 'ring-2 ring-red-400 ring-offset-2 dark:ring-offset-slate-900')}>
                                 <Eye className="w-4 h-4" /> Start Review
                             </Button>
                         )}
                     </div>
                 )}
                 {retro.status === 'REVIEW' && isOwner && (
-                <Button onClick={() => handleUpdateStatus('ACTIONS')} className={cn('bg-blue-600 hover:bg-blue-700 gap-2', isOvertime && 'ring-2 ring-red-400 ring-offset-2 dark:ring-offset-slate-900')}>
+                <Button onClick={() => handleUpdateStatus('ACTIONS')} className={cn('bg-primary text-primary-foreground hover:bg-primary/90 gap-2', isOvertime && 'ring-2 ring-red-400 ring-offset-2 dark:ring-offset-slate-900')}>
                     <ListTodo className="w-4 h-4" /> Start Actions
                 </Button>
                 )}
@@ -1165,7 +1230,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                                     <div className="min-w-0 flex-1 space-y-1">
                                         <div className="flex flex-wrap items-center gap-1.5">
                                             <span className={cn(
-                                                'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+                                                'rounded-full border px-2 py-0.5 text-xs font-bold uppercase tracking-wider',
                                                 accent.badge
                                             )}>
                                                 {column.title}
@@ -1181,7 +1246,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                                     <div className={cn(
                                         'flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-sm font-bold',
                                         total > 0
-                                            ? 'bg-yellow-50 text-yellow-600 dark:bg-yellow-900/20'
+                                            ? 'bg-yellow-50 text-amber-700 dark:text-amber-400 dark:bg-yellow-900/20'
                                             : 'text-muted-foreground'
                                     )}>
                                         <Star className={cn('h-3.5 w-3.5', total > 0 && 'fill-current')} /> {total}
@@ -1203,7 +1268,14 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                 }
 
                 return (
-                    <div className="mx-auto max-w-5xl space-y-2">
+                    <div
+                        // w-full matters: this is a flex item now, and a flex
+                        // item with auto cross-axis margins does NOT stretch —
+                        // it shrinks to its content and centres. Without an
+                        // explicit width the review cards collapse to the
+                        // width of the shortest card's text.
+                        className="mx-auto w-full max-w-5xl space-y-2"
+                    >
                         {voted.map(renderEntry)}
                         {unvoted.length > 0 && (
                             <div className="flex items-center gap-3 pt-3 pb-1">
@@ -1227,7 +1299,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <div className="space-y-6">
                 <h2 className="text-2xl font-bold flex items-center gap-2">
-                    <Star className="w-6 h-6 text-yellow-500 fill-yellow-500" />
+                    <Star className="w-6 h-6 text-amber-600 dark:text-amber-400 fill-yellow-500" />
                     Top 5 Items
                 </h2>
                 <div className="space-y-4">
@@ -1246,7 +1318,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                         <CardContent className="p-3">
                             <div className="flex justify-between items-start">
                             <div className="font-medium text-lg"><MentionText text={item.content} names={mentionNames} /></div>
-                            <div className="flex items-center gap-1 text-yellow-600 font-bold">
+                            <div className="flex items-center gap-1 text-amber-700 dark:text-amber-400 font-bold">
                                 <Star className="w-4 h-4 fill-current" /> {totalVotes}
                             </div>
                             </div>
@@ -1281,7 +1353,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
             </div>
             ) : retro.status === 'CLOSED' ? (
             <div className="space-y-8">
-                <div className="bg-gray-100 dark:bg-gray-800 p-8 rounded-2xl text-center border-2 border-dashed border-gray-300 dark:border-gray-700">
+                <div className="bg-muted p-6 rounded-lg text-center border-2 border-dashed">
                 <h2 className="text-3xl font-bold text-gray-500">Retrospective Closed</h2>
                 <p className="text-muted-foreground mt-2">This session is read-only.</p>
                 <div className="mt-6">
@@ -1344,7 +1416,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                                 <CardContent className="p-3">
                                 <div className="flex justify-between items-start">
                                     <div className="font-medium"><MentionText text={item.content} names={mentionNames} /></div>
-                                    <div className="flex items-center gap-1 text-yellow-600 font-bold">
+                                    <div className="flex items-center gap-1 text-amber-700 dark:text-amber-400 font-bold">
                                     <Star className="w-4 h-4 fill-current" /> {totalVotes}
                                     </div>
                                 </div>
@@ -1368,9 +1440,15 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                 onDragEnd={handleDragEnd}
             >
             <div className={cn(
-                "grid grid-cols-1 gap-4 h-[calc(100vh-150px)]",
+                // Fills whatever the header and banners leave, rather than
+                // guessing at a fixed offset. min-h-0 lets the columns scroll
+                // internally instead of stretching the page.
+                "grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden",
                 retro.columns.length >= 4
-                    ? "md:grid-cols-2 xl:grid-cols-4"
+                    // Four columns only once there's genuinely room: at 1280
+                    // with both rails they'd be ~172px wide, about 19
+                    // characters a line.
+                    ? "md:grid-cols-2 2xl:grid-cols-4"
                     : "md:grid-cols-3"
             )}>
             {retro.columns.map((column) => (
@@ -1422,7 +1500,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                                   <button
                                     type="button"
                                     aria-label="Edit item"
-                                    className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0"
+                                    className="-m-1 shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-focus-within:opacity-100 group-hover:opacity-100"
                                     onPointerDown={(e) => e.stopPropagation()}
                                     onClick={() => startEditItem(item.id, item.content)}
                                   >
@@ -1437,7 +1515,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                                         {retro.isAnonymous ? "Anonymous" : item.username}
                                     </div>
                                     {retro.status !== 'INPUT' && retro.status !== 'VOTING' && (
-                                    <div className="flex shrink-0 items-center gap-1 text-xs font-bold text-yellow-600">
+                                    <div className="flex shrink-0 items-center gap-1 text-xs font-bold text-amber-700 dark:text-amber-400">
                                         <Star className="w-3 h-3 fill-current" /> {totalItemVotes}
                                     </div>
                                     )}
@@ -1453,31 +1531,56 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                                 )}
 
                                 {retro.status === 'VOTING' && (
-                                <div className="flex flex-col gap-0.5 w-full">
-                                    <span className="text-[10px] uppercase font-bold text-muted-foreground">Your Votes</span>
-                                    <div className="flex flex-wrap gap-0.5">
-                                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((star) => (
-                                            <button
-                                                key={star}
-                                                onClick={() => {
-                                                    // If clicking the same star count, maybe toggle off? Or just set.
-                                                    // Let's just set.
-                                                    // Check if we have enough votes remaining to increase
-                                                    const diff = star - userVoteCount
-                                                    if (diff > 0 && votesRemaining < diff) return // Not enough votes
-                                                    handleSetVote(item.id, star)
-                                                }}
-                                                disabled={votesRemaining <= 0 && star > userVoteCount}
-                                                className={cn(
-                                                    "transition-transform hover:scale-110 focus:outline-none",
-                                                    star <= userVoteCount ? "text-yellow-500" : "text-gray-300 dark:text-gray-600",
-                                                    (votesRemaining <= 0 && star > userVoteCount) ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:text-yellow-400"
-                                                )}
-                                                onPointerDown={(e) => e.stopPropagation()} // Prevent drag start on vote click
-                                            >
-                                                <Star className={cn("w-4 h-4", star <= userVoteCount && "fill-current")} />
-                                            </button>
-                                        ))}
+                                // Stars, but each one padded out to a 24px hit
+                                // target (WCAG 2.5.8) instead of a bare 16px
+                                // icon 2px from its neighbours. They wrap onto
+                                // a second row in a narrow column rather than
+                                // shrinking further.
+                                <div className="flex flex-col gap-1">
+                                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                        Your votes
+                                        {userVoteCount > 0 && (
+                                          <span className="ml-1 font-bold text-amber-700 dark:text-amber-400">{userVoteCount}</span>
+                                        )}
+                                    </span>
+                                    <div
+                                        className="flex flex-wrap gap-0.5"
+                                        role="group"
+                                        aria-label="Your votes for this item"
+                                        onPointerDown={(e) => e.stopPropagation()}
+                                    >
+                                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((star) => {
+                                            const filled = star <= userVoteCount
+                                            // Clicking the star you're already on steps back down,
+                                            // so you can reach zero without hunting for a control.
+                                            const target = star === userVoteCount ? star - 1 : star
+                                            // Only block increases you can't afford.
+                                            const cost = target - userVoteCount
+                                            const unaffordable = cost > 0 && votesRemaining < cost
+                                            return (
+                                                <button
+                                                    key={star}
+                                                    type="button"
+                                                    disabled={unaffordable}
+                                                    aria-label={
+                                                        star === userVoteCount
+                                                            ? `Reduce to ${star - 1} votes`
+                                                            : `Give ${star} vote${star === 1 ? '' : 's'}`
+                                                    }
+                                                    aria-pressed={filled}
+                                                    onClick={() => handleSetVote(item.id, target)}
+                                                    className={cn(
+                                                        "flex h-6 w-6 items-center justify-center rounded transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                                        filled ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground/40",
+                                                        unaffordable
+                                                            ? "cursor-not-allowed opacity-40"
+                                                            : "cursor-pointer hover:scale-110 hover:text-amber-500"
+                                                    )}
+                                                >
+                                                    <Star className={cn("h-4 w-4", filled && "fill-current")} />
+                                                </button>
+                                            )
+                                        })}
                                     </div>
                                 </div>
                                 )}
@@ -1511,7 +1614,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                             />
                             <Button
                                 size="icon"
-                                className="absolute bottom-2 right-2 h-8 w-8 bg-blue-600 hover:bg-blue-700"
+                                className="absolute bottom-2 right-2 h-8 w-8 bg-primary text-primary-foreground hover:bg-primary/90"
                                 onClick={() => handleAddItem(column.id)}
                                 disabled={!newItemContent[column.id]?.trim()}
                             >
@@ -1529,23 +1632,58 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
         </div>
       </div>
 
-      {/* Participants Sidebar */}
-      <div className="w-64 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 p-4 flex flex-col">
-        <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-            Participants
-            <span className="bg-gray-100 dark:bg-gray-800 text-xs px-2 py-1 rounded-full">{participants.length}</span>
-        </h2>
-        <div className="space-y-2 overflow-y-auto flex-1">
+      {/* Participants rail. Collapsible, because on a 1280px laptop it and the
+          global nav together take 512px from the columns. Collapsed it keeps
+          the same information as a stacked avatar strip. */}
+      <div className={cn(
+          "flex flex-col border-l bg-card transition-all duration-200",
+          participantsCollapsed ? "w-14 p-2" : "w-56 p-3"
+      )}>
+        <div className={cn("mb-2 flex items-center gap-1", participantsCollapsed ? "justify-center" : "justify-between")}>
+            {!participantsCollapsed && (
+              <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Participants
+                <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-bold text-foreground">{participants.length}</span>
+              </h2>
+            )}
+            <button
+              type="button"
+              onClick={() => setParticipantsCollapsed((c) => !c)}
+              aria-label={participantsCollapsed ? 'Expand participants' : 'Collapse participants'}
+              aria-expanded={!participantsCollapsed}
+              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {participantsCollapsed
+                ? <ChevronLeft className="h-4 w-4" />
+                : <ChevronRight className="h-4 w-4" />}
+            </button>
+        </div>
+        <div className={cn("flex-1 overflow-y-auto", participantsCollapsed ? "space-y-1.5" : "space-y-1")}>
             {participants.map((p) => (
-                <div key={p.userId} className="flex items-center justify-between p-2 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                    <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-400 flex items-center justify-center text-white font-bold text-xs">
+                <div
+                  key={p.userId}
+                  title={participantsCollapsed ? `${p.username}${p.isReady ? ' · ready' : ''}` : p.username}
+                  className={cn(
+                    "flex items-center rounded-md transition-colors hover:bg-accent",
+                    participantsCollapsed ? "justify-center p-1" : "justify-between gap-2 p-1.5"
+                  )}
+                >
+                    <div className="flex min-w-0 items-center gap-2">
+                        <div className={cn(
+                          "relative flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-400 to-purple-400 text-xs font-bold text-white",
+                          participantsCollapsed ? "h-8 w-8" : "h-7 w-7"
+                        )}>
                             {p.username.substring(0, 2).toUpperCase()}
+                            {participantsCollapsed && p.isReady && (
+                              <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card bg-green-500" />
+                            )}
                         </div>
-                        <span className="text-sm font-medium truncate max-w-[100px]" title={p.username}>{p.username}</span>
+                        {!participantsCollapsed && (
+                          <span className="truncate text-sm font-medium">{p.username}</span>
+                        )}
                     </div>
-                    {p.isReady && (
-                        <span className="text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2 py-1 rounded-full font-medium">
+                    {!participantsCollapsed && p.isReady && (
+                        <span className="shrink-0 rounded-full bg-green-100 px-1.5 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
                             Ready
                         </span>
                     )}

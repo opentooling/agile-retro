@@ -10,6 +10,16 @@ import { Users, Plus, CheckCircle, AlertCircle, Pencil, Link2, Shield, ImagePlus
 import { CreateRetroDialog } from "@/components/CreateRetroDialog"
 import { useSearchParams } from 'next/navigation'
 import { GroupsField, useKeycloakGroups } from "@/components/GroupsField"
+import { PageShell, PageHeader } from "@/components/PageHeader"
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from "@/components/ui/dialog"
 
 type Team = {
     id: string
@@ -31,6 +41,7 @@ export default function TeamsPage() {
     const [newMemberGroups, setNewMemberGroups] = useState<string[]>([])
     const [newAdminGroups, setNewAdminGroups] = useState<string[]>([])
     const [isLoading, setIsLoading] = useState(false)
+    const [createOpen, setCreateOpen] = useState(false)
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
     const groupSuggestions = useKeycloakGroups()
     const searchParams = useSearchParams()
@@ -66,6 +77,7 @@ export default function TeamsPage() {
             setNewMemberGroups([])
             setNewAdminGroups([])
             setMessage({ type: 'success', text: 'Team created successfully' })
+            setCreateOpen(false)
             loadTeams()
             // Dispatch event to update sidebar
             window.dispatchEvent(new Event('team-updated'))
@@ -78,13 +90,59 @@ export default function TeamsPage() {
     }
 
     return (
-        <div className="p-8 max-w-4xl mx-auto space-y-8">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Teams</h1>
-                    <p className="text-muted-foreground mt-2">Manage your teams here. Create teams before starting retrospectives.</p>
-                </div>
-            </div>
+        <PageShell>
+            <PageHeader
+                title="Teams"
+                action={
+                    <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+                        <DialogTrigger asChild>
+                            <Button className="gap-2"><Plus className="h-4 w-4" /> New team</Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-[520px]">
+                            <DialogHeader>
+                                <DialogTitle>Create team</DialogTitle>
+                                <DialogDescription>
+                                    Teams control who can open a board. Groups come from your identity
+                                    provider (e.g. AD/Keycloak); leave them empty to restrict the team to
+                                    global admins for now — you can change them later.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <form onSubmit={handleCreateTeam} className="flex flex-col gap-4">
+                                <div className="flex flex-col gap-1.5">
+                                    <Label htmlFor="new-team-name">Name</Label>
+                                    <Input
+                                        id="new-team-name"
+                                        placeholder="e.g. Engineering, Design"
+                                        value={newTeamName}
+                                        onChange={(e) => setNewTeamName(e.target.value)}
+                                    />
+                                </div>
+                                <GroupsField
+                                    label="Member groups (view & participate)"
+                                    value={newMemberGroups}
+                                    onChange={setNewMemberGroups}
+                                    suggestions={groupSuggestions.groups}
+                                    datalistId="new-team-member-groups"
+                                    placeholder={groupSuggestions.configured ? 'Search groups…' : 'e.g. /Eng/Platform'}
+                                />
+                                <GroupsField
+                                    label="Admin groups (manage boards)"
+                                    value={newAdminGroups}
+                                    onChange={setNewAdminGroups}
+                                    suggestions={groupSuggestions.groups}
+                                    datalistId="new-team-admin-groups"
+                                    placeholder={groupSuggestions.configured ? 'Search groups…' : 'e.g. /Eng/Platform/Admins'}
+                                />
+                                <DialogFooter>
+                                    <Button type="submit" disabled={isLoading || !newTeamName.trim()}>
+                                        {isLoading ? 'Creating…' : 'Create team'}
+                                    </Button>
+                                </DialogFooter>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                }
+            />
 
             {message && (
                 <div className={`p-4 rounded-md flex items-center gap-2 ${message.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
@@ -92,52 +150,6 @@ export default function TeamsPage() {
                     {message.text}
                 </div>
             )}
-
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                        <Plus className="w-5 h-5" />
-                        Create New Team
-                    </CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <form onSubmit={handleCreateTeam} className="flex flex-col gap-4">
-                        <div className="flex gap-4">
-                            <Input
-                                placeholder="Enter team name (e.g. Engineering, Design)"
-                                value={newTeamName}
-                                onChange={(e) => setNewTeamName(e.target.value)}
-                                className="max-w-md"
-                            />
-                            <Button type="submit" disabled={isLoading || !newTeamName.trim()}>
-                                {isLoading ? "Creating..." : "Create Team"}
-                            </Button>
-                        </div>
-                        <div className="grid gap-4 sm:grid-cols-2 max-w-2xl">
-                            <GroupsField
-                                label="Member groups (view & participate)"
-                                value={newMemberGroups}
-                                onChange={setNewMemberGroups}
-                                suggestions={groupSuggestions.groups}
-                                datalistId="new-team-member-groups"
-                                placeholder={groupSuggestions.configured ? 'Search groups…' : 'e.g. /Eng/Platform'}
-                            />
-                            <GroupsField
-                                label="Admin groups (manage boards)"
-                                value={newAdminGroups}
-                                onChange={setNewAdminGroups}
-                                suggestions={groupSuggestions.groups}
-                                datalistId="new-team-admin-groups"
-                                placeholder={groupSuggestions.configured ? 'Search groups…' : 'e.g. /Eng/Platform/Admins'}
-                            />
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                            Groups come from your identity provider (e.g. AD/Keycloak). Leave empty to restrict the
-                            team to global admins. You can change these later in the team&apos;s settings.
-                        </p>
-                    </form>
-                </CardContent>
-            </Card>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {teams.map((team) => (
@@ -159,7 +171,7 @@ export default function TeamsPage() {
                     </div>
                 )}
             </div>
-        </div>
+        </PageShell>
     )
 }
 
@@ -283,7 +295,7 @@ function AccessGroupsSettings({
                 <span className="flex items-center gap-2">
                     <Shield className="w-4 h-4" /> Access groups
                 </span>
-                <span className={`text-xs ${count > 0 ? 'text-green-600' : 'text-muted-foreground'}`}>
+                <span className={`text-xs ${count > 0 ? 'text-green-700 dark:text-green-400' : 'text-muted-foreground'}`}>
                     {count > 0 ? `${count} configured` : 'Admins only'}
                 </span>
             </button>
@@ -311,7 +323,7 @@ function AccessGroupsSettings({
                         </p>
                     )}
                     {msg && (
-                        <p className={`text-xs ${msg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{msg.text}</p>
+                        <p className={`text-xs ${msg.type === 'success' ? 'text-green-700 dark:text-green-400' : 'text-red-600'}`}>{msg.text}</p>
                     )}
                     <Button size="sm" onClick={handleSave} disabled={saving}>
                         {saving ? 'Saving…' : 'Save access groups'}
@@ -363,7 +375,7 @@ function JiraSettings({ team }: { team: Team }) {
                 <span className="flex items-center gap-2">
                     <Link2 className="w-4 h-4" /> Jira integration
                 </span>
-                <span className={`text-xs ${configured ? 'text-green-600' : 'text-muted-foreground'}`}>
+                <span className={`text-xs ${configured ? 'text-green-700 dark:text-green-400' : 'text-muted-foreground'}`}>
                     {configured ? 'Connected' : 'Not configured'}
                 </span>
             </button>
@@ -386,7 +398,7 @@ function JiraSettings({ team }: { team: Team }) {
                         <Input className="h-8" type="password" placeholder={configured ? 'Leave blank to keep current' : 'Atlassian API token'} value={apiToken} onChange={e => setApiToken(e.target.value)} />
                     </div>
                     {msg && (
-                        <p className={`text-xs ${msg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{msg.text}</p>
+                        <p className={`text-xs ${msg.type === 'success' ? 'text-green-700 dark:text-green-400' : 'text-red-600'}`}>{msg.text}</p>
                     )}
                     <Button size="sm" onClick={handleSave} disabled={saving}>
                         {saving ? 'Saving…' : 'Save Jira settings'}
@@ -488,13 +500,13 @@ function TeamAvatar({ team, onUpdate }: { team: Team, onUpdate: () => void }) {
                     type="button"
                     onClick={handleRemove}
                     disabled={busy}
-                    className="text-[10px] text-muted-foreground hover:text-destructive flex items-center gap-0.5"
+                    className="text-xs text-muted-foreground hover:text-destructive flex items-center gap-0.5"
                 >
                     <Trash2 className="h-3 w-3" /> Remove
                 </button>
             )}
             <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-            {err && <span className="text-[10px] text-red-600 max-w-[80px] text-center">{err}</span>}
+            {err && <span className="text-xs text-red-600 max-w-[80px] text-center">{err}</span>}
         </div>
     )
 }
