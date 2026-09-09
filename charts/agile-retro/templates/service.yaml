@@ -12,4 +12,4 @@ spec:
       protocol: TCP
       name: http
   selector:
-    {{- include "agile-retro.selectorLabels" . | nindent 4 }}
+    {{- include "agile-retro.appSelectorLabels" . | nindent 4 }}

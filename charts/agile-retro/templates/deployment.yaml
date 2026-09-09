@@ -16,7 +16,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "agile-retro.selectorLabels" . | nindent 6 }}
+      {{- include "agile-retro.appSelectorLabels" . | nindent 6 }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -24,7 +24,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "agile-retro.selectorLabels" . | nindent 8 }}
+        {{- include "agile-retro.appSelectorLabels" . | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -66,6 +66,20 @@ spec:
             # (its database user may not be permitted to).
             - name: DB_SKIP_SCHEMA_BOOTSTRAP
               value: "true"
+            {{- end }}
+            {{- with .Values.app.branding }}
+            {{- if .name }}
+            - name: APP_NAME
+              value: {{ .name | quote }}
+            {{- end }}
+            {{- if .tagline }}
+            - name: APP_TAGLINE
+              value: {{ .tagline | quote }}
+            {{- end }}
+            {{- if .description }}
+            - name: APP_DESCRIPTION
+              value: {{ .description | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.app.url }}
             # Public URL of the app, so Auth.js builds correct OAuth redirect URIs

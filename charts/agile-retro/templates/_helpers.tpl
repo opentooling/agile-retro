@@ -51,6 +51,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Selector labels for the application workload specifically.
+
+`selectorLabels` alone (name + instance) also matches the Postgres and
+migration pods, which carry those same labels plus a `component`. That made the
+app Service and Deployment select workloads that aren't the app: it survived
+only because the Service's targetPort is the *named* port "http", which the
+Postgres pod doesn't expose. It still broke `kubectl port-forward svc/...` and
+made `kubectl logs deployment/<app>` show Postgres output. Adding a component of
+our own keeps each workload's selector to its own pods.
+*/}}
+{{- define "agile-retro.appSelectorLabels" -}}
+{{ include "agile-retro.selectorLabels" . }}
+app.kubernetes.io/component: app
+{{- end }}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "agile-retro.serviceAccountName" -}}
