@@ -43,8 +43,8 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* London Metal Exchange theme — steel-blue primary with copper/gold accents on
-   cool graphite neutrals. Values are HSL triplets consumed via hsl(var(--x)). */
+/* Default theme — steel-blue primary with copper/gold accents on cool graphite
+   neutrals. Values are HSL triplets consumed via hsl(var(--x)). */
 :root {
   --radius: 0.625rem;
   --background: 210 20% 99%;
@@ -124,40 +124,3 @@
   }
 }
 /* In-app Help page (rendered from docs/USER_GUIDE.md via src/lib/markdown.ts) */
-.help-content {
-  line-height: 1.7;
-}
-.help-content h1 { font-size: 1.6rem; font-weight: 700; margin: 1.6rem 0 0.8rem; }
-.help-content h2 { font-size: 1.3rem; font-weight: 700; margin: 1.6rem 0 0.6rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--border); }
-.help-content h3 { font-size: 1.1rem; font-weight: 600; margin: 1.2rem 0 0.4rem; }
-.help-content p { margin: 0.6rem 0; }
-.help-content a { color: #2563eb; text-decoration: underline; }
-.help-content ul, .help-content ol { margin: 0.6rem 0; padding-left: 1.4rem; }
-.help-content ul { list-style: disc; }
-.help-content ol { list-style: decimal; }
-.help-content li { margin: 0.25rem 0; }
-.help-content code {
-  font-family: var(--font-geist-mono, monospace);
-  font-size: 0.85em;
-  background: var(--muted);
-  padding: 0.1rem 0.35rem;
-  border-radius: 0.25rem;
-}
-.help-content pre {
-  background: var(--muted);
-  padding: 0.9rem 1rem;
-  border-radius: 0.5rem;
-  overflow-x: auto;
-  margin: 0.8rem 0;
-}
-.help-content pre code { background: none; padding: 0; font-size: 0.85em; }
-.help-content blockquote {
-  border-left: 3px solid var(--border);
-  padding: 0.2rem 0 0.2rem 1rem;
-  margin: 0.8rem 0;
-  color: var(--muted-foreground);
-}
-.help-content hr { border: 0; border-top: 1px solid var(--border); margin: 1.5rem 0; }
-.help-content table { width: 100%; border-collapse: collapse; margin: 0.9rem 0; font-size: 0.9rem; }
-.help-content th, .help-content td { border: 1px solid var(--border); padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
-.help-content th { background: var(--muted); font-weight: 600; }
