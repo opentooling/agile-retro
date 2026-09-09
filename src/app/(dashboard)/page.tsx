@@ -1,10 +1,35 @@
 import * as db from '@/lib/db'
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from 'next/link'
-import { formatDistanceToNow } from 'date-fns'
+import { auth } from '@/auth'
+import { authUserFromSession, canManageBoard } from '@/lib/authz'
 import { CreateRetroDialog } from '@/components/CreateRetroDialog'
-import { TeamMark } from '@/components/TeamMark'
+import { SessionList, type SessionSummary } from '@/components/SessionList'
+import { PageShell, PageHeader } from '@/components/PageHeader'
 import { LayoutDashboard, ListTodo, Users } from 'lucide-react'
+
+/** One compact metric. Three of these replace three full-height cards. */
+function Stat({
+  href,
+  icon: Icon,
+  label,
+  value,
+}: {
+  href: string
+  icon: typeof LayoutDashboard
+  label: string
+  value: number
+}) {
+  return (
+    <Link
+      href={href}
+      className="flex items-center gap-3 rounded-lg border bg-card px-4 py-2.5 transition-colors hover:bg-accent/60"
+    >
+      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <span className="text-2xl font-bold tabular-nums leading-none">{value}</span>
+      <span className="text-sm text-muted-foreground">{label}</span>
+    </Link>
+  )
+}
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const params = await searchParams
@@ -18,118 +43,67 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
   // Free-text team search by name (still supports old links that pass a team name).
   if (teamIdFilter) filter.teamNameContains = teamIdFilter
 
-  const [recentRetros, totalRetros, totalItems, openActions] = await Promise.all([
+  const [session, recentRetros, totalRetros, activeCount, openActions] = await Promise.all([
+    auth(),
     db.listRetrospectives(filter, 20),
     db.countRetrospectives(filter),
-    db.countItems(),
+    // Counted in the database, not from the 20 rows above — otherwise the tile
+    // silently under-reports as soon as there are more than 20 boards.
+    db.countRetrospectives({ ...filter, statusNot: 'CLOSED' }),
     db.countOpenActions(filter),
   ])
-  // This is a rough estimate of active users based on unique userIds in votes/items would be better but expensive
-  // For now, let's just show total retros as a placeholder or maybe something else simple
+
+  // Delete is limited to whoever may already manage the board — its creator,
+  // a team-admin of its team, or a global admin. Resolved server-side so the
+  // control only reaches people the server action would actually allow.
+  const authUser = authUserFromSession(session)
+  const sessions: SessionSummary[] = recentRetros.map((retro) => ({
+    id: retro.id,
+    title: retro.title,
+    status: retro.status,
+    creator: retro.creator,
+    createdAt: retro.createdAt.toISOString(),
+    expiresAt: retro.expiresAt ? retro.expiresAt.toISOString() : null,
+    team: retro.team ? { id: retro.team.id, name: retro.team.name, imageData: retro.team.imageData } : null,
+    tags: retro.tags ? retro.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+    canDelete: canManageBoard(authUser, {
+      teamId: retro.teamId,
+      creator: retro.creator,
+      team: retro.team,
+    }),
+  }))
+
+  const isFiltered = Boolean(creatorFilter || tagFilter || teamIdFilter)
 
   return (
-    <div className="p-8">
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-4xl font-bold mb-2">Dashboard</h1>
-          <p className="text-muted-foreground">Welcome back! Here's what's happening.</p>
-        </div>
-        <CreateRetroDialog />
+    <PageShell>
+      <PageHeader title="Dashboard" action={<CreateRetroDialog />} />
+
+      <div className="mb-5 grid gap-2 sm:grid-cols-3">
+        <Stat href="/history" icon={LayoutDashboard} label="retrospectives" value={totalRetros} />
+        <Stat href="/history?status=active" icon={Users} label="active now" value={activeCount} />
+        <Stat href="/actions" icon={ListTodo} label="open actions" value={openActions} />
       </div>
 
-      {/* Analytics Widgets */}
-      <div className="grid gap-4 md:grid-cols-3 mb-8">
-        <Link href="/history">
-            <Card className="hover:bg-accent transition-colors cursor-pointer h-full">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Retrospectives</CardTitle>
-                <LayoutDashboard className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-                <div className="text-2xl font-bold">{totalRetros}</div>
-            </CardContent>
-            </Card>
-        </Link>
-        
-        <Link href="/history?status=active">
-            <Card className="hover:bg-accent transition-colors cursor-pointer h-full">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Active Sessions</CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-                <div className="text-2xl font-bold">
-                {recentRetros.filter((r: { status: string }) => r.status !== 'CLOSED').length}
-                </div>
-                <p className="text-xs text-muted-foreground">Currently open</p>
-            </CardContent>
-            </Card>
-        </Link>
-
-        <Link href="/actions">
-            <Card className="hover:bg-accent transition-colors cursor-pointer h-full">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Open Actions</CardTitle>
-                <ListTodo className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-                <div className="text-2xl font-bold">
-                {openActions}
-                </div>
-            </CardContent>
-            </Card>
-        </Link>
-      </div>
-
-      <h2 className="text-2xl font-bold mb-4">Recent Sessions</h2>
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {recentRetros.map((retro) => (
-          <Link key={retro.id} href={`/retro/${retro.id}`}>
-            <Card className="hover:bg-accent transition-colors h-full flex flex-col">
-              <CardHeader>
-                <CardTitle className="flex justify-between items-start gap-2">
-                  <span className="truncate">{retro.title}</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex-1">
-                <div className="flex flex-col gap-2">
-                  <div className="flex justify-between items-center text-sm text-muted-foreground">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      retro.status === 'CLOSED' ? 'bg-gray-200 text-gray-800' : 'bg-green-100 text-green-800'
-                    }`}>
-                      {retro.status}
-                    </span>
-                    <span>{formatDistanceToNow(retro.createdAt, { addSuffix: true })}</span>
-                  </div>
-                  {retro.team && (
-                      <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
-                          <TeamMark team={retro.team} size={18} />
-                          {retro.team.name}
-                      </div>
-                  )}
-                  {retro.tags && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {retro.tags.split(',').map((tag: string, i: number) => (
-                        <span key={i} className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
-                          {tag.trim()}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                   <div className="text-xs text-muted-foreground mt-2">
-                      Created by: {retro.creator}
-                   </div>
-                </div>
-              </CardContent>
-            </Card>
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Recent sessions
+        </h2>
+        {totalRetros > sessions.length && (
+          <Link href="/history" className="text-xs font-medium text-primary hover:underline">
+            View all {totalRetros}
           </Link>
-        ))}
-        {recentRetros.length === 0 && (
-           <div className="col-span-full text-center py-12 text-muted-foreground">
-             No retrospectives found matching your filters.
-           </div>
         )}
       </div>
-    </div>
+
+      <SessionList
+        sessions={sessions}
+        emptyMessage={
+          isFiltered
+            ? 'No retrospectives match these filters.'
+            : 'No retrospectives yet — create your first session.'
+        }
+      />
+    </PageShell>
   )
 }

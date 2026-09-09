@@ -9,6 +9,7 @@ import { reconcileAllLinkedActions, pushActionDoneState } from '@/lib/jira-sync'
 import { TeamMark } from '@/components/TeamMark'
 
 import Link from 'next/link'
+import { PageShell, PageHeader } from '@/components/PageHeader'
 
 export default async function ActionsPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const session = await auth()
@@ -47,10 +48,11 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
   }
 
   return (
-    <div className="container mx-auto p-8">
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold">Action Items</h1>
-        <div className="flex gap-2">
+    <PageShell>
+      <PageHeader
+        title="Action items"
+        action={
+          <div className="flex gap-2">
             <Link href="/actions?status=open">
                 <Button variant={statusFilter === 'open' ? 'default' : 'outline'}>Open</Button>
             </Link>
@@ -60,17 +62,18 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
             <Link href="/actions?status=all">
                 <Button variant={statusFilter === 'all' ? 'default' : 'outline'}>All</Button>
             </Link>
-        </div>
-      </div>
+          </div>
+        }
+      />
 
       {assigneeFilter && (
         <div className="mb-4 text-sm text-muted-foreground">
           Filtered by assignee: <span className="font-semibold text-foreground">{assigneeFilter}</span>{' '}
-          <Link href="/actions" className="text-blue-600 hover:underline">clear</Link>
+          <Link href="/actions" className="text-primary hover:underline">clear</Link>
         </div>
       )}
 
-      <div className="grid gap-4">
+      <div className="grid gap-2">
         {actions.map((action) => {
             const team = action.retrospective.team
             const isOwner = session?.user?.name === action.retrospective.creator
@@ -79,11 +82,11 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
             )
 
             return (
-                <Card key={action.id} className="border-l-4 border-l-blue-500">
-                    <CardContent className="p-4 flex items-center justify-between gap-4">
+                <Card key={action.id} className="gap-0 border-l-4 border-l-primary py-0">
+                    <CardContent className="p-3 flex items-center justify-between gap-4">
                         <div className="flex flex-col gap-1">
-                            <span className="font-medium text-lg">{action.content}</span>
-                            <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+                            <span className="whitespace-pre-wrap font-medium">{action.content}</span>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                                 <Link href={`/actions?retroId=${action.retrospectiveId}`} className="hover:underline hover:text-primary">
                                     <span>Retro: {action.retrospective.title}</span>
                                 </Link>
@@ -118,7 +121,7 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
                             )}
                             {isOwner && (
                                 <form action={toggleAction.bind(null, action.id, !action.completed)}>
-                                    <Button size="sm" variant="outline" className={action.completed ? "gap-2 hover:bg-yellow-50 hover:text-yellow-600 hover:border-yellow-200" : "gap-2 hover:bg-green-50 hover:text-green-600 hover:border-green-200"}>
+                                    <Button size="sm" variant="outline" className={action.completed ? "gap-2 hover:bg-yellow-50 hover:text-amber-700 dark:text-amber-400 hover:border-yellow-200" : "gap-2 hover:bg-green-50 hover:text-green-700 dark:text-green-400 hover:border-green-200"}>
                                         {action.completed ? <Circle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
                                         {action.completed ? "Reopen" : "Mark Done"}
                                     </Button>
@@ -135,6 +138,6 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
             </div>
         )}
       </div>
-    </div>
+    </PageShell>
   )
 }

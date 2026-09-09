@@ -1,10 +1,10 @@
 import * as db from '@/lib/db'
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from 'next/link'
-import { formatDistanceToNow } from 'date-fns'
 import { auth } from '@/auth'
-import { TeamMark } from '@/components/TeamMark'
+import { authUserFromSession, canManageBoard } from '@/lib/authz'
+import { SessionList, type SessionSummary } from '@/components/SessionList'
+import { PageShell, PageHeader } from '@/components/PageHeader'
 
 export default async function HistoryPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const session = await auth()
@@ -28,64 +28,42 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
 
   const retros = await db.listRetrospectives(filter)
 
+  const authUser = authUserFromSession(session)
+  const sessions: SessionSummary[] = retros.map((retro) => ({
+    id: retro.id,
+    title: retro.title,
+    status: retro.status,
+    creator: retro.creator,
+    createdAt: retro.createdAt.toISOString(),
+    expiresAt: retro.expiresAt ? retro.expiresAt.toISOString() : null,
+    team: retro.team ? { id: retro.team.id, name: retro.team.name, imageData: retro.team.imageData } : null,
+    tags: retro.tags ? retro.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+    canDelete: canManageBoard(authUser, {
+      teamId: retro.teamId,
+      creator: retro.creator,
+      team: retro.team,
+    }),
+  }))
+
   return (
-    <div className="container mx-auto p-8">
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold">Retrospective History</h1>
-        <div className="flex gap-2">
+    <PageShell>
+      <PageHeader
+        title="Retrospective history"
+        action={
+          <div className="flex gap-2">
             <Link href="/history">
                 <Button variant={!myBoardsFilter ? 'default' : 'outline'}>All Boards</Button>
             </Link>
             <Link href="/history?myBoards=true">
                 <Button variant={myBoardsFilter ? 'default' : 'outline'}>My Boards</Button>
             </Link>
-        </div>
-      </div>
-      <div className="grid gap-4">
-        {retros.map((retro) => (
-          <Link key={retro.id} href={`/retro/${retro.id}`}>
-            <Card className="hover:bg-accent transition-colors">
-              <CardHeader>
-                <CardTitle className="flex justify-between items-center">
-                  <span>{retro.title}</span>
-                  <span className="text-sm font-normal text-muted-foreground">
-                    {formatDistanceToNow(retro.createdAt, { addSuffix: true })}
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col gap-2">
-                  <div className="flex justify-between text-sm text-muted-foreground">
-                    <div className="flex gap-4">
-                        <span>Status: {retro.status}</span>
-                        {retro.team && (
-                            <span className="inline-flex items-center gap-1.5 font-semibold text-primary">
-                                <TeamMark team={retro.team} size={18} /> {retro.team.name}
-                            </span>
-                        )}
-                    </div>
-                    <span>Created by: {retro.creator}</span>
-                  </div>
-                  {retro.tags && (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {retro.tags.split(',').map(tag => tag.trim()).filter(Boolean).map(tag => (
-                        <span key={tag} className="px-2 py-1 bg-secondary text-secondary-foreground rounded-md text-xs">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-        {retros.length === 0 && (
-           <div className="col-span-full text-center py-12 text-muted-foreground">
-             No retrospectives found matching your filters.
-           </div>
-        )}
-      </div>
-    </div>
+          </div>
+        }
+      />
+      <SessionList
+        sessions={sessions}
+        emptyMessage="No retrospectives found matching your filters."
+      />
+    </PageShell>
   )
 }
