@@ -125,6 +125,16 @@ app:
   # Required in most cluster deployments behind a proxy. Sets AUTH_TRUST_HOST=true.
   trustHost: true
 
+  # Deployment branding. Read at runtime, so one image serves any organisation
+  # without a rebuild. Leave empty for the neutral defaults.
+  branding:
+    # Product name — browser tab, sidebar and login screen.
+    name: ""          # default: "Agile Retro"
+    # One line under the name on the login screen.
+    tagline: ""       # default: "Sign in to create or join retrospectives"
+    # Meta description. Defaults to one naming your app.
+    description: ""
+
 env:
   # Define extra environment variables here. DATABASE_URL is injected
   # automatically from the bundled Postgres secret (or externalDatabase).

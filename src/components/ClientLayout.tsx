@@ -9,9 +9,10 @@ interface ClientLayoutProps {
   session: any
   keycloakIssuer?: string
   keycloakClientId?: string
+  appName: string
 }
 
-export function ClientLayout({ children, session, keycloakIssuer, keycloakClientId }: ClientLayoutProps) {
+export function ClientLayout({ children, session, keycloakIssuer, keycloakClientId, appName }: ClientLayoutProps) {
   const pathname = usePathname()
   const isLoginPage = pathname === '/login'
 
@@ -19,9 +20,9 @@ export function ClientLayout({ children, session, keycloakIssuer, keycloakClient
     <SessionProvider session={session}>
       <div className="flex min-h-screen">
         {!isLoginPage && (
-             <Sidebar user={session?.user} keycloakIssuer={keycloakIssuer} keycloakClientId={keycloakClientId} />
+             <Sidebar user={session?.user} keycloakIssuer={keycloakIssuer} keycloakClientId={keycloakClientId} appName={appName} />
         )}
-        <div className="flex-1 bg-gray-50 dark:bg-gray-900">
+        <div className="flex-1 bg-background">
           {children}
         </div>
       </div>

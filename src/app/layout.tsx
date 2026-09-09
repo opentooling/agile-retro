@@ -18,12 +18,15 @@ const geistMono = localFont({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  title: "LME Retro — London Metal Exchange Retrospectives",
-  description: "Run and track team retrospectives for the London Metal Exchange.",
-};
+// Resolved per request, so the title follows the deployment's configuration
+// rather than being baked in at build time.
+export async function generateMetadata(): Promise<Metadata> {
+  const { name, description } = branding()
+  return { title: name, description }
+}
 
 import { auth } from "@/auth"
+import { branding } from "@/lib/branding"
 import { ClientLayout } from "@/components/ClientLayout"
 
 export default async function RootLayout({
@@ -48,6 +51,7 @@ export default async function RootLayout({
               session={session} 
               keycloakIssuer={process.env.AUTH_KEYCLOAK_ISSUER}
               keycloakClientId={process.env.AUTH_KEYCLOAK_ID}
+              appName={branding().name}
             >
               {children}
             </ClientLayout>

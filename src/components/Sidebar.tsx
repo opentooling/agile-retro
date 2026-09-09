@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { LayoutDashboard, History, Filter, Tag, LogOut, LogIn, ChevronLeft, ChevronRight, Users, CheckSquare, HelpCircle, Coins, type LucideIcon } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { getPopularTags } from "@/app/actions"
 import { useSession, signIn, signOut } from "next-auth/react"
 import { cn } from "@/lib/utils"
@@ -27,6 +27,8 @@ interface SidebarProps {
   }
   keycloakIssuer?: string
   keycloakClientId?: string
+  /** Product name for this deployment (see lib/branding.ts). */
+  appName: string
 }
 
 interface NavItemProps {
@@ -69,13 +71,26 @@ function NavItem({ href, icon: Icon, label, isActive, isCollapsed }: NavItemProp
 }
 
 
-export function Sidebar({ user, keycloakIssuer, keycloakClientId }: SidebarProps) {
+export function Sidebar({ user, keycloakIssuer, keycloakClientId, appName }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
   const [popularTags, setPopularTags] = useState<{tag: string, count: number}[]>([])
   const { data: session } = useSession()
-  const [isCollapsed, setIsCollapsed] = useState(false)
+  // On a board the rail is pure overhead: its Filters block is already hidden
+  // there, so it contributes a nav strip and a duplicate ModeToggle while taking
+  // 256px from the screen that needs it most. Start collapsed there.
+  const isBoardRoute = pathname.startsWith('/retro/')
+  const [isCollapsed, setIsCollapsed] = useState(isBoardRoute)
+  // Re-apply the default when crossing into or out of a board, without
+  // overriding a deliberate toggle while staying on the same kind of route.
+  const collapseRoute = useRef(isBoardRoute)
+  useEffect(() => {
+    if (collapseRoute.current !== isBoardRoute) {
+      collapseRoute.current = isBoardRoute
+      setIsCollapsed(isBoardRoute)
+    }
+  }, [isBoardRoute])
 
   useEffect(() => {
     getPopularTags().then(setPopularTags)
@@ -150,7 +165,7 @@ export function Sidebar({ user, keycloakIssuer, keycloakClientId }: SidebarProps
         {!isCollapsed && (
           <div className="flex items-center gap-2 min-w-0">
             <Coins className="w-6 h-6 text-primary shrink-0" />
-            <span className="text-lg font-bold tracking-tight truncate">LME Retro</span>
+            <span className="text-lg font-bold tracking-tight truncate">{appName}</span>
           </div>
         )}
         <Button variant="ghost" size="icon" onClick={() => setIsCollapsed(!isCollapsed)}>
@@ -160,13 +175,7 @@ export function Sidebar({ user, keycloakIssuer, keycloakClientId }: SidebarProps
 
       <div className="flex-1 space-y-8 overflow-y-auto">
         <div>
-          {!isCollapsed && (
-            <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-              <LayoutDashboard className="w-5 h-5" />
-              Navigation
-            </h2>
-          )}
-            <nav className="flex flex-col gap-2">
+            <nav className="flex flex-col gap-1">
             <NavItem href={`/${preservedFilters}`} icon={LayoutDashboard} label="Dashboard" isActive={pathname === "/"} isCollapsed={isCollapsed} />
             <NavItem href={`/teams${preservedFilters}`} icon={Users} label="Teams" isActive={pathname === "/teams"} isCollapsed={isCollapsed} />
             <NavItem href={`/actions${preservedFilters}`} icon={CheckSquare} label="Actions" isActive={pathname === "/actions"} isCollapsed={isCollapsed} />
@@ -177,8 +186,8 @@ export function Sidebar({ user, keycloakIssuer, keycloakClientId }: SidebarProps
 
         {!isCollapsed && !pathname.startsWith('/retro/') && (
           <div>
-            <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-              <Filter className="w-5 h-5" />
+            <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <Filter className="w-3.5 h-3.5" />
               Filters
             </h2>
             <div className="space-y-4">
@@ -211,20 +220,26 @@ export function Sidebar({ user, keycloakIssuer, keycloakClientId }: SidebarProps
                   
                   {popularTags.length > 0 && (
                     <div className="space-y-2">
-                      <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                         <Tag className="w-3 h-3" />
-                        Popular Tags
-                      </Label>
+                        Popular tags
+                      </span>
                       <div className="flex flex-wrap gap-2">
                         {popularTags.map(({ tag, count }) => (
-                          <Badge
+                          <button
                             key={tag}
-                            variant={searchParams.get('tag') === tag ? "default" : "secondary"}
-                            className="cursor-pointer hover:opacity-80"
+                            type="button"
                             onClick={() => handleFilterChange('tag', tag)}
+                            className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            aria-pressed={searchParams.get('tag') === tag}
                           >
-                            {tag} ({count})
-                          </Badge>
+                            <Badge
+                              variant={searchParams.get('tag') === tag ? "default" : "secondary"}
+                              className="cursor-pointer hover:opacity-80"
+                            >
+                              {tag} ({count})
+                            </Badge>
+                          </button>
                         ))}
                       </div>
                     </div>
@@ -236,10 +251,10 @@ export function Sidebar({ user, keycloakIssuer, keycloakClientId }: SidebarProps
         )}
       </div>
 
-      <div className="border-t pt-4 mt-auto">
+      <div className="border-t pt-3 mt-auto">
         {user ? (
-          <div className={cn("border-t border-gray-200 dark:border-gray-800", !isCollapsed && "p-4")}>
-            <div className={cn("flex items-center mb-4", isCollapsed ? "justify-center flex-col gap-2" : "justify-between")}>
+          <div>
+            <div className={cn("flex items-center mb-3", isCollapsed ? "justify-center flex-col gap-2" : "justify-between")}>
                 {!isCollapsed && (
                   <div className="flex items-center gap-3 overflow-hidden">
                       <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-600 to-amber-600 flex items-center justify-center text-white font-bold shrink-0">

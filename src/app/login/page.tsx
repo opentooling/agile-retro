@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { LogIn, KeyRound, Coins } from "lucide-react"
 import { signIn, providerMap } from "@/auth"
+import { branding } from "@/lib/branding"
 
 function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -44,8 +45,9 @@ function getProviderIcon(id: string) {
 }
 
 export default function LoginPage() {
+  const { name, tagline } = branding()
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900 p-4">
+    <div className="flex items-center justify-center min-h-screen bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-2">
@@ -53,8 +55,8 @@ export default function LoginPage() {
               <Coins className="h-7 w-7 text-primary" />
             </div>
           </div>
-          <CardTitle className="text-2xl font-bold">Welcome to LME Retro</CardTitle>
-          <CardDescription>London Metal Exchange · sign in to create or join retrospectives</CardDescription>
+          <CardTitle className="text-2xl font-bold">Welcome to {name}</CardTitle>
+          <CardDescription>{tagline}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {Object.values(providerMap).map((provider) => (
