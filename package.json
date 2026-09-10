@@ -10,6 +10,7 @@
     "diag:keycloak": "tsx scripts/diagnose-keycloak.ts",
     "db:migrate": "tsx scripts/migrate-postgres.ts",
     "db:purge": "NODE_OPTIONS=--experimental-sqlite tsx scripts/purge-expired.ts",
+    "db:seed-demo": "NODE_OPTIONS=--experimental-sqlite tsx scripts/seed-demo.ts",
     "lint": "eslint",
     "test": "jest"
   },

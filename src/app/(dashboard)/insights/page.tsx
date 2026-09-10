@@ -5,7 +5,7 @@ import { authUserFromSession, canViewBoard } from '@/lib/authz'
 import { buildInsights, type TeamInsights } from '@/lib/analytics'
 import { SENTIMENT_LABEL, type Sentiment } from '@/lib/column-sentiment'
 import { PageShell, PageHeader } from '@/components/PageHeader'
-import { TeamMark } from '@/components/TeamMark'
+import { TeamPicker } from '@/components/TeamPicker'
 import { cn } from '@/lib/utils'
 
 /** A single figure, with the interpretation next to it rather than in a legend. */
@@ -191,9 +191,17 @@ export default async function InsightsPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
   const params = await searchParams
-  const requested = typeof params.teamId === 'string' ? params.teamId : undefined
+  // Deliberately not `teamId`: that is the app-wide team-name filter which the
+  // sidebar carries between pages, so using it here would leak a team id into
+  // the Dashboard, History, Actions and Teams filters and empty them.
+  const requested = typeof params.team === 'string' ? params.team : undefined
 
-  const [session, allTeams] = await Promise.all([auth(), db.listTeams()])
+  const [session, allTeams, recentRetros] = await Promise.all([
+    auth(),
+    db.listTeams(),
+    // Newest first; used only to pick a sensible default team.
+    db.listRetrospectives({}, 50),
+  ])
   const authUser = authUserFromSession(session)
 
   // Only teams whose boards this viewer could open — the aggregates are drawn
@@ -202,7 +210,17 @@ export default async function InsightsPage({
     canViewBoard(authUser, { teamId: team.id, creator: '', team })
   )
 
-  const selected = teams.find((t) => t.id === requested) ?? teams[0] ?? null
+  // Default to whichever visible team ran a retro most recently. Falling back
+  // to the first team in the list means an organisation with many teams opens
+  // on whichever one happens to sort first — usually one that has never run a
+  // retro at all, so the page greets you with an empty state.
+  const visible = new Set(teams.map((t) => t.id))
+  const mostRecentTeamId = recentRetros.find((r) => r.teamId && visible.has(r.teamId))?.teamId
+  const selected =
+    teams.find((t) => t.id === requested) ??
+    teams.find((t) => t.id === mostRecentTeamId) ??
+    teams[0] ??
+    null
   const insights = selected ? buildInsights(await db.teamAnalytics(selected.id)) : null
 
   return (
@@ -215,23 +233,11 @@ export default async function InsightsPage({
         </div>
       ) : (
         <>
-          <div className="mb-5 flex flex-wrap gap-1.5">
-            {teams.map((team) => (
-              <Link
-                key={team.id}
-                href={`/insights?teamId=${team.id}`}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm transition-colors',
-                  team.id === selected?.id
-                    ? 'border-primary bg-primary/10 font-medium text-foreground'
-                    : 'text-muted-foreground hover:bg-accent'
-                )}
-              >
-                <TeamMark team={team} size={16} />
-                {team.name}
-              </Link>
-            ))}
-          </div>
+          <TeamPicker
+            teams={teams.map((t) => ({ id: t.id, name: t.name, imageData: t.imageData }))}
+            selectedId={selected?.id}
+            basePath="/insights"
+          />
           {insights && <Insights insights={insights} />}
         </>
       )}

@@ -1,7 +1,7 @@
 import * as db from '@/lib/db'
 import Link from 'next/link'
 import { auth } from '@/auth'
-import { authUserFromSession, canManageBoard } from '@/lib/authz'
+import { authUserFromSession, canAdministerBoard } from '@/lib/authz'
 import { CreateRetroDialog } from '@/components/CreateRetroDialog'
 import { SessionList, type SessionSummary } from '@/components/SessionList'
 import { PageShell, PageHeader } from '@/components/PageHeader'
@@ -66,7 +66,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
     expiresAt: retro.expiresAt ? retro.expiresAt.toISOString() : null,
     team: retro.team ? { id: retro.team.id, name: retro.team.name, imageData: retro.team.imageData } : null,
     tags: retro.tags ? retro.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
-    canDelete: canManageBoard(authUser, {
+    canDelete: canAdministerBoard(authUser, {
       teamId: retro.teamId,
       creator: retro.creator,
       team: retro.team,
