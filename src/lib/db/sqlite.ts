@@ -534,6 +534,10 @@ export function createRetrospectiveWithColumns(
     for (const [index, c] of columns.entries()) {
       colStmt.run(randomUUID(), c.title, c.type, index, id);
     }
+    // A board opens in INPUT without a status change, so log that entry here
+    // or INPUT never appears in the phase durations.
+    db.prepare(`INSERT INTO "PhaseEvent" ("id","retrospectiveId","phase","enteredAt") VALUES (?,?,'INPUT',?)`)
+      .run(randomUUID(), id, dateToDb(data.phaseStartTime));
     return mapRetro(db.prepare(`SELECT * FROM "Retrospective" WHERE "id" = ?`).get(id) as Row);
   });
 }
@@ -576,12 +580,15 @@ export function updateRetroDurations(
   return getRetroFull(id);
 }
 
-export function listRetrospectives(filter: RetroFilter, take?: number): (Retrospective & { team: Team | null })[] {
+export function listRetrospectives(filter: RetroFilter, take?: number, skip?: number): (Retrospective & { team: Team | null })[] {
   const { clauses, params, needsTeamJoin } = buildRetroWhere(filter, "r", "t");
   const join = needsTeamJoin ? `JOIN "Team" t ON t."id" = r."teamId"` : "";
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const limit = take != null ? `LIMIT ${Number(take)}` : "";
-  const sql = `SELECT r.* FROM "Retrospective" r ${join} ${where} ORDER BY r."createdAt" DESC ${limit}`;
+  const limit = take != null ? ` LIMIT ${Number(take)}` : "";
+  // `id` breaks ties in the ORDER BY: boards created in the same millisecond
+  // would otherwise order arbitrarily and could land on two pages, or neither.
+  const offset = skip ? ` OFFSET ${Number(skip)}` : "";
+  const sql = `SELECT r.* FROM "Retrospective" r ${join} ${where} ORDER BY r."createdAt" DESC, r."id"${limit}${offset}`;
   const rows = getDb().prepare(sql).all(...params);
   const teamCache = new Map<string, Team | null>();
   return rows.map((row) => {
@@ -780,7 +787,11 @@ export function updateActionCompleted(id: string, completed: boolean): void {
 }
 
 
-export function listActionItems(filter: ActionFilter): ActionItemWithRetro[] {
+/**
+ * Where-clause for action queries. Shared by the list and the count so a page's
+ * "N results" can never describe a different set than the rows shown.
+ */
+function buildActionWhere(filter: ActionFilter): { clauses: string[]; params: any[]; needsTeamJoin: boolean } {
   const clauses: string[] = [];
   const params: any[] = [];
   let needsTeamJoin = false;
@@ -814,15 +825,32 @@ export function listActionItems(filter: ActionFilter): ActionItemWithRetro[] {
     clauses.push(`a."retrospectiveId" <> ?`);
     params.push(filter.excludeRetrospectiveId);
   }
+  return { clauses, params, needsTeamJoin };
+}
 
+export function countActionItems(filter: ActionFilter): number {
+  const { clauses, params, needsTeamJoin } = buildActionWhere(filter);
   const teamJoin = needsTeamJoin ? `JOIN "Team" t ON t."id" = r."teamId"` : "";
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) AS n FROM "ActionItem" a
+              JOIN "Retrospective" r ON r."id" = a."retrospectiveId" ${teamJoin} ${where}`)
+    .get(...params) as Row;
+  return Number(row?.n ?? 0);
+}
+
+export function listActionItems(filter: ActionFilter): ActionItemWithRetro[] {
+  const { clauses, params, needsTeamJoin } = buildActionWhere(filter);
+  const teamJoin = needsTeamJoin ? `JOIN "Team" t ON t."id" = r."teamId"` : "";
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const limit = filter.take != null ? ` LIMIT ${Number(filter.take)}` : "";
+  const offset = filter.skip ? ` OFFSET ${Number(filter.skip)}` : "";
   const sql = `
     SELECT a.* FROM "ActionItem" a
     JOIN "Retrospective" r ON r."id" = a."retrospectiveId"
     ${teamJoin}
     ${where}
-    ORDER BY r."createdAt" DESC`;
+    ORDER BY r."createdAt" DESC, a."id"${limit}${offset}`;
   const rows = getDb().prepare(sql).all(...params);
 
   const retroCache = new Map<string, (Retrospective & { team: Team | null }) | null>();

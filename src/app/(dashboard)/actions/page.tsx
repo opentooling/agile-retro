@@ -5,11 +5,12 @@ import { CheckCircle, Circle, User as UserIcon, Calendar } from 'lucide-react'
 import { auth } from '@/auth'
 import { revalidatePath } from 'next/cache'
 import { JiraActionButton } from "@/components/JiraActionButton"
-import { reconcileAllLinkedActions, pushActionDoneState } from '@/lib/jira-sync'
+import { reconcileActions, pushActionDoneState } from '@/lib/jira-sync'
 import { TeamMark } from '@/components/TeamMark'
 
 import Link from 'next/link'
 import { PageShell, PageHeader } from '@/components/PageHeader'
+import { Pager, pageFromParams } from '@/components/Pager'
 
 export default async function ActionsPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const session = await auth()
@@ -33,11 +34,18 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
   if (assigneeFilter) filter.assigneeContains = assigneeFilter
   if (retroIdFilter) filter.retrospectiveId = retroIdFilter
 
-  // Poll-on-open: pull the latest done state from linked Jira issues before
-  // listing, so the page reflects changes made in Jira.
-  await reconcileAllLinkedActions()
+  const PAGE_SIZE = 25
+  const total = await db.countActionItems(filter)
+  const page = pageFromParams(params.page, total, PAGE_SIZE)
+  const window = { ...filter, take: PAGE_SIZE, skip: (page - 1) * PAGE_SIZE }
 
-  const actions = await db.listActionItems(filter)
+  // Poll-on-open: pull the latest done state from linked Jira issues, but only
+  // for the actions on this page. Reconciling everything ever created meant
+  // outbound Jira calls proportional to the whole history on every render.
+  await reconcileActions(await db.listActionItems(window))
+
+  // Re-read: the reconcile above may have flipped completed flags.
+  const actions = await db.listActionItems(window)
 
   async function toggleAction(actionId: string, completed: boolean) {
     'use server'
@@ -138,6 +146,13 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
             </div>
         )}
       </div>
+      <Pager
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={total}
+        basePath="/actions"
+        params={params}
+      />
     </PageShell>
   )
 }

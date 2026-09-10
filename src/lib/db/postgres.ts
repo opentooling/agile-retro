@@ -558,6 +558,12 @@ export async function createRetrospectiveWithColumns(
         [randomUUID(), c.title, c.type, index, id]
       );
     }
+    // A board opens in INPUT without a status change, so log that entry here
+    // or INPUT never appears in the phase durations.
+    await client.query(
+      `INSERT INTO "PhaseEvent" ("id","retrospectiveId","phase","enteredAt") VALUES ($1,$2,'INPUT',$3)`,
+      [randomUUID(), id, data.phaseStartTime]
+    );
     return mapRetro(res.rows[0]);
   });
 }
@@ -605,15 +611,20 @@ export async function updateRetroDurations(
 
 export async function listRetrospectives(
   filter: RetroFilter,
-  take?: number
+  take?: number,
+  skip?: number
 ): Promise<(Retrospective & { team: Team | null })[]> {
   const params: unknown[] = [];
   const { clauses, needsTeamJoin } = buildRetroWhere(filter, "r", "t", params);
   const join = needsTeamJoin ? `JOIN "Team" t ON t."id" = r."teamId"` : "";
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const limit = take != null ? `LIMIT ${Number(take)}` : "";
+  const limit = take != null ? ` LIMIT ${Number(take)}` : "";
+  // `id` is the tiebreaker in the ORDER BY above: two boards created in the
+  // same millisecond would otherwise order arbitrarily and could appear on two
+  // pages, or on neither.
+  const offset = skip ? ` OFFSET ${Number(skip)}` : "";
   const rows = await query(
-    `SELECT r.* FROM "Retrospective" r ${join} ${where} ORDER BY r."createdAt" DESC ${limit}`,
+    `SELECT r.* FROM "Retrospective" r ${join} ${where} ORDER BY r."createdAt" DESC, r."id" ${limit}${offset}`,
     params
   );
   const teams = await getTeamsByIds([
@@ -800,8 +811,27 @@ export async function updateActionCompleted(id: string, completed: boolean): Pro
 }
 
 
-export async function listActionItems(filter: ActionFilter): Promise<ActionItemWithRetro[]> {
+export async function countActionItems(filter: ActionFilter): Promise<number> {
   const params: unknown[] = [];
+  const { clauses, needsTeamJoin } = buildActionWhere(filter, params);
+  const teamJoin = needsTeamJoin ? `JOIN "Team" t ON t."id" = r."teamId"` : "";
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const rows = await query(
+    `SELECT COUNT(*)::int AS n FROM "ActionItem" a
+     JOIN "Retrospective" r ON r."id" = a."retrospectiveId" ${teamJoin} ${where}`,
+    params
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * Where-clause for action queries. Shared by the list and the count so a page's
+ * "N results" can never describe a different set than the rows shown.
+ */
+function buildActionWhere(
+  filter: ActionFilter,
+  params: unknown[]
+): { clauses: string[]; needsTeamJoin: boolean } {
   const clauses: string[] = [];
   let needsTeamJoin = false;
 
@@ -827,15 +857,23 @@ export async function listActionItems(filter: ActionFilter): Promise<ActionItemW
   if (filter.excludeRetrospectiveId) {
     clauses.push(`a."retrospectiveId" <> $${params.push(filter.excludeRetrospectiveId)}`);
   }
+  return { clauses, needsTeamJoin };
+}
+
+export async function listActionItems(filter: ActionFilter): Promise<ActionItemWithRetro[]> {
+  const params: unknown[] = [];
+  const { clauses, needsTeamJoin } = buildActionWhere(filter, params);
 
   const teamJoin = needsTeamJoin ? `JOIN "Team" t ON t."id" = r."teamId"` : "";
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const limit = filter.take != null ? ` LIMIT ${Number(filter.take)}` : "";
+  const offset = filter.skip ? ` OFFSET ${Number(filter.skip)}` : "";
   const rows = await query(
     `SELECT a.* FROM "ActionItem" a
      JOIN "Retrospective" r ON r."id" = a."retrospectiveId"
      ${teamJoin}
      ${where}
-     ORDER BY r."createdAt" DESC`,
+     ORDER BY r."createdAt" DESC, a."id"${limit}${offset}`,
     params
   );
 

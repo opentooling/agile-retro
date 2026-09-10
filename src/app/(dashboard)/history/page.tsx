@@ -2,9 +2,10 @@ import * as db from '@/lib/db'
 import { Button } from "@/components/ui/button"
 import Link from 'next/link'
 import { auth } from '@/auth'
-import { authUserFromSession, canManageBoard } from '@/lib/authz'
+import { authUserFromSession, canAdministerBoard } from '@/lib/authz'
 import { SessionList, type SessionSummary } from '@/components/SessionList'
 import { PageShell, PageHeader } from '@/components/PageHeader'
+import { Pager, pageFromParams } from '@/components/Pager'
 
 export default async function HistoryPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const session = await auth()
@@ -26,7 +27,13 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
     delete filter.creatorContains
   }
 
-  const retros = await db.listRetrospectives(filter)
+  // This page used to load every board ever created. A team running
+  // fortnightly retros produces ~26 a year, so an established org reaches
+  // thousands — all of them queried, serialised and rendered at once.
+  const PAGE_SIZE = 25
+  const total = await db.countRetrospectives(filter)
+  const page = pageFromParams(params.page, total, PAGE_SIZE)
+  const retros = await db.listRetrospectives(filter, PAGE_SIZE, (page - 1) * PAGE_SIZE)
 
   const authUser = authUserFromSession(session)
   const sessions: SessionSummary[] = retros.map((retro) => ({
@@ -38,7 +45,7 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
     expiresAt: retro.expiresAt ? retro.expiresAt.toISOString() : null,
     team: retro.team ? { id: retro.team.id, name: retro.team.name, imageData: retro.team.imageData } : null,
     tags: retro.tags ? retro.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
-    canDelete: canManageBoard(authUser, {
+    canDelete: canAdministerBoard(authUser, {
       teamId: retro.teamId,
       creator: retro.creator,
       team: retro.team,
@@ -63,6 +70,13 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
       <SessionList
         sessions={sessions}
         emptyMessage="No retrospectives found matching your filters."
+      />
+      <Pager
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={total}
+        basePath="/history"
+        params={params}
       />
     </PageShell>
   )

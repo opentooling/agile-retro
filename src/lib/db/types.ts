@@ -157,6 +157,9 @@ export type ActionFilter = {
   teamId?: string;
   /** Exclude one retro, so a board doesn't list its own actions as carried over. */
   excludeRetrospectiveId?: string;
+  /** Page window. Callers that render a list must set these — the tables grow without bound. */
+  take?: number;
+  skip?: number;
 };
 
 export type CreateColumnInput = { title: string; type: string };
@@ -247,7 +250,8 @@ export interface DbApi {
   teamAnalytics(teamId: string): MaybePromise<TeamAnalyticsRaw>;
   listRetrospectives(
     filter: RetroFilter,
-    take?: number
+    take?: number,
+    skip?: number
   ): MaybePromise<(Retrospective & { team: Team | null })[]>;
   countRetrospectives(filter: RetroFilter): MaybePromise<number>;
   getAllTagStrings(): MaybePromise<string[]>;
@@ -291,6 +295,7 @@ export interface DbApi {
   updateActionCompleted(id: string, completed: boolean): MaybePromise<void>;
   setActionExternalLink(id: string, link: { externalUrl: string; externalKey: string }): MaybePromise<void>;
   listActionItems(filter: ActionFilter): MaybePromise<ActionItemWithRetro[]>;
+  countActionItems(filter: ActionFilter): MaybePromise<number>;
   countOpenActions(retroFilter: RetroFilter): MaybePromise<number>;
 
   // Maintenance

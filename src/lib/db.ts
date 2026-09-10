@@ -95,6 +95,7 @@ export const getActionItem = bind("getActionItem");
 export const updateActionCompleted = bind("updateActionCompleted");
 export const setActionExternalLink = bind("setActionExternalLink");
 export const listActionItems = bind("listActionItems");
+export const countActionItems = bind("countActionItems");
 export const countOpenActions = bind("countOpenActions");
 
 // Maintenance

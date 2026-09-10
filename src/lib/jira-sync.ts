@@ -7,9 +7,15 @@
  *     `pushActionDoneState` transitions the linked issue to Done (or reopens it).
  *     This runs immediately on toggle.
  *   - External -> app ("reconcile / pull"): when a board or the actions page is
- *     opened, `reconcileActionsForRetro` / `reconcileAllLinkedActions` read the
- *     linked issues' status and update the app's `completed` flag to match. This
- *     is a poll-on-open, not a background job.
+ *     opened, `reconcileActionsForRetro` / `reconcileActions` read the linked
+ *     issues' status and update the app's `completed` flag to match. This is a
+ *     poll-on-open, not a background job.
+ *
+ * Polling is bounded in two ways, because this runs on a page render and makes
+ * outbound network calls. Callers pass only the actions they are about to
+ * display, and each team is polled at most once per RECONCILE_INTERVAL_MS
+ * across renders — otherwise every refresh of a busy actions page fires a
+ * fresh round of Jira requests.
  *
  * The sync covers reopen in both directions: an issue moved out of Done in Jira
  * un-completes the action, and un-completing an action reopens the issue.
@@ -24,6 +30,13 @@ import type { ActionItemWithRetro, Team } from "./db/types";
 import { getPlugin } from "./plugins/registry";
 
 const PLUGIN_ID = "jira";
+
+/**
+ * Minimum gap between polls of the same team. In-process and best-effort: a
+ * restart or a second replica simply polls again, which is harmless.
+ */
+const RECONCILE_INTERVAL_MS = Number(process.env.JIRA_RECONCILE_INTERVAL_MS ?? 60_000);
+const lastPolled = new Map<string, number>();
 
 /**
  * Reconcile the app's completed flags with the linked external tasks' done
@@ -46,6 +59,10 @@ async function reconcile(actions: ActionItemWithRetro[]): Promise<void> {
   }
 
   for (const { team, actions: teamActions } of byTeam.values()) {
+    const since = Date.now() - (lastPolled.get(team.id) ?? 0);
+    if (since < RECONCILE_INTERVAL_MS) continue;
+    lastPolled.set(team.id, Date.now());
+
     const keys = teamActions.map((a) => a.externalKey!).filter(Boolean);
     let doneByKey: Map<string, boolean>;
     try {
@@ -80,12 +97,19 @@ export async function reconcileActionsForRetro(retrospectiveId: string): Promise
 }
 
 /** Reconcile all linked actions (called on the actions page). */
-export async function reconcileAllLinkedActions(): Promise<void> {
+/**
+ * Reconcile a specific set of actions — the ones a page is about to show.
+ *
+ * Replaces a previous `reconcileAllLinkedActions`, which read *every* action
+ * ever created and then asked Jira about all of them on each render of the
+ * actions page. That was unbounded outbound work proportional to the whole
+ * history, and it ignored the page's own filters.
+ */
+export async function reconcileActions(actions: ActionItemWithRetro[]): Promise<void> {
   try {
-    const actions = await db.listActionItems({});
     await reconcile(actions);
   } catch (err) {
-    console.error("reconcileAllLinkedActions failed:", err);
+    console.error("reconcileActions failed:", err);
   }
 }
 
