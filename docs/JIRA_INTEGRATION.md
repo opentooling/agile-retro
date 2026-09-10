@@ -126,6 +126,13 @@ page is opened, the app reconciles: it reads each linked issue's status category
 and updates the action's `completed` flag to match Jira. This is a
 poll-on-open, not a background job — there is no webhook to configure.
 
+The poll is bounded in two ways, because it runs during a page render and makes
+outbound calls. Only the actions **on the page being rendered** are reconciled,
+and a given team is polled at most once per `JIRA_RECONCILE_INTERVAL_MS`
+(default 60000) across renders. An earlier version read every action ever
+created and asked Jira about all of them on each render, which grew without
+limit as a team's history grew.
+
 Because the app→Jira push runs on every toggle, the two stay converged and don't
 ping-pong.
 
@@ -147,7 +154,7 @@ src/lib/plugins/
 src/lib/jira-sync.ts
   pushActionDoneState(id, done)        app -> Jira on toggle (transition/reopen)
   reconcileActionsForRetro(retroId)    Jira -> app on board open
-  reconcileAllLinkedActions()          Jira -> app on the Actions page
+  reconcileActions(actions)            Jira -> app for a page of actions
 
 src/app/actions.ts
   updateTeamJira(...)                 save a team's Jira config (token kept if blank)

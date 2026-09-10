@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import {
   Eye, EyeOff, ListTodo, Play, Star, Users, Clock, Trash2, SmilePlus,
-  Shield, ExternalLink, LayoutDashboard, Pencil,
+  Shield, ExternalLink, LayoutDashboard, Pencil, Building2, RefreshCw,
 } from 'lucide-react'
 import { PageShell, PageHeader } from '@/components/PageHeader'
 import { RETRO_TEMPLATES } from '@/lib/retro-templates'
@@ -145,7 +145,7 @@ export default function HelpPage() {
           <p>
             If the team has Jira configured, an action can be pushed to Jira{' '}
             <ExternalLink className="inline h-3.5 w-3.5" /> and its done state stays in sync both
-            ways.
+            ways — see <a href="#jira" className="text-primary hover:underline">Jira</a> below.
           </p>
         </Section>
 
@@ -168,6 +168,75 @@ export default function HelpPage() {
               deliberate — access fails closed rather than open. If your team can&apos;t see a
               board, check its groups first.
             </span>
+          </p>
+        </Section>
+
+        <Section id="directory" icon={Building2} title="Where your access comes from">
+          <p>
+            You are not added to a team inside this app. Membership follows the groups you are
+            already in — typically <Term>Active Directory</Term> groups, federated into Keycloak
+            and sent to the app when you sign in. A team is bound to one or more of those group
+            names, and everyone in them can open that team&apos;s boards.
+          </p>
+          <p>
+            Group names are matched leniently: case is ignored, and a team may be bound either to
+            the full path (<code className="rounded bg-muted px-1">/Eng/Platform</code>) or just the
+            last part (<code className="rounded bg-muted px-1">Platform</code>).
+          </p>
+          <p className="flex gap-2 rounded-md border border-amber-200 bg-amber-50/60 p-2.5 dark:border-amber-900 dark:bg-amber-950/20">
+            <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span>
+              <span className="font-medium text-foreground">Joined a group but still can&apos;t
+              see the board?</span> Your groups are read once, when you sign in. Sign out and back
+              in to pick up a change — nothing in the app can refresh it for you.
+            </span>
+          </p>
+          <p>
+            Administrators: the groups arrive in the ID token&apos;s <Term>user_roles</Term> claim
+            (configurable, and it falls back to <Term>groups</Term>). If nobody can open a team&apos;s
+            boards, that claim is usually missing from the ID token rather than the team being
+            misconfigured. Full setup, including the LDAP group sync and the Group Membership
+            mapper, is in <Term>docs/KEYCLOAK_GROUPS.md</Term>.
+          </p>
+        </Section>
+
+        <Section id="jira" icon={ExternalLink} title="Jira">
+          <p>
+            Jira is connected <Term>per team</Term>, on the{' '}
+            <Link href="/teams" className="text-primary hover:underline">Teams</Link> page. A team
+            admin fills in four things — all four are required before anything appears:
+          </p>
+          <ul className="space-y-0.5">
+            <li><Term>Base URL</Term> — e.g. https://yourco.atlassian.net</li>
+            <li><Term>Project key</Term> — the project new issues are raised in, e.g. PROJ</li>
+            <li><Term>Account email</Term> — the account the issues are created as</li>
+            <li><Term>API token</Term> — from your Atlassian account security settings, not your password</li>
+          </ul>
+          <p>
+            Once connected, any action item on that team&apos;s boards gets a{' '}
+            <Term>Create in Jira</Term> button. It raises a <Term>Task</Term> in the project and
+            links the two, showing the issue key from then on. The assignee is matched to a Jira
+            user where possible; when it can&apos;t be matched the name is kept in the issue
+            description rather than being dropped.
+          </p>
+          <p>
+            <Term>Done state syncs both ways.</Term> Ticking the action off transitions the issue
+            to a done status; moving the issue to done in Jira ticks off the action. Reopening
+            works in both directions too. The Jira side is read when you open a board or the
+            Actions page — there is no webhook — so a change made in Jira appears the next time
+            you look, not instantly.
+          </p>
+          <p className="flex gap-2 rounded-md border border-amber-200 bg-amber-50/60 p-2.5 dark:border-amber-900 dark:bg-amber-950/20">
+            <Shield className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span>
+              The issue is created and transitioned as the account whose token you supplied, so it
+              needs permission to create issues in that project and to move them to done. A
+              missing transition is the usual reason an issue stops short of Done.
+            </span>
+          </p>
+          <p>
+            Setup detail, network requirements for self-hosted Jira, and how to add another
+            tracker are in <Term>docs/JIRA_INTEGRATION.md</Term>.
           </p>
         </Section>
 
@@ -207,6 +276,24 @@ export default function HelpPage() {
             <div>
               <dt className="font-medium text-foreground">The board looks empty during input</dt>
               <dd>Blind input is probably on — a banner at the top of the board will say so.</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-foreground">You were added to a group but still can&apos;t get in</dt>
+              <dd>Sign out and back in — group membership is read at sign-in.</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-foreground">No &ldquo;Create in Jira&rdquo; button</dt>
+              <dd>
+                The board has no team, or the team is missing one of the four Jira settings. All
+                four are required.
+              </dd>
+            </div>
+            <div>
+              <dt className="font-medium text-foreground">A Jira issue was created but never moves to Done</dt>
+              <dd>
+                The connected account may lack permission to transition it, or the project may have
+                no available transition to a done status from where the issue is.
+              </dd>
             </div>
             <div>
               <dt className="font-medium text-foreground">A board you expected is gone</dt>
