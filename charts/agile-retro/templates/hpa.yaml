@@ -1,0 +1,42 @@
+{{- include "agile-retro.validateScaling" . -}}
+{{- if and .Values.autoscaling.enabled (not .Values.sqlite.enabled) }}
+{{/*
+Previously `autoscaling.enabled` only removed the Deployment's `replicas`
+field and rendered no autoscaler at all — so turning it on looked configured
+and silently left the app at one pod. This is that missing HPA.
+
+CPU is a weak signal for this workload: a retro is a few dozen long-lived
+websockets, so it is I/O-bound and idles cheaply even with a full room.
+Treat the CPU target as a safety valve, not a capacity model.
+*/}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "agile-retro.fullname" . }}
+  labels:
+    {{- include "agile-retro.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "agile-retro.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    {{- with .Values.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ . }}
+    {{- end }}
+    {{- with .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ . }}
+    {{- end }}
+{{- end }}

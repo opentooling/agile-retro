@@ -60,11 +60,26 @@ resources: {}
   #   cpu: 100m
   #   memory: 128Mi
 
+# Horizontal autoscaling. Read the `scaling` block below first: more than one
+# replica is not supported yet, so enabling this alone will fail the render.
+# Ignored when sqlite.enabled (a file database cannot be shared between pods).
 autoscaling:
   enabled: false
   minReplicas: 1
-  maxReplicas: 100
+  maxReplicas: 5
+  # CPU is a weak signal here — the app is I/O-bound on long-lived websockets
+  # and idles cheaply even with a full room. Treat this as a safety valve.
   targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+scaling:
+  # Board updates are broadcast in-process (Socket.IO's default adapter), so a
+  # second pod splits each board's room and people stop seeing each other's
+  # cards, votes and presence. Running multiple replicas needs a shared adapter
+  # (e.g. Redis), shared presence, and sticky sessions at the ingress.
+  #
+  # Set true only if you understand that and still want to scale out.
+  allowMultipleReplicas: false
   # targetMemoryUtilizationPercentage: 80
 
 nodeSelector: {}

@@ -177,6 +177,48 @@ when `sqlite.enabled`.
 kubectl logs job/<release>-agile-retro-migrate
 ```
 
+## Scaling
+
+The app runs as **one replica**, and the chart refuses to render more without an
+explicit acknowledgement. That is not an oversight:
+
+Board updates are broadcast with Socket.IO's default in-process adapter, so
+`io.to(room)` only reaches sockets connected to *that pod*. With a second
+replica, two people on the same board can land on different pods and stop
+seeing each other's cards, votes and presence — the board looks broken rather
+than slow. Participant tracking is an in-process map for the same reason.
+
+Setting `replicaCount > 1` or `autoscaling.enabled=true` therefore fails the
+render with an explanation. Overriding it is deliberate:
+
+```yaml
+scaling:
+  allowMultipleReplicas: true   # only with the prerequisites below
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+```
+
+### What scaling out actually requires
+
+1. A shared Socket.IO adapter (`@socket.io/redis-adapter` and Redis) so
+   broadcasts cross pods.
+2. Shared presence — `participants` in `server.ts` moved out of process.
+3. Session affinity at the Route/Ingress, or websocket-only transport;
+   Socket.IO's polling handshake needs to reach the same pod.
+4. Single-owner background work: the retention sweep and the Jira reconcile
+   throttle are per-process, so N replicas means N sweeps and N× the polling.
+
+Until those exist, a single replica is the supported configuration. It is also
+usually sufficient — a retrospective is a few dozen long-lived websockets for
+under an hour, and the app is I/O-bound rather than CPU-bound. If you need to
+survive a node eviction rather than serve more load, that is the same piece of
+work.
+
+> SQLite can never be scaled out: it is a single-writer file database, and the
+> chart blocks multiple replicas with a separate message when `sqlite.enabled`.
+
 ## Troubleshooting
 
 ### Version Mismatch Error

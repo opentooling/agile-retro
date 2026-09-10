@@ -42,6 +42,22 @@
   {{- end }}
   {{- end }}
 
+{{- if or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled }}
+
+!! MULTIPLE REPLICAS ARE RUNNING
+  Board updates are broadcast in-process (Socket.IO's default adapter), so each
+  pod only reaches the sockets connected to it. People on the same board can
+  land on different pods and stop seeing each other's cards, votes and presence.
+  {{- if .Values.autoscaling.enabled }}
+  Autoscaler: {{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas.
+  {{- else }}
+  replicaCount: {{ .Values.replicaCount }}
+  {{- end }}
+  This needs a shared Socket.IO adapter (e.g. Redis), shared presence and
+  sticky sessions before it is safe. Set replicaCount back to 1 unless you have
+  those.
+{{- end }}
+
 3. Authentication:
   {{- if .Values.auth.google.enabled }}
   - Google OAuth is enabled
