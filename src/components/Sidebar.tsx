@@ -150,6 +150,7 @@ export function Sidebar({ user, keycloakIssuer, keycloakClientId, appName }: Sid
         // survives — the next sign-in then silently re-authenticates with no
         // prompt, which looks like logout not working at all.
         await signOut({ redirect: false })
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- logoutUrl is the identity provider's end_session endpoint, an absolute off-origin URL; router.push() cannot leave the app.
         window.location.href = logoutUrl
     } else {
         await signOut()
