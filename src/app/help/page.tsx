@@ -180,8 +180,7 @@ export default function HelpPage() {
           </p>
           <p>
             Group names are matched leniently: case is ignored, and a team may be bound either to
-            the full path (<code className="rounded bg-muted px-1">/Eng/Platform</code>) or just the
-            last part (<code className="rounded bg-muted px-1">Platform</code>).
+            a group&apos;s full path or just its last segment.
           </p>
           <p className="flex gap-2 rounded-md border border-amber-200 bg-amber-50/60 p-2.5 dark:border-amber-900 dark:bg-amber-950/20">
             <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -207,10 +206,10 @@ export default function HelpPage() {
             admin fills in four things — all four are required before anything appears:
           </p>
           <ul className="space-y-0.5">
-            <li><Term>Base URL</Term> — e.g. https://yourco.atlassian.net</li>
-            <li><Term>Project key</Term> — the project new issues are raised in, e.g. PROJ</li>
+            <li><Term>Base URL</Term> — the address of your Jira instance</li>
+            <li><Term>Project key</Term> — the project new issues are raised in</li>
             <li><Term>Account email</Term> — the account the issues are created as</li>
-            <li><Term>API token</Term> — from your Atlassian account security settings, not your password</li>
+            <li><Term>API token</Term> — created in that account&apos;s security settings, not your password</li>
           </ul>
           <p>
             Once connected, any action item on that team&apos;s boards gets a{' '}

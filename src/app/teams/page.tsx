@@ -383,7 +383,7 @@ function JiraSettings({ team }: { team: Team }) {
                 <div className="px-3 pb-3 flex flex-col gap-2">
                     <div className="flex flex-col gap-1">
                         <Label className="text-xs">Base URL</Label>
-                        <Input className="h-8" placeholder="https://yourco.atlassian.net" value={baseUrl} onChange={e => setBaseUrl(e.target.value)} />
+                        <Input className="h-8" placeholder="https://jira.example.com" value={baseUrl} onChange={e => setBaseUrl(e.target.value)} />
                     </div>
                     <div className="flex flex-col gap-1">
                         <Label className="text-xs">Project key</Label>
@@ -391,7 +391,7 @@ function JiraSettings({ team }: { team: Team }) {
                     </div>
                     <div className="flex flex-col gap-1">
                         <Label className="text-xs">Account email</Label>
-                        <Input className="h-8" placeholder="you@yourco.com" value={email} onChange={e => setEmail(e.target.value)} />
+                        <Input className="h-8" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} />
                     </div>
                     <div className="flex flex-col gap-1">
                         <Label className="text-xs">API token</Label>

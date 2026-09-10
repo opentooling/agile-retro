@@ -30,9 +30,9 @@ Open **Teams**, expand **Jira integration** on a team card, and fill in:
 
 | Field | Example | Notes |
 | --- | --- | --- |
-| Base URL | `https://jira.yourco.com` | Your Jira Server/Data Center host, no trailing slash needed |
+| Base URL | `https://jira.example.com` | Your Jira Server/Data Center host, no trailing slash needed |
 | Project key | `PROJ` | The key issues are created under |
-| Account email | `you@yourco.com` | The account the token belongs to (used for Basic auth) |
+| Account email | `you@example.com` | The account the token belongs to (used for Basic auth) |
 | API token | `ATATT3x…` | An Atlassian API token (see below) |
 
 The API token is **write-only from the UI**: it is stored server-side and never
