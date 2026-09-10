@@ -12,6 +12,7 @@ import { purgeExpiredRetros } from "./src/lib/purge";
 import {
     authUserFromToken,
     canViewBoard,
+    canContributeToBoard,
     canManageBoard,
     canEditItem,
     type AuthUser,
@@ -72,7 +73,7 @@ async function loadRetroRef(retroId: string): Promise<RetroRef | null> {
     const retro = await db.getRetro(retroId);
     if (!retro) return null;
     const team = retro.teamId ? await db.getTeam(retro.teamId) : null;
-    return { teamId: retro.teamId, creator: retro.creator, team };
+    return { teamId: retro.teamId, creator: retro.creator, team, status: retro.status };
 }
 
 const dev = process.env.NODE_ENV !== "production";
@@ -177,6 +178,21 @@ app.prepare().then(() => {
             }
             return ref;
         };
+        /**
+         * For anything that writes. Distinct from requireView: a closed board
+         * stays readable but is frozen, and previously every mutating handler
+         * used requireView (or no guard at all), so "read-only" was a label on
+         * a screen rather than a rule.
+         */
+        const requireContribute = async (retroId: string): Promise<RetroRef | null> => {
+            const ref = await loadRetroRef(retroId);
+            if (!ref) return null;
+            if (!canContributeToBoard(user, ref)) {
+                socket.emit("access-denied", { retroId });
+                return null;
+            }
+            return ref;
+        };
         const requireManage = async (retroId: string): Promise<RetroRef | null> => {
             const ref = await loadRetroRef(retroId);
             if (!ref) return null;
@@ -188,7 +204,7 @@ app.prepare().then(() => {
         };
 
         socket.on("user-ready", async ({ retroId, isReady }) => {
-            if (!(await requireView(retroId))) return;
+            if (!(await requireContribute(retroId))) return;
             if (participants[retroId] && participants[retroId][socket.id]) {
                 participants[retroId][socket.id].isReady = isReady;
                 io.to(retroId).emit("participants-updated", Object.values(participants[retroId]));
@@ -197,7 +213,7 @@ app.prepare().then(() => {
 
         socket.on("add-item", async ({ retroId, columnId, content }) => {
             try {
-                if (!(await requireView(retroId))) return;
+                if (!(await requireContribute(retroId))) return;
 
                 // Get max order in this column
                 const nextOrder = (await db.itemMaxOrder(columnId) ?? -1) + 1;
@@ -244,7 +260,7 @@ app.prepare().then(() => {
 
         socket.on("vote", async ({ retroId, itemId, delta }) => {
             try {
-                if (!(await requireView(retroId))) return;
+                if (!(await requireContribute(retroId))) return;
 
                 // Votes belong to the authenticated user, never a client id.
                 const existingVote = await db.findVote(itemId, user.id);
@@ -311,7 +327,7 @@ app.prepare().then(() => {
 
         socket.on("add-action-item", async ({ retroId, content, assignee, dueDate }) => {
             try {
-                if (!(await requireView(retroId))) return;
+                if (!(await requireContribute(retroId))) return;
                 await db.createActionItem({
                     content,
                     retrospectiveId: retroId,
@@ -347,7 +363,7 @@ app.prepare().then(() => {
 
         socket.on("toggle-reaction", async ({ retroId, itemId, emoji }) => {
             try {
-                if (!(await requireView(retroId))) return;
+                if (!(await requireContribute(retroId))) return;
                 // Reactions belong to the authenticated user.
                 const existingReaction = await db.findReaction(itemId, user.id, emoji);
 
@@ -366,7 +382,7 @@ app.prepare().then(() => {
 
         socket.on("move-item", async ({ retroId, itemId, targetColumnId, newIndex }) => {
             try {
-                if (!(await requireView(retroId))) return;
+                if (!(await requireContribute(retroId))) return;
 
                 // 1. Get the item to verify it exists and get its current column
                 const itemToMove = await db.getItem(itemId);

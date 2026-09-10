@@ -274,6 +274,84 @@ describe('RetroBoard', () => {
     })
   })
 
+  describe('a closed board', () => {
+    const closedData = {
+      ...mockRetroData,
+      status: 'CLOSED',
+      columns: [
+        {
+          ...mockRetroData.columns[0],
+          items: Array.from({ length: 8 }, (_, i) => ({
+            id: `item-${i}`, content: `Card ${i}`, summary: i === 0 ? 'Discussed' : null,
+            userId: 'u1', username: 'ana', votes: [{ userId: 'u1', count: 8 - i }], reactions: [],
+          })),
+        },
+        ...mockRetroData.columns.slice(1),
+      ],
+      actions: [{ id: 'a1', content: 'Fix the pipeline', completed: false }],
+    }
+
+    it('opens on the discussion view, pooled and vote-sorted', () => {
+      render(<RetroBoard initialData={closedData} user={{ name: 'test-user' }} />)
+      expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute('aria-selected', 'true')
+    })
+
+    it('can be read through each phase, including Input', () => {
+      // A closed board used to show only the pooled Review layout, so the
+      // column arrangement the team actually raised things in was unreachable.
+      render(<RetroBoard initialData={closedData} user={{ name: 'test-user' }} />)
+      for (const phase of ['Input', 'Voting', 'Review', 'Actions']) {
+        expect(screen.getByRole('tab', { name: phase })).toBeInTheDocument()
+      }
+
+      fireEvent.click(screen.getByRole('tab', { name: 'Input' }))
+      expect(screen.getByRole('tab', { name: 'Input' })).toHaveAttribute('aria-selected', 'true')
+      // Cards are grouped under their column heading again.
+      expect(screen.getAllByText('What went well').length).toBeGreaterThan(0)
+      expect(screen.getByText('Card 0')).toBeInTheDocument()
+    })
+
+    it('is explicit that it is not a point-in-time snapshot', () => {
+      // The board holds its final content; only the arrangement changes.
+      render(<RetroBoard initialData={closedData} user={{ name: 'test-user' }} />)
+      expect(screen.getByText(/not a snapshot of that moment/)).toBeInTheDocument()
+    })
+
+    it('shows every card, not just the top few', () => {
+      // It used to show the top 5, which made revisiting a past retro a
+      // summary rather than a record of what was said.
+      render(<RetroBoard initialData={closedData} user={{ name: 'test-user' }} />)
+      for (let i = 0; i < 8; i++) {
+        expect(screen.getByText(`Card ${i}`)).toBeInTheDocument()
+      }
+    })
+
+    it('says it is a record, and keeps the export', () => {
+      render(<RetroBoard initialData={closedData} user={{ name: 'test-user' }} />)
+      expect(screen.getByText(/This retrospective is closed/)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Export report/ })).toBeInTheDocument()
+    })
+
+    it('offers no way to add a card or react', () => {
+      render(<RetroBoard initialData={closedData} user={{ name: 'test-user' }} />)
+      expect(screen.queryByPlaceholderText(/Add a new item/)).toBeNull()
+      expect(screen.queryByLabelText('Add reaction')).toBeNull()
+    })
+
+    it('still shows the retro notes that were captured', () => {
+      render(<RetroBoard initialData={closedData} user={{ name: 'test-user' }} />)
+      expect(screen.getByText('Discussed')).toBeInTheDocument()
+    })
+
+    it('still lists action items under their phase — they outlive the session', () => {
+      render(<RetroBoard initialData={closedData} user={{ name: 'test-user' }} />)
+      fireEvent.click(screen.getByRole('tab', { name: 'Actions' }))
+      expect(screen.getByText('Fix the pipeline')).toBeInTheDocument()
+      // And they stay togglable, unlike everything else on a closed board.
+      expect(screen.getByRole('checkbox')).toBeInTheDocument()
+    })
+  })
+
   describe('phase timer', () => {
     // A phase that started 6 minutes ago with a 5 minute budget: 1 minute over.
     const overtimeData = {

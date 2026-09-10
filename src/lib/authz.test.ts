@@ -1,5 +1,7 @@
 import {
   parseGroupsClaim,
+  canAdministerBoard,
+  canContributeToBoard,
   claimsFromIdToken,
   identityFromClaims,
   authUserFromSession,
@@ -272,5 +274,55 @@ describe('recovering identity from a stored ID token', () => {
     expect(
       authUserFromSession({ user: { email: 'bob@example.com' }, id_token: fakeIdToken({ sub: 'x' }) })?.groups
     ).toEqual([])
+  })
+})
+
+describe('a closed board is frozen', () => {
+  const closed: RetroRef = { ...teamBoard, status: 'CLOSED' }
+  const member = makeUser({ groups: ['/Eng/Platform'] })
+  const facilitator = makeUser({ id: 'alice', name: 'Alice', email: null, groups: ['/Eng/Platform'] })
+  const admin = makeUser({ isAdmin: true })
+
+  it('stays readable by exactly the people who could read it before', () => {
+    // Closing a board must not widen its audience: cards are written on the
+    // understanding that the audience is the team.
+    expect(canViewBoard(member, closed)).toBe(true)
+    expect(canViewBoard(admin, closed)).toBe(true)
+    expect(canViewBoard(makeUser({ groups: ['/Some/Other'] }), closed)).toBe(false)
+  })
+
+  it('accepts no further contributions from anyone, including admins', () => {
+    for (const user of [member, facilitator, admin]) {
+      expect(canContributeToBoard(user, closed)).toBe(false)
+    }
+    // …while an open board is unaffected.
+    expect(canContributeToBoard(member, teamBoard)).toBe(true)
+  })
+
+  it('cannot be driven or moderated, so it cannot be quietly reopened', () => {
+    for (const user of [facilitator, admin]) {
+      expect(canManageBoard(user, closed)).toBe(false)
+      expect(canManageBoard(user, teamBoard)).toBe(true)
+    }
+  })
+
+  it('freezes item editing even for the author', () => {
+    const own = { userId: member.id, username: member.name! }
+    expect(canEditItem(member, teamBoard, own)).toBe(true)
+    expect(canEditItem(member, closed, own)).toBe(false)
+  })
+
+  it('can still be deleted — freezing is not immortality', () => {
+    // Retention deletes closed boards on a timer, so making them undeletable
+    // by hand would be inconsistent as well as annoying.
+    expect(canAdministerBoard(facilitator, closed)).toBe(true)
+    expect(canAdministerBoard(admin, closed)).toBe(true)
+    expect(canAdministerBoard(makeUser({ groups: ['/Some/Other'] }), closed)).toBe(false)
+  })
+
+  it('treats every other phase as live', () => {
+    for (const status of ['INPUT', 'VOTING', 'REVIEW', 'ACTIONS', undefined]) {
+      expect(canContributeToBoard(member, { ...teamBoard, status })).toBe(true)
+    }
   })
 })

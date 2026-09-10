@@ -122,6 +122,60 @@ export function columnAccent(type: string): { badge: string; border: string } {
   return ACCENT_PALETTE[columnSentiment(type)]
 }
 
+/**
+ * One card, read-only. Used by the closed-board archive, where nothing can be
+ * added, edited, voted on or reacted to.
+ */
+function ArchivedItem({
+  item,
+  column,
+  showVotes,
+  names,
+  anonymous,
+}: {
+  item: { id: string; content: string; summary: string | null; username: string; votes: { count: number }[]; reactions?: { userId: string; emoji: string }[] }
+  column: { title: string; type: string }
+  showVotes: boolean
+  names: string[]
+  anonymous: boolean
+}) {
+  const accent = columnAccent(column.type)
+  const total = item.votes.reduce((acc, v) => acc + v.count, 0)
+  return (
+    <Card className={cn('gap-0 border-l-4 py-0 shadow-none', accent.border)}>
+      <CardContent className="space-y-1.5 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className={cn('rounded-full border px-2 py-0.5 text-xs font-bold uppercase tracking-wider', accent.badge)}>
+                {column.title}
+              </span>
+              <span className="text-xs text-muted-foreground">{anonymous ? 'Anonymous' : item.username}</span>
+            </div>
+            <div className="whitespace-pre-wrap text-sm font-medium leading-snug">
+              <MentionText text={item.content} names={names} />
+            </div>
+          </div>
+          {showVotes && (
+            <div className={cn(
+              'flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-sm font-bold',
+              total > 0 ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400' : 'text-muted-foreground'
+            )}>
+              <Star className={cn('h-3.5 w-3.5', total > 0 && 'fill-current')} /> {total}
+            </div>
+          )}
+        </div>
+        <ReactionBar reactions={item.reactions ?? []} userId="" onToggle={() => {}} readOnly />
+        {item.summary && (
+          <div className="whitespace-pre-wrap rounded-md bg-muted/50 px-2.5 py-1.5 text-xs leading-relaxed text-muted-foreground">
+            {item.summary}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 /** Board phases in order, with the labels people actually say out loud. */
 const PHASES = [
   { id: 'INPUT', label: 'Input' },
@@ -662,6 +716,10 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
   const [isReady, setIsReady] = useState(false)
   const [isWarningDismissed, setIsWarningDismissed] = useState(false)
   const [participantsCollapsed, setParticipantsCollapsed] = useState(false)
+  // Which phase's layout a closed board is being read through. A closed board
+  // holds its final content; the phases differ in how that content is arranged,
+  // which is the part worth revisiting.
+  const [archiveView, setArchiveView] = useState<'INPUT' | 'VOTING' | 'REVIEW' | 'ACTIONS'>('REVIEW')
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -1335,86 +1393,138 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                 </div>
             </div>
             ) : retro.status === 'CLOSED' ? (
-            <div className="space-y-8">
-                <div className="bg-muted p-6 rounded-lg text-center border-2 border-dashed">
-                <h2 className="text-3xl font-bold text-gray-500">Retrospective Closed</h2>
-                <p className="text-muted-foreground mt-2">This session is read-only.</p>
-                <div className="mt-6">
-                    <Link href="/">
-                        <Button variant="outline" className="gap-2">
-                            <LayoutDashboard className="w-4 h-4" />
-                            Return to Dashboard
+            // A closed board keeps its final content. The phases differ in how
+            // that content is arranged, and that arrangement is the part worth
+            // revisiting — so the archive is readable through each of them
+            // rather than only the pooled Review layout.
+            <div className="mx-auto w-full max-w-6xl space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/40 px-4 py-3">
+                    <div>
+                        <h2 className="font-semibold">This retrospective is closed</h2>
+                        <p className="text-sm text-muted-foreground">
+                            Kept as a read-only record. Action items can still be ticked off.
+                        </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <Link href="/history">
+                            <Button variant="outline" size="sm" className="gap-2">
+                                <LayoutDashboard className="h-4 w-4" /> All retrospectives
+                            </Button>
+                        </Link>
+                        <Button size="sm" onClick={handleExportPDF} className="gap-2">
+                            <Download className="h-4 w-4" /> Export report
                         </Button>
-                    </Link>
-                    <Button onClick={handleExportPDF} className="gap-2 ml-4">
-                        <Download className="w-4 h-4" />
-                        Export Full Report
-                    </Button>
-                </div>
-                </div>
-                
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div>
-                    <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                        <ThumbsUp className="w-5 h-5 text-green-500" />
-                        Action Items
-                    </h3>
-                    <div className="space-y-4">
-                    {retro.actions && retro.actions.length > 0 ? (
-                        retro.actions.map((action) => (
-                        <ActionCard
-                            key={action.id}
-                            action={action}
-                            names={mentionNames}
-                            jiraConfigured={Boolean(retro.team?.jiraConfigured)}
-                            onToggle={() => {
-                                if (socket) {
-                                    socket.emit('toggle-action-item', { retroId: retro.id, actionId: action.id })
-                                }
-                            }}
-                        />
-                        ))
-                    ) : (
-                        <div className="text-muted-foreground italic p-4 border border-dashed rounded-lg text-center">
-                            No action items recorded.
-                        </div>
-                    )}
                     </div>
                 </div>
-                <div>
-                    <h3 className="text-xl font-bold mb-4">Summary</h3>
-                    <div className="space-y-4">
-                        {retro.columns
-                        .flatMap(col => col.items)
-                        .sort((a, b) => {
-                            const votesA = a.votes.reduce((acc, v) => acc + v.count, 0)
-                            const votesB = b.votes.reduce((acc, v) => acc + v.count, 0)
-                            return votesB - votesA
-                        })
-                        .slice(0, 5)
-                        .map((item) => {
-                            const totalVotes = item.votes.reduce((acc, v) => acc + v.count, 0)
-                            return (
-                            <Card key={item.id} className="gap-0 py-0">
-                                <CardContent className="p-3">
-                                <div className="flex justify-between items-start">
-                                    <div className="font-medium"><MentionText text={item.content} names={mentionNames} /></div>
-                                    <div className="flex items-center gap-1 text-amber-700 dark:text-amber-400 font-bold">
-                                    <Star className="w-4 h-4 fill-current" /> {totalVotes}
-                                    </div>
-                                </div>
-                                {item.summary && (
-                                    <div className="mt-2 text-sm text-muted-foreground bg-muted p-2 rounded">
-                                    {item.summary}
-                                    </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex gap-1" role="tablist" aria-label="View this retrospective as">
+                        {PHASES.map((phase) => (
+                            <button
+                                key={phase.id}
+                                type="button"
+                                role="tab"
+                                aria-selected={archiveView === phase.id}
+                                onClick={() => setArchiveView(phase.id)}
+                                className={cn(
+                                    'rounded-md px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                                    archiveView === phase.id
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:bg-accent'
                                 )}
-                                </CardContent>
-                            </Card>
-                            )
-                        })}
+                            >
+                                {phase.label}
+                            </button>
+                        ))}
                     </div>
+                    <p className="text-xs text-muted-foreground">
+                        Shows the final content in each phase&apos;s layout — not a snapshot of that moment.
+                    </p>
                 </div>
-                </div>
+
+                {(archiveView === 'INPUT' || archiveView === 'VOTING') ? (
+                    // As raised: cards stay in their columns, in the order the
+                    // team put them in.
+                    <div className={cn(
+                        'grid grid-cols-1 gap-4',
+                        retro.columns.length >= 4 ? 'md:grid-cols-2 xl:grid-cols-4' : 'md:grid-cols-3'
+                    )}>
+                        {retro.columns.map((column) => (
+                            <div key={column.id} className="space-y-2">
+                                <h3 className={cn(
+                                    'w-fit rounded-full border px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider',
+                                    columnAccent(column.type).badge
+                                )}>
+                                    {column.title}
+                                    <span className="ml-1.5 font-normal opacity-70">{column.items.length}</span>
+                                </h3>
+                                {column.items.map((item) => (
+                                    <ArchivedItem
+                                        key={item.id}
+                                        item={item}
+                                        column={column}
+                                        showVotes={archiveView === 'VOTING'}
+                                        names={mentionNames}
+                                        anonymous={retro.isAnonymous}
+                                    />
+                                ))}
+                                {column.items.length === 0 && (
+                                    <p className="rounded-lg border border-dashed p-3 text-center text-xs italic text-muted-foreground">
+                                        Nothing raised here
+                                    </p>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                ) : archiveView === 'REVIEW' ? (
+                    // As discussed: pooled across columns, highest-voted first.
+                    <div className="mx-auto w-full max-w-4xl space-y-2">
+                        {retro.columns
+                            .flatMap(col => col.items.map(item => ({ item, column: col })))
+                            .map(entry => ({ ...entry, total: entry.item.votes.reduce((acc, v) => acc + v.count, 0) }))
+                            .sort((a, b) => b.total - a.total)
+                            .map(({ item, column }) => (
+                                <ArchivedItem
+                                    key={item.id}
+                                    item={item}
+                                    column={column}
+                                    showVotes
+                                    names={mentionNames}
+                                    anonymous={retro.isAnonymous}
+                                />
+                            ))}
+                        {retro.columns.every(c => c.items.length === 0) && (
+                            <div className="rounded-lg border border-dashed p-6 text-center text-sm italic text-muted-foreground">
+                                No cards were raised in this retrospective.
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    // What the team agreed to do about it.
+                    <div className="mx-auto w-full max-w-3xl space-y-2">
+                        {retro.actions && retro.actions.length > 0 ? (
+                            retro.actions.map((action) => (
+                                <ActionCard
+                                    key={action.id}
+                                    action={action}
+                                    names={mentionNames}
+                                    jiraConfigured={Boolean(retro.team?.jiraConfigured)}
+                                    // Still togglable: actions outlive the
+                                    // session that produced them.
+                                    onToggle={() => {
+                                        if (socket) {
+                                            socket.emit('toggle-action-item', { retroId: retro.id, actionId: action.id })
+                                        }
+                                    }}
+                                />
+                            ))
+                        ) : (
+                            <div className="rounded-lg border border-dashed p-6 text-center text-sm italic text-muted-foreground">
+                                No action items recorded.
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
             ) : (
             <DndContext 

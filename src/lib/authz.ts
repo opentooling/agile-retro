@@ -54,6 +54,8 @@ export type RetroRef = {
   teamId: string | null;
   creator: string;
   team?: TeamRef;
+  /** Board phase. Only "CLOSED" affects policy: a closed board is frozen. */
+  status?: string;
 };
 
 export type ItemRef = { userId: string; username: string };
@@ -283,8 +285,34 @@ export function canViewBoard(user: AuthUser | null, retro: RetroRef): boolean {
   return isTeamMember(user, retro) || isTeamAdmin(user, retro);
 }
 
-/** Can the user manage the board (phase changes, timer, moderation)? */
-export function canManageBoard(user: AuthUser | null, retro: RetroRef): boolean {
+/**
+ * A closed board is an archive: it can still be read by everyone who could read
+ * it before, but its contents are frozen.
+ *
+ * Closing used to be presentational only — the board said "read-only" while
+ * every socket handler happily accepted edits, votes and reactions. This is the
+ * single check the server enforces it with.
+ *
+ * Action items are the deliberate exception and are not governed by this:
+ * they outlive the session that produced them, get carried into the team's next
+ * retro, and are ticked off from the Actions page long after the board closes.
+ */
+export function isBoardFrozen(retro: RetroRef): boolean {
+  return retro.status === "CLOSED";
+}
+
+/** Can the user change anything on this board? False once it is closed. */
+export function canContributeToBoard(user: AuthUser | null, retro: RetroRef): boolean {
+  if (isBoardFrozen(retro)) return false;
+  return canViewBoard(user, retro);
+}
+
+/**
+ * Who administers this board: its facilitator, a team-admin of its team, or a
+ * global admin. Independent of phase — deleting a finished retro is a normal
+ * thing to want, and retention deletes closed boards on a timer anyway.
+ */
+export function canAdministerBoard(user: AuthUser | null, retro: RetroRef): boolean {
   if (!user) return false;
   if (user.isAdmin) return true;
   if (isFacilitator(user, retro)) return true;
@@ -292,9 +320,23 @@ export function canManageBoard(user: AuthUser | null, retro: RetroRef): boolean 
   return false;
 }
 
+/**
+ * Can the user run the board — phase changes, the timer, moderating other
+ * people's cards?
+ *
+ * False once the board is closed: there is no phase left to drive, and
+ * reopening would otherwise be a quiet way around the freeze. Deletion is
+ * deliberately *not* governed by this; see canAdministerBoard.
+ */
+export function canManageBoard(user: AuthUser | null, retro: RetroRef): boolean {
+  if (isBoardFrozen(retro)) return false;
+  return canAdministerBoard(user, retro);
+}
+
 /** Can the user edit this specific item (its content or summary/notes)? */
 export function canEditItem(user: AuthUser | null, retro: RetroRef, item: ItemRef): boolean {
   if (!user) return false;
+  if (isBoardFrozen(retro)) return false;
   if (canManageBoard(user, retro)) return true; // facilitator / team-admin / admin
   // Author of the item.
   if (item.userId && norm(item.userId) === user.id) return true;

@@ -26,7 +26,7 @@ export default async function RetroPage({ params }: { params: Promise<{ id: stri
   // team-admins / admins; open boards (no team) remain visible to any
   // authenticated user. This mirrors the checks enforced by the socket server.
   const authUser = authUserFromSession(session)
-  const retroRef: RetroRef = { teamId: retro.teamId, creator: retro.creator, team: retro.team }
+  const retroRef: RetroRef = { teamId: retro.teamId, creator: retro.creator, team: retro.team, status: retro.status }
 
   if (!canViewBoard(authUser, retroRef)) {
     return (
