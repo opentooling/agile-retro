@@ -16,8 +16,13 @@ exists, this fails the render rather than letting someone reach for
 The escape hatch is deliberate but explicit: scaling.allowMultipleReplicas.
 */}}
 {{- define "agile-retro.validateScaling" -}}
+{{/* `scaling` may be absent when upgrading a release installed before this
+     block existed — `helm upgrade --reuse-values` carries the old values
+     forward and does not merge in new chart defaults, so this must not
+     assume the key is present. Absent means not acknowledged. */}}
+{{- $acknowledged := (default dict .Values.scaling).allowMultipleReplicas -}}
 {{- $wantsMany := or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled -}}
-{{- if and $wantsMany (not .Values.scaling.allowMultipleReplicas) -}}
+{{- if and $wantsMany (not $acknowledged) -}}
 {{- if .Values.sqlite.enabled -}}
 {{- fail "\n\nSQLite is a single-writer file database and cannot be shared between pods.\nRunning more than one replica will corrupt it.\n\nUse PostgreSQL (postgresql.enabled=true or externalDatabase.*) before scaling out.\n" -}}
 {{- else -}}
