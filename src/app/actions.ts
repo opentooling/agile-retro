@@ -5,7 +5,7 @@ import type { Team } from '@/lib/db/types'
 import { getPlugin } from '@/lib/plugins/registry'
 import { pushActionDoneState } from '@/lib/jira-sync'
 import { auth } from '@/auth'
-import { authUserFromSession, isTeamAdmin, canViewBoard, canManageBoard, type RetroRef } from '@/lib/authz'
+import { authUserFromSession, isTeamAdmin, canViewBoard, canAdministerBoard, type RetroRef } from '@/lib/authz'
 import { revalidatePath } from 'next/cache'
 import { templateById } from '@/lib/retro-templates'
 import { RETENTION_OPTIONS, expiryFromRetention } from '@/lib/retention'
@@ -52,11 +52,16 @@ function parseIntSafe(value: FormDataEntryValue | null): number | null {
 }
 
 export async function createRetrospective(formData: FormData) {
-    console.log("createRetrospective called")
     const title = formData.get('title') as string
     const tags = formData.get('tags') as string
-    const creator = formData.get('creator') as string
     const teamId = formData.get('teamId') as string
+
+    // Identity comes from the session, never the form. The creator is the
+    // board's facilitator, which carries management rights over it, so accepting a
+    // client-supplied name let anyone attribute a board to someone else.
+    const authUser = authUserFromSession(await auth())
+    if (!authUser) throw new Error('You must be signed in to create a retrospective')
+    const creator = authUser.name || authUser.id
 
     const inputDuration = parseIntSafe(formData.get('inputDuration'))
     const votingDuration = parseIntSafe(formData.get('votingDuration'))
@@ -81,12 +86,24 @@ export async function createRetrospective(formData: FormData) {
     // created without one ("open board", visible to any authenticated user).
     const normalizedTeamId = teamId && teamId.trim() ? teamId.trim() : null
 
+    // Creating a board *against a team* was previously unchecked, so anyone
+    // could put a board into any team's space — polluting its history and its
+    // insights, and not even being able to open it afterwards. Require the same
+    // access the board itself will demand.
+    if (normalizedTeamId) {
+        const team = await db.getTeam(normalizedTeamId)
+        if (!team) throw new Error('Team not found')
+        if (!canViewBoard(authUser, { teamId: normalizedTeamId, creator: '', team })) {
+            throw new Error('You do not have access to that team')
+        }
+    }
+
     try {
         const retro = await db.createRetrospectiveWithColumns(
             {
                 title: title.trim(),
                 tags: tags || "",
-                creator: creator || "Anonymous",
+                creator,
                 teamId: normalizedTeamId,
                 inputDuration,
                 votingDuration,
@@ -211,9 +228,20 @@ export async function updateTeamImage(id: string, imageData: string | null): Pro
     return sanitizeTeam(team)
 }
 
+/**
+ * Teams this viewer can actually work with.
+ *
+ * Previously every authenticated user got every team, which listed the names of
+ * teams they have no access to and — worse — offered them in the board-creation
+ * picker. Access-controlled teams should not be discoverable by people outside
+ * them. Global admins still see all.
+ */
 export async function getTeams(): Promise<SafeTeam[]> {
+    const authUser = authUserFromSession(await auth())
     const teams = await db.listTeams()
-    return teams.map(sanitizeTeam)
+    return teams
+        .filter((team) => canViewBoard(authUser, { teamId: team.id, creator: '', team }))
+        .map(sanitizeTeam)
 }
 
 export async function updateTeamJira(
@@ -372,10 +400,11 @@ export async function deleteRetrospective(retroId: string): Promise<void> {
 
     const team = retro.teamId ? await db.getTeam(retro.teamId) : null
     const authUser = authUserFromSession(await auth())
-    const ref: RetroRef = { teamId: retro.teamId, creator: retro.creator, team }
+    const ref: RetroRef = { teamId: retro.teamId, creator: retro.creator, team, status: retro.status }
 
-    // canManageBoard is exactly this policy: facilitator, team-admin or admin.
-    if (!canManageBoard(authUser, ref)) {
+    // canAdministerBoard, not canManageBoard: a closed board is frozen for
+    // editing but must still be deletable.
+    if (!canAdministerBoard(authUser, ref)) {
         throw new Error('Only the board creator, a team admin or an admin can delete this board')
     }
 

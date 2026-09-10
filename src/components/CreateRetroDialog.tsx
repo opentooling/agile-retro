@@ -50,20 +50,12 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
   const [templateId, setTemplateId] = useState<string>(DEFAULT_TEMPLATE_ID)
   const [openTemplateCombobox, setOpenTemplateCombobox] = useState(false)
   const [retention, setRetention] = useState<string>(DEFAULT_RETENTION)
-  const [creator, setCreator] = useState("")
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
   const { data: session } = useSession()
 
   useEffect(() => {
     setMounted(true)
-    if (session?.user?.name) {
-      setCreator(session.user.name)
-    } else {
-      const stored = localStorage.getItem('retro-username')
-      if (stored) setCreator(stored)
-    }
-    
     getUniqueTags().then((tags: string[]) => setTags(tags))
     getTeams().then(setTeams)
 
@@ -435,7 +427,6 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                 </div>
             </div>
 
-            <input type="hidden" name="creator" value={creator} />
           </div>
           <DialogFooter>
             <Button type="submit">Create Session</Button>
