@@ -88,28 +88,42 @@ export function SessionList({
 
   return (
     <>
-      <ul className="divide-y rounded-lg border bg-card">
+      {/* Newspaper columns rather than a grid: the list is sorted, so it has
+          to read top-to-bottom down one column and then continue down the next.
+          A grid would interleave it.
+
+          Every width decision here is a container query — the list's own width
+          and each row's own width — never the viewport's. Keyed to the viewport,
+          two columns switched on at a 1536px window regardless of the 256px an
+          open sidebar takes, and rows kept all their metadata in a column too
+          narrow for it; the page then grew past the window and pushed the Create
+          button off-screen. */}
+      <div className="@container">
+      <ul className="rounded-lg border bg-card @min-[88rem]:columns-2 @min-[88rem]:gap-6 @min-[88rem]:[column-rule:1px_solid_var(--color-border)]">
         {sessions.map((session) => {
           const retention = session.expiresAt ? retentionLabel(session.expiresAt) : null
           return (
-            <li key={session.id} className="group relative">
+            // Metadata appears by priority as the row itself widens — team, then
+            // retention (actionable: the board will be deleted), then creator,
+            // then tags — so the title always keeps ~230px or more.
+            <li key={session.id} className="@container group relative break-inside-avoid border-b last:border-b-0">
               <Link
                 href={`/retro/${session.id}`}
-                className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 transition-colors hover:bg-accent/60 sm:flex-nowrap"
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 transition-colors hover:bg-accent/60 @md:flex-nowrap"
               >
                 <PhaseBadge status={session.status} className="w-16 shrink-0" />
 
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{session.title}</span>
 
                 {session.team && (
-                  <span className="hidden shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground sm:flex">
+                  <span className="hidden shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground @2xl:flex">
                     <TeamMark team={session.team} size={16} />
                     <span className="max-w-[10rem] truncate">{session.team.name}</span>
                   </span>
                 )}
 
                 {session.tags.length > 0 && (
-                  <span className="hidden shrink-0 gap-1 lg:flex">
+                  <span className="hidden shrink-0 gap-1 @6xl:flex">
                     {session.tags.slice(0, 2).map((tag) => (
                       <Badge key={tag} variant="secondary" className="font-normal">{tag}</Badge>
                     ))}
@@ -122,8 +136,8 @@ export function SessionList({
                 {retention && (
                   <span
                     className={cn(
-                      'hidden shrink-0 items-center gap-1 text-[11px] sm:flex',
-                      retention.urgent ? 'font-semibold text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+                      'hidden shrink-0 items-center gap-1 text-[11px] @3xl:flex',
+                      retention.urgent ? 'font-semibold text-[hsl(var(--tone-risk-ink))]' : 'text-muted-foreground'
                     )}
                     title={`Automatically deleted on ${new Date(session.expiresAt!).toLocaleDateString()}`}
                   >
@@ -132,7 +146,7 @@ export function SessionList({
                   </span>
                 )}
 
-                <span className="hidden w-32 shrink-0 truncate text-right text-xs text-muted-foreground md:block">
+                <span className="hidden w-28 shrink-0 truncate text-right text-xs text-muted-foreground @4xl:block">
                   {session.creator}
                 </span>
                 <span className="w-24 shrink-0 text-right text-xs text-muted-foreground">
@@ -159,6 +173,7 @@ export function SessionList({
           )
         })}
       </ul>
+      </div>
 
       <Dialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
         <DialogContent className="sm:max-w-[440px]">

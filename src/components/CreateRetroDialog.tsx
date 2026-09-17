@@ -128,14 +128,22 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
           {preselectedTeamId ? "New Session" : "Create New Session"}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px] overflow-visible">
-        <DialogHeader>
+      {/* Header and footer stay put; only the fields scroll. The form grew
+          (format, retention, blind input) until it no longer fit shorter
+          screens, and the whole-dialog scroll it used to have was switched off
+          by an `overflow-visible` meant to keep the dropdowns unclipped — which
+          they never were: they render in a portal, outside the dialog. */}
+      <DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden sm:max-w-[425px]">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Create Retrospective</DialogTitle>
           <DialogDescription>
             Start a new retrospective session. Give it a meaningful title.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          {/* Bleeds to the dialog's edges so the scrollbar sits at the border
+              and focus rings on the fields aren't clipped by the scroll box. */}
+          <div className="-mx-6 min-h-0 flex-1 overflow-y-auto px-6">
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="title" className="text-right">
@@ -428,7 +436,8 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
             </div>
 
           </div>
-          <DialogFooter>
+          </div>
+          <DialogFooter className="shrink-0 border-t pt-4">
             <Button type="submit">Create Session</Button>
           </DialogFooter>
         </form>

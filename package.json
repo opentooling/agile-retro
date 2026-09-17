@@ -1,6 +1,6 @@
 {
   "name": "agile-retro",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "NODE_OPTIONS=--experimental-sqlite tsx watch server.ts",
@@ -13,7 +13,8 @@
     "db:seed-demo": "NODE_OPTIONS=--experimental-sqlite tsx scripts/seed-demo.ts",
     "audit": "tsx scripts/audit-deps.ts",
     "lint": "eslint",
-    "test": "jest"
+    "test": "jest",
+    "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

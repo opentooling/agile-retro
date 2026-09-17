@@ -16,6 +16,11 @@ const config = {
     coverageProvider: 'v8',
     testEnvironment: 'jsdom',
     setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
+    // Agent worktrees live under .claude/worktrees/ — full copies of the repo on
+    // other branches. Without this, jest runs their tests (and resolves their
+    // modules) alongside this checkout's.
+    testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/'],
+    modulePathIgnorePatterns: ['<rootDir>/.claude/'],
     moduleNameMapper: {
         // Handle module aliases (mirrors tsconfig "paths").
         '^@/(.*)$': '<rootDir>/src/$1',

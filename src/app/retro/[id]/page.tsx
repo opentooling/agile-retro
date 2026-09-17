@@ -12,11 +12,7 @@ export default async function RetroPage({ params }: { params: Promise<{ id: stri
   const { id } = await params
   const session = await auth()
 
-  // Poll-on-open: pull the latest done state from linked Jira issues so the
-  // board's action items reflect changes made in Jira.
-  await reconcileActionsForRetro(id)
-
-  const retro = await db.getRetroFull(id)
+  let retro = await db.getRetroFull(id)
 
   if (!retro) {
     notFound()
@@ -43,6 +39,13 @@ export default async function RetroPage({ params }: { params: Promise<{ id: stri
       </div>
     )
   }
+
+  // Poll-on-open: pull the latest done state from linked Jira issues so the
+  // board's action items reflect changes made in Jira. Only after the access
+  // check — it calls out with the team's Jira credentials, and used to run for
+  // anyone who opened the link, even when the page then refused them.
+  await reconcileActionsForRetro(id)
+  retro = (await db.getRetroFull(id)) ?? retro
 
   const canManage = canManageBoard(authUser, retroRef)
 

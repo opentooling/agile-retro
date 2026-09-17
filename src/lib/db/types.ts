@@ -1,3 +1,4 @@
+import type { BoardScope } from "../authz";
 /**
  * Shared types for the data-access layer.
  *
@@ -140,6 +141,8 @@ export type RetroFull = Retrospective & {
 };
 
 export type RetroFilter = {
+  /** Restrict to boards the viewer may see (see boardScopeFor in authz). */
+  scope?: BoardScope;
   creatorContains?: string;
   creatorEquals?: string;
   tagsContains?: string;
@@ -148,6 +151,13 @@ export type RetroFilter = {
 };
 
 export type ActionFilter = {
+  /**
+   * Which boards' actions may be returned. Required, not optional: an action
+   * listing that forgets it returns every team's actions to whoever asked —
+   * which is exactly what the Actions page used to do. System callers that
+   * are already gated some other way pass `{ kind: "all" }` and say why.
+   */
+  scope: BoardScope;
   completed?: boolean;
   teamNameContains?: string;
   creatorContains?: string;
@@ -207,6 +217,23 @@ export type TeamAnalyticsRaw = {
   };
   /** Seconds spent in each phase, per board, from the phase log. */
   phaseDurations: { phase: string; seconds: number }[];
+  /** One entry per board that had cards, oldest first — the trend lines. */
+  perRetro: {
+    at: Date;
+    title: string;
+    cards: number;
+    /** Cards that got notes in Review. */
+    discussed: number;
+    /** Distinct contributors; null on anonymous boards, which are never counted. */
+    contributors: number | null;
+  }[];
+  /** Each action, dated by the board that agreed it and by when it was closed. */
+  actionTimeline: {
+    agreedAt: Date;
+    completed: boolean;
+    /** Null while open, and for completions that predate the timestamp. */
+    completedAt: Date | null;
+  }[];
 };
 
 export type RetroDurations = {

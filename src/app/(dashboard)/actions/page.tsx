@@ -3,9 +3,10 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CheckCircle, Circle, User as UserIcon, Calendar } from 'lucide-react'
 import { auth } from '@/auth'
-import { revalidatePath } from 'next/cache'
 import { JiraActionButton } from "@/components/JiraActionButton"
-import { reconcileActions, pushActionDoneState } from '@/lib/jira-sync'
+import { reconcileActions } from '@/lib/jira-sync'
+import { authUserFromSession, boardScopeFor } from '@/lib/authz'
+import { setActionCompleted } from '@/app/actions'
 import { TeamMark } from '@/components/TeamMark'
 
 import Link from 'next/link'
@@ -21,7 +22,11 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
   const assigneeFilter = typeof params.assignee === 'string' ? params.assignee : undefined
   const retroIdFilter = typeof params.retroId === 'string' ? params.retroId : undefined
 
-  const filter: db.ActionFilter = {}
+  // Only actions from boards this viewer could open. Filtered in the query, so
+  // paging and the total stay right. Until this, every signed-in user saw every
+  // team's actions here.
+  const scope = boardScopeFor(authUserFromSession(session), await db.listTeams())
+  const filter: db.ActionFilter = { scope }
 
   if (statusFilter === 'open') {
     filter.completed = false
@@ -47,16 +52,8 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
   // Re-read: the reconcile above may have flipped completed flags.
   const actions = await db.listActionItems(window)
 
-  async function toggleAction(actionId: string, completed: boolean) {
-    'use server'
-    await db.updateActionCompleted(actionId, completed)
-    // Mirror the change to the linked Jira issue (best-effort).
-    await pushActionDoneState(actionId, completed)
-    revalidatePath('/actions')
-  }
-
   return (
-    <PageShell>
+    <PageShell width="wide">
       <PageHeader
         title="Action items"
         action={
@@ -81,7 +78,10 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
         </div>
       )}
 
-      <div className="grid gap-2">
+      {/* Columns follow the list's own width (a container query), not the
+          window's — an open sidebar takes 256px the viewport can't see. */}
+      <div className="@container">
+      <div className="grid gap-2 @min-[88rem]:grid-cols-2">
         {actions.map((action) => {
             const team = action.retrospective.team
             const isOwner = session?.user?.name === action.retrospective.creator
@@ -128,8 +128,10 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
                                 />
                             )}
                             {isOwner && (
-                                <form action={toggleAction.bind(null, action.id, !action.completed)}>
-                                    <Button size="sm" variant="outline" className={action.completed ? "gap-2 hover:bg-yellow-50 hover:text-amber-700 dark:text-amber-400 hover:border-yellow-200" : "gap-2 hover:bg-green-50 hover:text-green-700 dark:text-green-400 hover:border-green-200"}>
+                                <form action={setActionCompleted.bind(null, action.id, !action.completed)}>
+                                    <Button size="sm" variant="outline" className={action.completed
+                                        ? "gap-2 hover:border-[hsl(var(--tone-risk)/0.5)] hover:bg-[hsl(var(--tone-risk-soft))] hover:text-[hsl(var(--tone-risk-ink))]"
+                                        : "gap-2 hover:border-[hsl(var(--tone-positive)/0.5)] hover:bg-[hsl(var(--tone-positive-soft))] hover:text-[hsl(var(--tone-positive-ink))]"}>
                                         {action.completed ? <Circle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
                                         {action.completed ? "Reopen" : "Mark Done"}
                                     </Button>
@@ -145,6 +147,7 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
                 No action items found.
             </div>
         )}
+      </div>
       </div>
       <Pager
         page={page}

@@ -53,7 +53,7 @@ export default function HelpPage() {
   const { name } = branding()
 
   return (
-    <PageShell className="max-w-3xl">
+    <PageShell width="prose">
       <PageHeader
         title="Help"
         action={

@@ -43,75 +43,107 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* Default theme — steel-blue primary with copper/gold accents on cool graphite
-   neutrals. Values are HSL triplets consumed via hsl(var(--x)). */
+/* Theme — warm and vibrant, after the ShoutOut palette: cream paper, teal
+   primary, sunny/coral/lilac/sky accents. Values are HSL triplets consumed via
+   hsl(var(--x)).
+
+   Contrast was checked rather than eyeballed. Everything text-sized clears WCAG
+   AA on its own surface; the one value that did not survive the move is the
+   destructive red — ShoutOut's coral-strong (#d9503f) measures 4.06:1 on a
+   white card, so it is one step darker here. */
 :root {
   --radius: 0.625rem;
-  --background: 210 20% 99%;
-  --foreground: 215 28% 15%;
+  --background: 38 100% 96%;        /* cream paper */
+  --foreground: 247 10% 18%;        /* ink */
   --card: 0 0% 100%;
-  --card-foreground: 215 28% 15%;
+  --card-foreground: 247 10% 18%;
   --popover: 0 0% 100%;
-  --popover-foreground: 215 28% 15%;
-  --primary: 212 52% 27%;
-  --primary-foreground: 210 30% 98%;
-  --secondary: 210 16% 93%;
-  --secondary-foreground: 215 28% 20%;
-  --muted: 210 16% 95%;
-  --muted-foreground: 215 14% 40%;
-  --accent: 28 50% 92%;
-  --accent-foreground: 24 55% 28%;
-  --destructive: 0 72% 48%;
-  --border: 214 18% 88%;
-  --input: 214 18% 88%;
-  --ring: 212 52% 35%;
-  --chart-1: 43 74% 49%;   /* gold */
-  --chart-2: 22 65% 48%;   /* copper */
-  --chart-3: 212 45% 33%;  /* steel */
-  --chart-4: 210 9% 55%;   /* silver */
-  --chart-5: 30 45% 42%;   /* bronze */
-  --sidebar: 210 20% 98%;
-  --sidebar-foreground: 215 20% 26%;
-  --sidebar-primary: 212 52% 27%;
-  --sidebar-primary-foreground: 210 30% 98%;
-  --sidebar-accent: 210 16% 93%;
-  --sidebar-accent-foreground: 215 28% 20%;
-  --sidebar-border: 214 18% 88%;
-  --sidebar-ring: 212 52% 35%;
+  --popover-foreground: 247 10% 18%;
+  --primary: 177 62% 30%;           /* teal, strong */
+  --primary-foreground: 43 100% 99%;
+  --secondary: 40 100% 92%;         /* warm sand */
+  --secondary-foreground: 247 10% 18%;
+  --muted: 40 100% 92%;
+  --muted-foreground: 251 7% 44%;
+  --accent: 43 100% 85%;            /* sunny, soft — hover wash */
+  --accent-foreground: 247 10% 18%;
+  --destructive: 7 67% 48%;         /* coral, darkened to clear AA on white */
+  --border: 40 57% 86%;
+  --input: 40 57% 86%;
+  --ring: 177 58% 39%;              /* teal */
+  /* Chart marks. Slots 2 and 3 are the pair the trend charts draw with, and
+     they are validated together for colour-vision separation against the card
+     surface (worst adjacent CVD ΔE 12.6 light, 13.7 dark; the target is 8). */
+  --chart-1: 40 100% 48%;           /* sunny */
+  --chart-2: 7 67% 55%;             /* coral */
+  --chart-3: 177 77% 36%;           /* teal */
+  --chart-4: 206 64% 46%;           /* sky */
+  --chart-5: 248 58% 59%;           /* lilac */
+  --sidebar: 43 100% 99%;
+  --sidebar-foreground: 247 10% 18%;
+  --sidebar-primary: 177 62% 30%;
+  --sidebar-primary-foreground: 43 100% 99%;
+  --sidebar-accent: 43 100% 85%;
+  --sidebar-accent-foreground: 247 10% 18%;
+  --sidebar-border: 40 57% 86%;
+  --sidebar-ring: 177 58% 39%;
+
+  /* Semantic tones — sentiment on cards and charts, board phases, column
+     accents. One family per meaning, each with a soft fill and an ink that
+     clears WCAG AA on that fill (measured, not guessed). Components reference
+     these instead of fixed Tailwind palettes, so a theme change reaches them. */
+  --tone-positive: 124 41% 55%;   --tone-positive-soft: 123 47% 91%;  --tone-positive-ink: 125 45% 32%;
+  --tone-negative: 6 100% 71%;    --tone-negative-soft: 9 100% 93%;   --tone-negative-ink: 9 68% 41%;
+  --tone-improve: 206 83% 65%;    --tone-improve-soft: 206 89% 93%;   --tone-improve-ink: 206 68% 38%;
+  --tone-risk: 41 100% 62%;       --tone-risk-soft: 43 100% 85%;      --tone-risk-ink: 40 100% 24%;
+  --tone-review: 249 80% 75%;     --tone-review-soft: 250 100% 95%;   --tone-review-ink: 248 48% 50%;
+  --tone-neutral: 251 7% 62%;     --tone-neutral-soft: 260 23% 92%;   --tone-neutral-ink: 250 9% 31%;
 }
 
 .dark {
-  --background: 220 18% 10%;
-  --foreground: 210 16% 92%;
-  --card: 220 16% 13%;
-  --card-foreground: 210 16% 92%;
-  --popover: 220 16% 13%;
-  --popover-foreground: 210 16% 92%;
-  --primary: 210 45% 62%;
-  --primary-foreground: 220 35% 12%;
-  --secondary: 217 20% 20%;
-  --secondary-foreground: 210 16% 92%;
-  --muted: 217 18% 20%;
-  --muted-foreground: 215 15% 65%;
-  --accent: 24 38% 24%;
-  --accent-foreground: 30 55% 82%;
-  --destructive: 0 62% 47%;
-  --border: 217 18% 22%;
-  --input: 217 18% 22%;
-  --ring: 210 45% 55%;
-  --chart-1: 43 70% 55%;   /* gold */
-  --chart-2: 22 65% 55%;   /* copper */
-  --chart-3: 210 45% 58%;  /* steel */
-  --chart-4: 210 10% 65%;  /* silver */
-  --chart-5: 30 50% 55%;   /* bronze */
-  --sidebar: 220 20% 12%;
-  --sidebar-foreground: 210 16% 90%;
-  --sidebar-primary: 43 70% 55%;
-  --sidebar-primary-foreground: 220 35% 12%;
-  --sidebar-accent: 217 18% 20%;
-  --sidebar-accent-foreground: 210 16% 92%;
-  --sidebar-border: 217 18% 22%;
-  --sidebar-ring: 210 45% 55%;
+  --background: 249 12% 12%;
+  --foreground: 40 45% 94%;         /* warm off-white, not grey */
+  --card: 247 11% 16%;
+  --card-foreground: 40 45% 94%;
+  --popover: 247 11% 16%;
+  --popover-foreground: 40 45% 94%;
+  --primary: 177 50% 58%;           /* teal, lifted for the dark surface */
+  --primary-foreground: 249 12% 12%;
+  --secondary: 251 11% 20%;
+  --secondary-foreground: 40 45% 94%;
+  --muted: 251 11% 20%;
+  --muted-foreground: 255 14% 72%;
+  --accent: 42 53% 19%;             /* sunny, deep — hover wash */
+  --accent-foreground: 42 100% 68%;
+  --destructive: 7 100% 77%;
+  --border: 249 10% 25%;
+  --input: 249 10% 25%;
+  --ring: 177 50% 58%;
+  /* Slots 2 and 3 are deeper than the UI coral and teal: ShoutOut's dark coral
+     sits outside the mark lightness band and lands only ΔE 4.6 from its teal
+     under protanopia — indistinguishable on a two-series chart. */
+  --chart-1: 42 100% 68%;           /* sunny */
+  --chart-2: 9 75% 56%;             /* coral */
+  --chart-3: 177 60% 41%;           /* teal */
+  --chart-4: 205 86% 73%;           /* sky */
+  --chart-5: 248 100% 83%;          /* lilac */
+  --sidebar: 247 11% 16%;
+  --sidebar-foreground: 40 45% 94%;
+  --sidebar-primary: 177 50% 58%;
+  --sidebar-primary-foreground: 249 12% 12%;
+  --sidebar-accent: 251 11% 20%;
+  --sidebar-accent-foreground: 40 45% 94%;
+  --sidebar-border: 249 10% 25%;
+  --sidebar-ring: 177 50% 58%;
+
+  /* On the dark surface the family colour is legible on its own deep fill, so
+     ink and colour are the same step. */
+  --tone-positive: 124 46% 66%;   --tone-positive-soft: 126 30% 18%;  --tone-positive-ink: 124 46% 66%;
+  --tone-negative: 7 100% 77%;    --tone-negative-soft: 6 37% 21%;    --tone-negative-ink: 7 100% 77%;
+  --tone-improve: 205 86% 73%;    --tone-improve-soft: 207 43% 20%;   --tone-improve-ink: 205 86% 73%;
+  --tone-risk: 42 100% 68%;       --tone-risk-soft: 42 53% 19%;       --tone-risk-ink: 42 100% 68%;
+  --tone-review: 248 100% 83%;    --tone-review-soft: 248 32% 24%;    --tone-review-ink: 248 100% 83%;
+  --tone-neutral: 255 14% 72%;    --tone-neutral-soft: 251 11% 20%;   --tone-neutral-ink: 255 14% 72%;
 }
 
 @layer base {

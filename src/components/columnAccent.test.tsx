@@ -66,10 +66,10 @@ describe('columnAccent', () => {
     expect(columnAccent('ANYTHING_POSITIVE').border).toBe(columnAccent('WHAT_WENT_WELL').border)
     expect(columnAccent('ANYTHING_NEGATIVE').border).toBe(columnAccent('WHAT_DIDNT_GO_WELL').border)
     expect(columnAccent('ANYTHING_IMPROVE').border).toBe(columnAccent('WHAT_SHOULD_BE_IMPROVED').border)
-    expect(columnAccent('ANYTHING_RISK').border).toContain('amber')
+    expect(columnAccent('ANYTHING_RISK').border).toContain('--tone-risk')
   })
 
   it('falls back to a neutral accent for an unknown type', () => {
-    expect(columnAccent('MYSTERY').border).toContain('slate')
+    expect(columnAccent('MYSTERY').border).toContain('--tone-neutral')
   })
 })

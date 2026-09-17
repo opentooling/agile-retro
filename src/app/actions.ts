@@ -5,7 +5,7 @@ import type { Team } from '@/lib/db/types'
 import { getPlugin } from '@/lib/plugins/registry'
 import { pushActionDoneState } from '@/lib/jira-sync'
 import { auth } from '@/auth'
-import { authUserFromSession, isTeamAdmin, canViewBoard, canAdministerBoard, type RetroRef } from '@/lib/authz'
+import { authUserFromSession, canViewBoard, canAdministerBoard, canAdministerTeam, teamAccessLevel, type RetroRef } from '@/lib/authz'
 import { revalidatePath } from 'next/cache'
 import { templateById } from '@/lib/retro-templates'
 import { RETENTION_OPTIONS, expiryFromRetention } from '@/lib/retention'
@@ -156,23 +156,32 @@ export async function createTeam(
  * team-admins (its creator or members of its admin groups), because whoever can
  * edit these bindings controls who can access the team's boards.
  */
+/**
+ * Gate for every mutation of a team's own settings.
+ *
+ * `updateTeam`, `updateTeamImage` and `updateTeamJira` previously ran with no
+ * authorization at all — they took an id and wrote. The only thing keeping a
+ * stranger out was that the Teams page listed just the teams you belong to, and
+ * a server action is a public endpoint, so that was never a control. The Teams
+ * page now shows every team by name, so this has to be one.
+ */
+async function requireTeamAdmin(id: string): Promise<Team> {
+    if (!id) throw new Error('Team ID is required')
+    const authUser = authUserFromSession(await auth())
+    const team = await db.getTeam(id)
+    if (!team) throw new Error('Team not found')
+    if (!canAdministerTeam(authUser, team)) {
+        throw new Error('You are not allowed to change this team')
+    }
+    return team
+}
+
 export async function updateTeamGroups(
     id: string,
     memberGroups: string[],
     adminGroups: string[]
 ): Promise<SafeTeam> {
-    if (!id) throw new Error('Team ID is required')
-
-    const authUser = authUserFromSession(await auth())
-    if (!authUser) throw new Error('Unauthorized')
-
-    const existing = await db.getTeam(id)
-    if (!existing) throw new Error('Team not found')
-
-    const ref: RetroRef = { teamId: id, creator: '', team: existing }
-    if (!authUser.isAdmin && !isTeamAdmin(authUser, ref)) {
-        throw new Error('You are not allowed to edit this team\'s access groups')
-    }
+    await requireTeamAdmin(id)
 
     const team = await db.updateTeamGroups(id, {
         memberGroups: sanitizeGroups(memberGroups),
@@ -184,9 +193,7 @@ export async function updateTeamGroups(
 }
 
 export async function updateTeam(id: string, name: string) {
-    if (!id) {
-        throw new Error('Team ID is required')
-    }
+    await requireTeamAdmin(id)
     if (!name || !name.trim()) {
         throw new Error('Team name is required')
     }
@@ -195,7 +202,9 @@ export async function updateTeam(id: string, name: string) {
         const team = await db.updateTeam(id, name.trim())
         revalidatePath('/teams')
         revalidatePath('/')
-        return team
+        // Never the raw row: it carries the Jira API token, which is
+        // write-only — not even a team admin gets it back.
+        return sanitizeTeam(team)
     } catch (error) {
         console.error("Error updating team:", error)
         throw error
@@ -209,7 +218,7 @@ export async function updateTeam(id: string, name: string) {
  */
 const MAX_TEAM_IMAGE_CHARS = 700_000 // ~500 KB once base64-encoded
 export async function updateTeamImage(id: string, imageData: string | null): Promise<SafeTeam> {
-    if (!id) throw new Error('Team ID is required')
+    await requireTeamAdmin(id)
 
     let value: string | null = null
     if (imageData) {
@@ -244,11 +253,64 @@ export async function getTeams(): Promise<SafeTeam[]> {
         .map(sanitizeTeam)
 }
 
+/**
+ * A team you have no access to, as seen from the directory: enough to know it
+ * exists and to ask someone for access, and nothing else.
+ */
+export type TeamStub = {
+    id: string
+    name: string
+    createdAt: Date
+    imageData: string | null
+    access: 'none'
+}
+
+export type TeamListing = (SafeTeam & { access: 'admin' | 'member' }) | TeamStub
+
+/**
+ * Every team, so people can see what exists and go ask for access.
+ *
+ * This is deliberately not `getTeams()`. That one hides teams you are not in,
+ * which is still right where it is used — the board-creation picker must only
+ * offer teams you could actually open the board on. A directory has the
+ * opposite job, so the two stay separate rather than one growing a flag.
+ *
+ * What a stranger gets is a name and a logo. The rest of a team does not
+ * travel: its access groups spell out the company's AD structure, and its Jira
+ * fields carry a server address and the account email it syncs as. The union
+ * return type is what keeps that honest — nothing can read `memberGroups` off a
+ * listing without first narrowing on `access`.
+ */
+export async function getTeamDirectory(): Promise<TeamListing[]> {
+    const authUser = authUserFromSession(await auth())
+    if (!authUser) return []
+    const teams = await db.listTeams()
+    const listings = teams.map((team): TeamListing => {
+        const access = teamAccessLevel(authUser, team)
+        if (access === 'none') {
+            return {
+                id: team.id,
+                name: team.name,
+                createdAt: team.createdAt,
+                imageData: team.imageData,
+                access,
+            }
+        }
+        return { ...sanitizeTeam(team), access }
+    })
+    // Your own teams first. Otherwise, in an organisation with a few hundred
+    // teams, the directory buries the two you actually work in.
+    return listings.sort((a, b) => {
+        const mine = Number(b.access !== 'none') - Number(a.access !== 'none')
+        return mine !== 0 ? mine : a.name.localeCompare(b.name)
+    })
+}
+
 export async function updateTeamJira(
     id: string,
     config: { jiraBaseUrl: string; jiraProjectKey: string; jiraEmail: string; jiraApiToken: string }
 ): Promise<SafeTeam> {
-    if (!id) throw new Error('Team ID is required')
+    await requireTeamAdmin(id)
 
     const norm = (v: string) => (v && v.trim() ? v.trim() : null)
 
@@ -283,6 +345,9 @@ export async function createExternalTaskForAction(
 
     const action = await db.getActionItem(actionId)
     if (!action) throw new Error('Action item not found')
+    // Previously unchecked: any signed-in user could create an issue in any
+    // team's Jira project, authenticated as that team's Jira account.
+    await requireViewOfRetro(action.retrospectiveId)
 
     if (action.externalUrl && action.externalKey) {
         // Already linked — don't create a duplicate.
@@ -346,6 +411,9 @@ export async function getCarriedOverActions(retroId: string): Promise<CarriedAct
     if (!canViewBoard(authUser, ref)) return []
 
     const actions = await db.listActionItems({
+        // Gated above by canViewBoard on this team, and restricted to it by
+        // teamId, so the query itself needs no further scope.
+        scope: { kind: 'all' },
         completed: false,
         teamId: retro.teamId,
         excludeRetrospectiveId: retroId,
@@ -364,24 +432,45 @@ export async function getCarriedOverActions(retroId: string): Promise<CarriedAct
     }))
 }
 
-/** Mark a carried-over action done from the board that surfaced it. */
-export async function completeCarriedOverAction(actionId: string, completed: boolean): Promise<void> {
+/**
+ * Tick an action off, or reopen it — from the Actions page or from a board.
+ *
+ * Allowed for anyone who can view the board the action came from: the same
+ * rule the live board applies. Actions are deliberately exempt from a closed
+ * board's freeze — they outlive the session that produced them.
+ *
+ * The Actions page used to run its own inline version with no check at all:
+ * it only hid the button from non-owners, and a server action is a public
+ * endpoint, so any signed-in user could flip any action (and its Jira issue)
+ * by id.
+ */
+export async function setActionCompleted(actionId: string, completed: boolean): Promise<void> {
     if (!actionId) throw new Error('Action id is required')
 
     const action = await db.getActionItem(actionId)
     if (!action) throw new Error('Action not found')
-
-    const retro = await db.getRetro(action.retrospectiveId)
-    if (!retro) throw new Error('Retrospective not found')
-
-    const team = retro.teamId ? await db.getTeam(retro.teamId) : null
-    const authUser = authUserFromSession(await auth())
-    const ref: RetroRef = { teamId: retro.teamId, creator: retro.creator, team }
-    if (!canViewBoard(authUser, ref)) throw new Error('Unauthorized')
+    await requireViewOfRetro(action.retrospectiveId)
 
     await db.updateActionCompleted(actionId, completed)
     await pushActionDoneState(actionId, completed)
     revalidatePath('/actions')
+    revalidatePath(`/retro/${action.retrospectiveId}`)
+}
+
+/** Mark a carried-over action done from the board that surfaced it. */
+export async function completeCarriedOverAction(actionId: string, completed: boolean): Promise<void> {
+    return setActionCompleted(actionId, completed)
+}
+
+/** Throws unless the signed-in viewer may see this board. Returns the board. */
+async function requireViewOfRetro(retroId: string) {
+    const retro = await db.getRetro(retroId)
+    if (!retro) throw new Error('Retrospective not found')
+    const team = retro.teamId ? await db.getTeam(retro.teamId) : null
+    const authUser = authUserFromSession(await auth())
+    const ref: RetroRef = { teamId: retro.teamId, creator: retro.creator, team }
+    if (!canViewBoard(authUser, ref)) throw new Error('Unauthorized')
+    return retro
 }
 
 /**

@@ -22,7 +22,10 @@ export function ClientLayout({ children, session, keycloakIssuer, keycloakClient
         {!isLoginPage && (
              <Sidebar user={session?.user} keycloakIssuer={keycloakIssuer} keycloakClientId={keycloakClientId} appName={appName} />
         )}
-        <div className="flex-1 bg-background">
+        {/* min-w-0: a flex item won't shrink below its content's min width by
+            default, so one over-wide element made the whole page scroll
+            sideways and pushed right-aligned controls off-screen. */}
+        <div className="min-w-0 flex-1 bg-background">
           {children}
         </div>
       </div>

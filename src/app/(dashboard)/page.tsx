@@ -1,7 +1,7 @@
 import * as db from '@/lib/db'
 import Link from 'next/link'
 import { auth } from '@/auth'
-import { authUserFromSession, canAdministerBoard } from '@/lib/authz'
+import { authUserFromSession, canAdministerBoard, boardScopeFor } from '@/lib/authz'
 import { CreateRetroDialog } from '@/components/CreateRetroDialog'
 import { SessionList, type SessionSummary } from '@/components/SessionList'
 import { PageShell, PageHeader } from '@/components/PageHeader'
@@ -43,14 +43,18 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
   // Free-text team search by name (still supports old links that pass a team name).
   if (teamIdFilter) filter.teamNameContains = teamIdFilter
 
-  const [session, recentRetros, totalRetros, activeCount, openActions] = await Promise.all([
-    auth(),
+  // The open-actions count is limited to boards the viewer can see, so it
+  // agrees with what the Actions page it links to will actually list.
+  const session = await auth()
+  const actionScope = boardScopeFor(authUserFromSession(session), await db.listTeams())
+
+  const [recentRetros, totalRetros, activeCount, openActions] = await Promise.all([
     db.listRetrospectives(filter, 20),
     db.countRetrospectives(filter),
     // Counted in the database, not from the 20 rows above — otherwise the tile
     // silently under-reports as soon as there are more than 20 boards.
     db.countRetrospectives({ ...filter, statusNot: 'CLOSED' }),
-    db.countOpenActions(filter),
+    db.countOpenActions({ ...filter, scope: actionScope }),
   ])
 
   // Delete is limited to whoever may already manage the board — its creator,
@@ -76,7 +80,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
   const isFiltered = Boolean(creatorFilter || tagFilter || teamIdFilter)
 
   return (
-    <PageShell>
+    <PageShell width="wide">
       <PageHeader title="Dashboard" action={<CreateRetroDialog />} />
 
       <div className="mb-5 grid gap-2 sm:grid-cols-3">

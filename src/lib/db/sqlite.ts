@@ -13,12 +13,13 @@
  */
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { engagementFromRows, phaseDurationsFromRows } from "./aggregate";
+import { engagementFromRows, phaseDurationsFromRows, perRetroFromRows, actionTimelineFromRows } from "./aggregate";
 import type {
   Team, TeamJiraConfig, TeamGroups, TeamCreateOptions, Retrospective, Column, Vote, Reaction, Item, ActionItem,
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro, TeamAnalyticsRaw,
 } from "./types";
+import type { BoardScope } from "../authz";
 import path from "node:path";
 import fs from "node:fs";
 
@@ -348,11 +349,28 @@ const mapItem = (r: Row): Item => ({
 // Where-clause builders
 // ---------------------------------------------------------------------------
 
+/**
+ * Access scope as SQL: open boards and/or the listed teams. No scope, or
+ * `all`, adds nothing; an empty scope matches no rows at all.
+ */
+function scopeClause(scope: BoardScope | undefined, col: string, params: any[]): string | null {
+  if (!scope || scope.kind === "all") return null;
+  const parts: string[] = [];
+  if (scope.openBoards) parts.push(`${col} IS NULL`);
+  if (scope.teamIds.length) {
+    parts.push(`${col} IN (${scope.teamIds.map(() => "?").join(",")})`);
+    params.push(...scope.teamIds);
+  }
+  return parts.length ? `(${parts.join(" OR ")})` : "0";
+}
+
 function buildRetroWhere(f: RetroFilter, ra: string, ta: string) {
   const clauses: string[] = [];
   const params: any[] = [];
   let needsTeamJoin = false;
 
+  const scoped = scopeClause(f.scope, `${ra}."teamId"`, params);
+  if (scoped) clauses.push(scoped);
   if (f.creatorEquals != null) {
     clauses.push(`${ra}.creator = ?`);
     params.push(f.creatorEquals);
@@ -796,6 +814,8 @@ function buildActionWhere(filter: ActionFilter): { clauses: string[]; params: an
   const params: any[] = [];
   let needsTeamJoin = false;
 
+  const scoped = scopeClause(filter.scope, `r."teamId"`, params);
+  if (scoped) clauses.push(scoped);
   if (filter.completed !== undefined) {
     clauses.push(`a."completed" = ?`);
     params.push(filter.completed ? 1 : 0);
@@ -919,7 +939,7 @@ export function listExpiredRetroIds(now: Date): string[] {
 export function teamAnalytics(teamId: string): TeamAnalyticsRaw {
   const db = getDb();
   const retros = db
-    .prepare(`SELECT "id", "createdAt", "isAnonymous" FROM "Retrospective" WHERE "teamId" = ? ORDER BY "createdAt"`)
+    .prepare(`SELECT "id", "title", "createdAt", "isAnonymous" FROM "Retrospective" WHERE "teamId" = ? ORDER BY "createdAt"`)
     .all(teamId) as Row[];
 
   const empty: TeamAnalyticsRaw = {
@@ -928,6 +948,8 @@ export function teamAnalytics(teamId: string): TeamAnalyticsRaw {
     actions: { open: 0, done: 0, overdue: 0, daysToClose: [] },
     engagement: { totalItems: 0, itemsWithSummary: 0, retrosWithItems: 0, voteSpread: [], contributorsPerRetro: [] },
     phaseDurations: [],
+    perRetro: [],
+    actionTimeline: [],
   };
   if (retros.length === 0) return empty;
 
@@ -948,7 +970,7 @@ export function teamAnalytics(teamId: string): TeamAnalyticsRaw {
   ).map((r) => ({ type: r.type as string, items: Number(r.items) }));
 
   const actionRows = db
-    .prepare(`SELECT "completed", "dueDate", "createdAt", "completedAt" FROM "ActionItem" WHERE "retrospectiveId" IN (${holes})`)
+    .prepare(`SELECT "retrospectiveId" AS retro, "completed", "dueDate", "createdAt", "completedAt" FROM "ActionItem" WHERE "retrospectiveId" IN (${holes})`)
     .all(...ids) as Row[];
   const now = Date.now();
   const actions = { open: 0, done: 0, overdue: 0, daysToClose: [] as number[] };
@@ -998,6 +1020,8 @@ export function teamAnalytics(teamId: string): TeamAnalyticsRaw {
       voteRows
     ),
     phaseDurations: phaseDurationsFromRows(phaseRows),
+    perRetro: perRetroFromRows(retros, itemRows),
+    actionTimeline: actionTimelineFromRows(retros, actionRows),
   };
 }
 

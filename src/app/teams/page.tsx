@@ -1,12 +1,13 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { createTeam, getTeams, updateTeam, updateTeamJira, updateTeamGroups, updateTeamImage } from '@/app/actions'
+import { createTeam, getTeamDirectory, updateTeam, updateTeamJira, updateTeamGroups, updateTeamImage } from '@/app/actions'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Users, Plus, CheckCircle, AlertCircle, Pencil, Link2, Shield, ImagePlus, Trash2 } from 'lucide-react'
+import { Users, Plus, CheckCircle, AlertCircle, Pencil, Link2, Shield, ImagePlus, Trash2, Lock } from 'lucide-react'
+import { TeamMark } from '@/components/TeamMark'
 import { CreateRetroDialog } from "@/components/CreateRetroDialog"
 import { useSearchParams } from 'next/navigation'
 import { GroupsField, useKeycloakGroups } from "@/components/GroupsField"
@@ -25,6 +26,9 @@ type Team = {
     id: string
     name: string
     createdAt: Date
+    // 'none' means the viewer can see that this team exists and nothing more:
+    // the server sends no groups, no Jira config and no creator for it.
+    access: 'admin' | 'member' | 'none'
     createdBy?: string | null
     memberGroups?: string[]
     adminGroups?: string[]
@@ -53,7 +57,7 @@ export default function TeamsPage() {
 
     async function loadTeams() {
         try {
-            const loadedTeams = await getTeams()
+            const loadedTeams = await getTeamDirectory()
             if (teamFilter) {
                 setTeams(loadedTeams.filter(t => t.name.toLowerCase().includes(teamFilter.toLowerCase())))
             } else {
@@ -90,7 +94,7 @@ export default function TeamsPage() {
     }
 
     return (
-        <PageShell>
+        <PageShell width="wide">
             <PageHeader
                 title="Teams"
                 action={
@@ -151,7 +155,10 @@ export default function TeamsPage() {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* A column per ~330px of the grid's own width (container query),
+                so an open sidebar can't leave four cramped cards. */}
+            <div className="@container">
+            <div className="grid grid-cols-1 gap-4 @2xl:grid-cols-2 @5xl:grid-cols-3 @min-[88rem]:grid-cols-4">
                 {teams.map((team) => (
                     <TeamCard
                         key={team.id}
@@ -170,6 +177,7 @@ export default function TeamsPage() {
                         No teams found. Create one to get started.
                     </div>
                 )}
+            </div>
             </div>
         </PageShell>
     )
@@ -199,11 +207,34 @@ function TeamCard({ team, onUpdate, groupSuggestions }: { team: Team, onUpdate: 
         }
     }
 
+    // A team the viewer has no access to is listed so they know it exists and
+    // who to ask — but it carries no settings, and the server sent none.
+    if (team.access === 'none') {
+        return (
+            <Card className="border-dashed bg-muted/30">
+                <CardContent className="flex items-center gap-4 p-6">
+                    <TeamMark team={team} size={48} className="opacity-60" />
+                    <div className="min-w-0 flex-1">
+                        <h3 className="truncate font-semibold text-lg text-muted-foreground">{team.name}</h3>
+                        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Lock className="h-3 w-3 shrink-0" />
+                            No access — ask a member of this team to add your group
+                        </p>
+                    </div>
+                </CardContent>
+            </Card>
+        )
+    }
+
+    const canAdmin = team.access === 'admin'
+
     return (
         <Card className="hover:shadow-md transition-shadow">
             <CardContent className="p-6 flex flex-col gap-4">
                 <div className="flex items-center gap-4">
-                    <TeamAvatar team={team} onUpdate={onUpdate} />
+                    {canAdmin
+                        ? <TeamAvatar team={team} onUpdate={onUpdate} />
+                        : <TeamMark team={team} size={48} />}
                     <div className="flex-1 min-w-0">
                         {isEditing ? (
                             <div className="flex gap-2 items-center w-full">
@@ -231,15 +262,25 @@ function TeamCard({ team, onUpdate, groupSuggestions }: { team: Team, onUpdate: 
                                         Created {new Date(team.createdAt).toLocaleDateString()}
                                     </p>
                                 </div>
-                                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => setIsEditing(true)}>
-                                    <Pencil className="w-3 h-3" />
-                                </Button>
+                                {canAdmin && (
+                                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => setIsEditing(true)}>
+                                        <Pencil className="w-3 h-3" />
+                                    </Button>
+                                )}
                             </div>
                         )}
                     </div>
                 </div>
-                <AccessGroupsSettings team={team} groupSuggestions={groupSuggestions} onUpdate={onUpdate} />
-                <JiraSettings team={team} />
+                {/* Settings are a team-admin act; a member joins the boards but
+                    does not rewire who can reach them. The server enforces the
+                    same line — this only stops the page offering what it would
+                    refuse. */}
+                {canAdmin && (
+                    <>
+                        <AccessGroupsSettings team={team} groupSuggestions={groupSuggestions} onUpdate={onUpdate} />
+                        <JiraSettings team={team} />
+                    </>
+                )}
                 <div className="w-full">
                     <CreateRetroDialog preselectedTeamId={team.id} />
                 </div>

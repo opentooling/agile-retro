@@ -346,7 +346,10 @@ app.prepare().then(() => {
             try {
                 if (!(await requireView(retroId))) return;
                 const action = await db.getActionItem(actionId);
-                if (action) {
+                // The access check above is for the board the client *named*.
+                // Without this, access to any board — every open board counts —
+                // was enough to toggle an action from any other team's board.
+                if (action && action.retrospectiveId === retroId) {
                     const newCompleted = !action.completed;
                     await db.updateActionCompleted(actionId, newCompleted);
 

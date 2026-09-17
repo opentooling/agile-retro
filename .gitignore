@@ -47,3 +47,6 @@ next-env.d.ts
 /data/*.db*
 
 .expo
+
+# Claude Code agent worktrees (full checkouts of other branches)
+.claude/worktrees/

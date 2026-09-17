@@ -94,25 +94,28 @@ type ActionData = {
  * lifted out of its column (the review list mixes all three together).
  */
 const ACCENT_PALETTE = {
+  // Tone tokens, not fixed Tailwind palettes: the column accents follow the
+  // theme (and carry their own dark values) instead of needing a parallel set
+  // of dark: classes.
   positive: {
-    badge: 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800',
-    border: 'border-l-green-500',
+    badge: 'bg-[hsl(var(--tone-positive-soft))] text-[hsl(var(--tone-positive-ink))] border-[hsl(var(--tone-positive)/0.4)]',
+    border: 'border-l-[hsl(var(--tone-positive))]',
   },
   negative: {
-    badge: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800',
-    border: 'border-l-red-500',
+    badge: 'bg-[hsl(var(--tone-negative-soft))] text-[hsl(var(--tone-negative-ink))] border-[hsl(var(--tone-negative)/0.4)]',
+    border: 'border-l-[hsl(var(--tone-negative))]',
   },
   improve: {
-    badge: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800',
-    border: 'border-l-blue-500',
+    badge: 'bg-[hsl(var(--tone-improve-soft))] text-[hsl(var(--tone-improve-ink))] border-[hsl(var(--tone-improve)/0.4)]',
+    border: 'border-l-[hsl(var(--tone-improve))]',
   },
   risk: {
-    badge: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800',
-    border: 'border-l-amber-500',
+    badge: 'bg-[hsl(var(--tone-risk-soft))] text-[hsl(var(--tone-risk-ink))] border-[hsl(var(--tone-risk)/0.4)]',
+    border: 'border-l-[hsl(var(--tone-risk))]',
   },
   neutral: {
-    badge: 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
-    border: 'border-l-slate-400',
+    badge: 'bg-[hsl(var(--tone-neutral-soft))] text-[hsl(var(--tone-neutral-ink))] border-[hsl(var(--tone-neutral)/0.4)]',
+    border: 'border-l-[hsl(var(--tone-neutral))]',
   },
 } as const
 

@@ -53,7 +53,7 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
   }))
 
   return (
-    <PageShell>
+    <PageShell width="wide">
       <PageHeader
         title="Retrospective history"
         action={
