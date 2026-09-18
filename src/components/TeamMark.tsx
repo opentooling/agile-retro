@@ -22,11 +22,11 @@ export function TeamMark({
         src={team.imageData}
         alt=""
         style={dim}
-        className={`shrink-0 rounded-full border object-cover ${className}`}
+        className={`shrink-0 rounded-[30%] border object-cover ${className}`}
       />
     )
   }
   // No logo uploaded: draw one from the team's name rather than showing the
   // same grey glyph for every team.
-  return <Identicon name={team.name} size={size} className={className} />
+  return <Identicon name={team.name} size={size} shape="square" className={className} />
 }

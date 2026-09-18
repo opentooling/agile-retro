@@ -1,12 +1,11 @@
 import * as db from '@/lib/db'
-import { Button } from "@/components/ui/button"
-import Link from 'next/link'
 import { auth } from '@/auth'
 import { authUserFromSession, canAdministerBoard } from '@/lib/authz'
 import { SessionList, type SessionSummary } from '@/components/SessionList'
 import { PageShell } from '@/components/PageHeader'
-import { PageHero } from '@/components/PageHero'
-import { History as HistoryIcon } from 'lucide-react'
+import { Masthead, Segmented } from '@/components/Masthead'
+import { ScopeBar } from '@/components/ScopeBar'
+import { Archive } from 'lucide-react'
 import { Pager, pageFromParams } from '@/components/Pager'
 
 export default async function HistoryPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
@@ -54,26 +53,43 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
     }),
   }))
 
+  // The view switch keeps the cross-page filters but swaps the view's own key.
+  const viewHref = (view: 'all' | 'live' | 'mine') => {
+    const next = new URLSearchParams()
+    for (const key of ['teamId', 'creator', 'tag']) {
+      const value = params[key]
+      if (typeof value === 'string' && value) next.set(key, value)
+    }
+    if (view === 'live') next.set('status', 'active')
+    if (view === 'mine') next.set('myBoards', 'true')
+    const qs = next.toString()
+    return qs ? `/history?${qs}` : '/history'
+  }
+  const view = myBoardsFilter ? 'mine' : statusFilter === 'active' ? 'live' : 'all'
+
   return (
     <PageShell width="wide">
-      <PageHero
-        icon={HistoryIcon}
-        title="Retrospective history"
-        subtitle="Every session your teams have run."
-        action={
-          <div className="flex gap-2">
-            <Link href="/history">
-                <Button variant={!myBoardsFilter ? 'default' : 'outline'}>All Boards</Button>
-            </Link>
-            <Link href="/history?myBoards=true">
-                <Button variant={myBoardsFilter ? 'default' : 'outline'}>My Boards</Button>
-            </Link>
-          </div>
+      <Masthead
+        eyebrow="Archive"
+        icon={Archive}
+        title="History"
+        lede={`Every session your teams have run — ${total} ${total === 1 ? 'board' : 'boards'}${view === 'all' ? '' : ' in this view'}.`}
+        actions={
+          <Segmented
+            label="Which boards"
+            items={[
+              { href: viewHref('all'), label: 'All boards', active: view === 'all' },
+              { href: viewHref('live'), label: 'Live', active: view === 'live' },
+              { href: viewHref('mine'), label: 'My boards', active: view === 'mine' },
+            ]}
+          />
         }
       />
+      <ScopeBar fields={['team', 'creator', 'tag']} />
       <SessionList
         sessions={sessions}
         emptyMessage="No retrospectives found matching your filters."
+        emptyHint="Try clearing a filter, or switch to All boards."
       />
       <Pager
         page={page}

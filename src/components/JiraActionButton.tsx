@@ -31,7 +31,7 @@ export function JiraActionButton({
         href={link.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center gap-1 text-xs text-blue-600 hover:underline"
+        className="inline-flex items-center gap-1 rounded-full bg-[hsl(var(--tone-improve-soft))] px-2 py-0.5 text-xs font-semibold text-[hsl(var(--tone-improve-ink))] hover:underline"
       >
         <ExternalLink className="w-3 h-3" /> {link.key}
       </a>
@@ -43,7 +43,7 @@ export function JiraActionButton({
       <Button
         size="sm"
         variant="outline"
-        className="h-7 gap-1"
+        className="h-7 gap-1 rounded-full"
         disabled={busy}
         onClick={async () => {
           setBusy(true)
@@ -59,7 +59,7 @@ export function JiraActionButton({
       >
         <ExternalLink className="w-3 h-3" /> {busy ? 'Creating…' : 'Create in Jira'}
       </Button>
-      {error && <span className="text-xs text-red-500 max-w-[220px] text-right">{error}</span>}
+      {error && <span className="max-w-[220px] text-right text-xs text-destructive">{error}</span>}
     </div>
   )
 }

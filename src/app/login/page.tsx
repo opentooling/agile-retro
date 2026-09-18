@@ -1,7 +1,8 @@
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { LogIn, KeyRound, Coins, Sparkles } from "lucide-react"
-import { BlobField, TeamScene } from "@/components/visual/Illustration"
+import { LogIn, KeyRound } from "lucide-react"
+import { StageScene } from "@/components/visual/Illustration"
+import { LogoMark } from "@/components/visual/Logo"
+import { ModeToggle } from "@/components/mode-toggle"
 import { signIn, providerMap } from "@/auth"
 import { branding } from "@/lib/branding"
 
@@ -48,36 +49,45 @@ function getProviderIcon(id: string) {
 export default function LoginPage() {
   const { name, tagline } = branding()
   return (
-    <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
-      {/* Left: the pitch, on colour. Hidden on small screens, where the card
-          is the whole page. */}
-      <aside className="relative hidden overflow-hidden bg-gradient-to-br from-[hsl(var(--tone-improve-soft))] via-[hsl(var(--accent))] to-[hsl(var(--tone-review-soft))] p-12 lg:flex lg:flex-col lg:justify-center">
-        <BlobField stretch={false} className="pointer-events-none absolute inset-0 h-full w-full opacity-50" />
-        <div className="relative max-w-md">
-          <span className="inline-flex items-center gap-2 rounded-full bg-card/70 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground backdrop-blur">
-            <Sparkles className="h-3.5 w-3.5" /> Team retrospectives
-          </span>
-          <h2 className="mt-5 text-4xl font-bold leading-tight tracking-tight text-foreground">
-            Look back together,<br />then actually follow through.
-          </h2>
-          <p className="mt-4 text-base text-muted-foreground">{tagline}</p>
-          <TeamScene className="mt-10 w-full max-w-sm" />
+    <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1.15fr)_minmax(26rem,1fr)]">
+      {/* Left: the product, on ink — the same stage the board is. Hidden on
+          small screens, where the sign-in is the whole page. */}
+      <aside className="relative hidden flex-col justify-between overflow-hidden bg-rail p-12 text-rail-foreground lg:flex">
+        <div className="flex items-center gap-3">
+          <LogoMark className="h-9 w-9" />
+          <span className="text-lg font-semibold tracking-tight">{name}</span>
         </div>
+        <div className="max-w-xl">
+          <p className="eyebrow !text-rail-muted">Team retrospectives</p>
+          <h2 className="mt-4 text-5xl font-semibold leading-[1.05] tracking-[-0.03em]">
+            Look back together.<br />
+            <span className="text-rail-active">Then follow through.</span>
+          </h2>
+          <StageScene className="mt-12 w-full max-w-lg" />
+        </div>
+        <ol className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-rail-muted" aria-label="How a session runs">
+          {['Input', 'Voting', 'Review', 'Actions'].map((phase, i) => (
+            <li key={phase} className="flex items-center gap-2">
+              <span className="font-mono text-xs tabular-nums">0{i + 1}</span>
+              {phase}
+            </li>
+          ))}
+        </ol>
       </aside>
 
       {/* Right: the sign-in itself. */}
-      <main className="flex items-center justify-center bg-background p-6">
-        <Card className="w-full max-w-md border-none bg-transparent shadow-none">
-          <CardHeader className="text-center">
-            <div className="flex justify-center mb-3">
-              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-md">
-                <Coins className="h-7 w-7" />
-              </div>
-            </div>
-            <CardTitle className="text-2xl font-bold">Welcome to {name}</CardTitle>
-            <CardDescription>Sign in to create or join a retrospective.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+      <main className="relative flex items-center justify-center bg-background px-6 py-12">
+        <div className="absolute right-4 top-4">
+          <ModeToggle />
+        </div>
+        <div className="w-full max-w-sm">
+          <div className="flex items-center gap-3 lg:hidden">
+            <span className="rounded-xl bg-rail p-1.5"><LogoMark className="h-8 w-8" /></span>
+            <span className="text-lg font-semibold tracking-tight">{name}</span>
+          </div>
+          <h1 className="mt-8 text-3xl font-semibold tracking-tight lg:mt-0">Sign in</h1>
+          <p className="mt-2 text-muted-foreground">{tagline}</p>
+          <div className="mt-8 space-y-3">
             {Object.values(providerMap).map((provider) => (
               <form
                 key={provider.id}
@@ -86,14 +96,22 @@ export default function LoginPage() {
                   await signIn(provider.id, { redirectTo: "/" })
                 }}
               >
-                <Button className="w-full gap-2 shadow-sm" size="lg" type="submit" variant="outline">
+                <Button className="h-12 w-full justify-start gap-3 bg-card px-4 text-base shadow-[var(--shadow-card)]" size="lg" type="submit" variant="outline">
                   {getProviderIcon(provider.id)}
-                  Sign in with {provider.name}
+                  Continue with {provider.name}
                 </Button>
               </form>
             ))}
-          </CardContent>
-        </Card>
+            {Object.values(providerMap).length === 0 && (
+              <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                No sign-in provider is configured for this deployment.
+              </p>
+            )}
+          </div>
+          <p className="mt-10 border-t pt-4 text-xs text-muted-foreground">
+            Your team&apos;s boards are visible to you through your identity provider&apos;s groups.
+          </p>
+        </div>
       </main>
     </div>
   )

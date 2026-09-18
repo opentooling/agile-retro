@@ -5,7 +5,9 @@ import { buildInsights } from '@/lib/analytics'
 import { buildTrends } from '@/lib/trends'
 import { InsightsView } from '@/components/InsightsView'
 import { PageShell } from '@/components/PageHeader'
-import { PageHero } from '@/components/PageHero'
+import { Masthead } from '@/components/Masthead'
+import { EmptyState } from '@/components/visual/EmptyState'
+import { NoData } from '@/components/visual/Illustration'
 import { TrendingUp } from 'lucide-react'
 import { TeamPicker } from '@/components/TeamPicker'
 
@@ -51,16 +53,19 @@ export default async function InsightsPage({
 
   return (
     <PageShell width="wide">
-      <PageHero
+      <Masthead
+        eyebrow="Analytics"
         icon={TrendingUp}
-        title="Insights"
-        subtitle="How this team's retrospectives are going, and which way they're heading."
+        title={selected ? <>Insights <span className="text-muted-foreground">· {selected.name}</span></> : 'Insights'}
+        lede="How this team's retrospectives are going, and which way they're heading."
       />
 
       {teams.length === 0 ? (
-        <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
-          You don&apos;t have access to any team&apos;s boards yet.
-        </div>
+        <EmptyState
+          illustration={<NoData className="h-20 w-36" />}
+          title="You don't have access to any team's boards yet."
+          hint="Insights are per team. Ask a team admin to add your group."
+        />
       ) : (
         <>
           <TeamPicker

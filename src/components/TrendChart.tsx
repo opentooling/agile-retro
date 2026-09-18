@@ -233,7 +233,7 @@ export function TrendChart({
   const flip = tipLeft > width * 0.6
 
   return (
-    <figure className="flex flex-col rounded-lg border bg-card px-4 pb-3 pt-3">
+    <figure className="flex flex-col rounded-xl border bg-card px-4 pb-3 pt-4 shadow-[var(--shadow-card)]">
       <figcaption className="mb-2 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold">{title}</div>

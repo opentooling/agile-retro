@@ -29,29 +29,35 @@ export function initialsOf(name: string): string {
 export function Identicon({
   name,
   size = 28,
+  shape = 'circle',
   className,
 }: {
   name: string
   size?: number
+  /** People are circles; teams are rounded squares, so the two never read as each other. */
+  shape?: 'circle' | 'square'
   className?: string
 }) {
   const h = hash(name || '?')
-  // Two hues a step apart on the wheel, at a lightness that keeps white text
-  // legible on either end of the gradient.
+  // Two hues a step apart on the wheel. Lightness depends on the hue: yellows
+  // and greens are far brighter than blues at the same HSL lightness, so they
+  // are drawn darker to keep the white initials legible (≥4.5:1 at both ends).
   const hue = h % 360
   const hue2 = (hue + 38) % 360
+  const light = (x: number) => (x >= 35 && x <= 195 ? 25 : x > 195 && x < 250 ? 38 : 36)
   return (
     <span
       aria-hidden
       className={cn(
-        'inline-flex shrink-0 select-none items-center justify-center rounded-full font-semibold text-white',
+        'inline-flex shrink-0 select-none items-center justify-center font-semibold text-white',
+        shape === 'circle' ? 'rounded-full' : 'rounded-[30%]',
         className,
       )}
       style={{
         width: size,
         height: size,
         fontSize: Math.max(9, Math.round(size * 0.38)),
-        background: `linear-gradient(135deg, hsl(${hue} 68% 58%), hsl(${hue2} 72% 45%))`,
+        background: `linear-gradient(135deg, hsl(${hue} 62% ${light(hue)}%), hsl(${hue2} 66% ${light(hue2) - 4}%))`,
         boxShadow: 'inset 0 1px 0 rgb(255 255 255 / 0.25)',
       }}
     >

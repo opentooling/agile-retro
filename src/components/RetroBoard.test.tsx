@@ -334,7 +334,7 @@ describe('RetroBoard', () => {
 
     it('offers no way to add a card or react', () => {
       render(<RetroBoard initialData={closedData} user={{ name: 'test-user' }} />)
-      expect(screen.queryByPlaceholderText(/Add a new item/)).toBeNull()
+      expect(screen.queryByPlaceholderText(/Add a card/)).toBeNull()
       expect(screen.queryByLabelText('Add reaction')).toBeNull()
     })
 
@@ -439,15 +439,23 @@ describe('RetroBoard', () => {
     const renderReview = () =>
       render(<RetroBoard initialData={reviewData} user={{ name: 'test-user' }} />)
 
-    it('lets the cards fill the available width', () => {
-      // The review list is a flex item, and a flex item with auto cross-axis
+    it('lets the discussion queue fill the available width', () => {
+      // The review layout is a flex item, and a flex item with auto cross-axis
       // margins shrinks to its content instead of stretching. Without an
       // explicit width the cards collapse to the width of the shortest card's
       // text, which is what happened when the board became a flex column.
       const { container } = renderReview()
-      const list = container.querySelector('.max-w-5xl')
-      expect(list).not.toBeNull()
-      expect(list!.className).toMatch(/\bw-full\b/)
+      const layout = container.querySelector('[data-review-queue]')
+      expect(layout).not.toBeNull()
+      expect(layout!.className).toMatch(/\bw-full\b/)
+    })
+
+    it('puts the top-voted card in the spotlight, and walks the queue', () => {
+      renderReview()
+      const spotlight = screen.getByRole('region', { name: 'Now discussing' })
+      expect(within(spotlight).getByText('Flaky CI')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /Next topic/ }))
+      expect(within(spotlight).getByText('Pairing helped')).toBeInTheDocument()
     })
 
     it('labels each item with the column it came from', () => {
@@ -487,6 +495,30 @@ describe('RetroBoard', () => {
         itemId: 'bad-1',
         emoji: '👍',
       })
+    })
+  })
+
+  describe('ACTIONS phase', () => {
+    const actionsData = {
+      ...mockRetroData,
+      status: 'ACTIONS',
+      columns: [
+        {
+          ...mockRetroData.columns[0],
+          items: [{ id: 'i1', content: 'Flaky CI', summary: null, username: 'bo', votes: [{ userId: 'u1', count: 4 }], reactions: [] }],
+        },
+        ...mockRetroData.columns.slice(1),
+      ],
+    }
+
+    it('turns a top card into a draft action without sending anything', () => {
+      render(<RetroBoard initialData={actionsData} user={{ name: 'test-user' }} />)
+      const mockSocket = (io as jest.Mock).mock.results[0].value
+
+      fireEvent.click(screen.getByRole('button', { name: /Turn into an action/ }))
+      expect(screen.getByLabelText('New action item')).toHaveValue('Flaky CI')
+      // Only a draft: nothing is created until the facilitator adds it.
+      expect(mockSocket.emit).not.toHaveBeenCalledWith('add-action-item', expect.anything())
     })
   })
 

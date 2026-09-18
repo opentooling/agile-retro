@@ -36,15 +36,5 @@ export function PageShell({
   className?: string
   width?: keyof typeof SHELL_WIDTHS
 }) {
-  return <div className={cn('mx-auto p-6', SHELL_WIDTHS[width], className)}>{children}</div>
-}
-
-/** Page title plus its primary action, on one row. */
-export function PageHeader({ title, action }: { title: string; action?: ReactNode }) {
-  return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <h1 className="text-xl font-bold">{title}</h1>
-      {action}
-    </div>
-  )
+  return <div className={cn('mx-auto px-4 py-8 sm:px-8 sm:py-10', SHELL_WIDTHS[width], className)}>{children}</div>
 }

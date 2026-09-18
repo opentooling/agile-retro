@@ -36,6 +36,7 @@ import {
 import { useSession } from "next-auth/react"
 import { TeamMark } from "@/components/TeamMark"
 import { RETRO_TEMPLATES, DEFAULT_TEMPLATE_ID } from "@/lib/retro-templates"
+import { columnSentiment } from "@/lib/column-sentiment"
 import { RETENTION_OPTIONS, DEFAULT_RETENTION } from "@/lib/retention"
 
 export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: string }) {
@@ -48,8 +49,7 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
   const [openCombobox, setOpenCombobox] = useState(false)
   const [openTeamCombobox, setOpenTeamCombobox] = useState(false)
   const [templateId, setTemplateId] = useState<string>(DEFAULT_TEMPLATE_ID)
-  const [openTemplateCombobox, setOpenTemplateCombobox] = useState(false)
-  const [retention, setRetention] = useState<string>(DEFAULT_RETENTION)
+    const [retention, setRetention] = useState<string>(DEFAULT_RETENTION)
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
   const { data: session } = useSession()
@@ -113,9 +113,9 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
 
   if (!mounted) {
     return (
-      <Button className="gap-2">
+      <Button className="gap-2" size={preselectedTeamId ? "sm" : "default"} variant={preselectedTeamId ? "outline" : "default"}>
         <Plus className="h-4 w-4" />
-        Create New Session
+        New session
       </Button>
     )
   }
@@ -123,9 +123,9 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className={cn("gap-2", preselectedTeamId && "w-full")} variant={preselectedTeamId ? "outline" : "default"} size={preselectedTeamId ? "sm" : "default"}>
+        <Button className="gap-2" variant={preselectedTeamId ? "outline" : "default"} size={preselectedTeamId ? "sm" : "default"}>
           <Plus className="h-4 w-4" />
-          {preselectedTeamId ? "New Session" : "Create New Session"}
+          New session
         </Button>
       </DialogTrigger>
       {/* Header and footer stay put; only the fields scroll. The form grew
@@ -133,11 +133,11 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
           screens, and the whole-dialog scroll it used to have was switched off
           by an `overflow-visible` meant to keep the dropdowns unclipped — which
           they never were: they render in a portal, outside the dialog. */}
-      <DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden sm:max-w-[425px]">
+      <DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden sm:max-w-[520px]">
         <DialogHeader className="shrink-0">
-          <DialogTitle>Create Retrospective</DialogTitle>
+          <DialogTitle className="text-xl tracking-tight">New retrospective</DialogTitle>
           <DialogDescription>
-            Start a new retrospective session. Give it a meaningful title.
+            Name it, choose who can join and how the board is laid out. Format and privacy are fixed once it starts.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
@@ -145,23 +145,22 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
               and focus rings on the fields aren't clipped by the scroll box. */}
           <div className="-mx-6 min-h-0 flex-1 overflow-y-auto px-6">
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="title" className="text-right">
+            <div className="grid gap-1.5">
+              <Label htmlFor="title">
                 Title
               </Label>
               <Input
                 id="title"
                 name="title"
                 placeholder="Sprint 42 Retro"
-                className="col-span-3"
                 required
               />
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="teamId" className="text-right">
+            <div className="grid gap-1.5">
+              <Label htmlFor="teamId">
                 Team
               </Label>
-              <div className="col-span-3">
+              <div>
                   <Popover open={openTeamCombobox} onOpenChange={setOpenTeamCombobox}>
                     <PopoverTrigger asChild>
                       <Button
@@ -233,69 +232,50 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                   </p>
               </div>
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">
+            <div className="grid gap-1.5">
+              <Label>
                 Format
               </Label>
-              <div className="col-span-3">
-                <Popover open={openTemplateCombobox} onOpenChange={setOpenTemplateCombobox}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={openTemplateCombobox}
-                      className="w-full justify-between"
-                    >
-                      <span className="truncate">
-                        {RETRO_TEMPLATES.find((t) => t.id === templateId)?.name}
-                      </span>
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="p-0">
-                    <Command>
-                      <CommandList>
-                        <CommandGroup>
-                          {RETRO_TEMPLATES.map((template) => (
-                            <CommandItem
-                              key={template.id}
-                              value={template.name.toLowerCase()}
-                              onSelect={() => {
-                                setTemplateId(template.id)
-                                setOpenTemplateCombobox(false)
-                              }}
-                              className="items-start"
-                            >
-                              <Check
-                                className={cn(
-                                  "mr-2 mt-0.5 h-4 w-4 shrink-0",
-                                  templateId === template.id ? "opacity-100" : "opacity-0"
-                                )}
-                              />
-                              <span className="flex flex-col gap-0.5">
-                                <span className="font-medium">{template.name}</span>
-                                <span className="text-xs text-muted-foreground">{template.description}</span>
-                              </span>
-                            </CommandItem>
+              <div>
+                {/* Formats as tiles rather than a dropdown: the choice is about
+                    the columns, so each tile shows them, in their colours. */}
+                <div role="radiogroup" aria-label="Format" className="grid grid-cols-2 gap-2">
+                  {RETRO_TEMPLATES.map((template) => {
+                    const selected = templateId === template.id
+                    return (
+                      <button
+                        key={template.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() => setTemplateId(template.id)}
+                        className={cn(
+                          "flex flex-col gap-2 rounded-lg border p-2.5 text-left transition-colors",
+                          selected ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-accent",
+                        )}
+                      >
+                        <span className="flex gap-1" aria-hidden>
+                          {template.columns.map((c) => (
+                            <span key={c.type} className="h-1.5 flex-1 rounded-full" style={{ background: `hsl(var(--tone-${columnSentiment(c.type)}))` }} />
                           ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
+                        </span>
+                        <span className="text-sm font-medium leading-tight">{template.name}</span>
+                      </button>
+                    )
+                  })}
+                </div>
                 <input type="hidden" name="template" value={templateId} />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {RETRO_TEMPLATES.find((t) => t.id === templateId)?.columns.length} columns ·
-                  {' '}{RETRO_TEMPLATES.find((t) => t.id === templateId)?.columns.map((c) => c.title).join(', ')}
+                  {RETRO_TEMPLATES.find((t) => t.id === templateId)?.columns.map((c) => c.title).join(" · ")}
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">
+            <div className="grid gap-1.5">
+              <Label>
                 Tags
               </Label>
-              <div className="col-span-3 flex flex-col gap-2">
+              <div className="flex flex-col gap-2">
                 <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
                   <PopoverTrigger asChild>
                     <Button
@@ -360,9 +340,9 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                 {selectedTags.length > 0 && (
                     <div className="flex flex-wrap gap-1">
                         {selectedTags.map(tag => (
-                            <span key={tag} className="bg-secondary text-secondary-foreground px-2 py-1 rounded-md text-xs flex items-center gap-1">
+                            <span key={tag} className="flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
                                 {tag}
-                                <span className="cursor-pointer hover:text-destructive" onClick={() => toggleTag(tag)}>×</span>
+                                <button type="button" aria-label={`Remove tag ${tag}`} className="rounded-full px-0.5 hover:text-destructive" onClick={() => toggleTag(tag)}>×</button>
                             </span>
                         ))}
                     </div>
@@ -370,9 +350,9 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
               </div>
             </div>
             
-            <div className="grid grid-cols-4 items-center gap-4">
-                <Label className="text-right col-span-1">Phase Timers (min)</Label>
-                <div className="col-span-3 flex gap-2">
+            <div className="grid gap-1.5">
+                <Label>Phase timers (minutes)</Label>
+                <div className="grid grid-cols-3 gap-2">
                     <div className="flex flex-col gap-1">
                         <Label htmlFor="inputDuration" className="text-xs text-muted-foreground">Input</Label>
                         <Input type="number" id="inputDuration" name="inputDuration" defaultValue="10" min="2" />
@@ -388,9 +368,9 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                 </div>
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="isAnonymous" className="text-right">Anonymous</Label>
-                <div className="col-span-3 flex items-center space-x-2">
+            <div className="grid gap-1.5">
+                <Label htmlFor="isAnonymous">Anonymous</Label>
+                <div className="flex items-center gap-2">
                     <Switch id="isAnonymous" name="isAnonymous" />
                     <Label htmlFor="isAnonymous" className="font-normal text-muted-foreground">
                         Hide usernames on cards
@@ -398,15 +378,15 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                 </div>
             </div>
 
-            <div className="grid grid-cols-4 items-start gap-4">
-                <Label htmlFor="retentionDays" className="text-right pt-1">Retention</Label>
-                <div className="col-span-3 flex flex-col gap-1">
+            <div className="grid gap-1.5">
+                <Label htmlFor="retentionDays">Retention</Label>
+                <div className="flex flex-col gap-1">
                     <select
                         id="retentionDays"
                         name="retentionDays"
                         value={retention}
                         onChange={(e) => setRetention(e.target.value)}
-                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                        className="h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-xs"
                     >
                         {RETENTION_OPTIONS.map((option) => (
                             <option key={option.value} value={option.value}>{option.label}</option>
@@ -420,10 +400,10 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
                 </div>
             </div>
 
-            <div className="grid grid-cols-4 items-start gap-4">
-                <Label htmlFor="blindInput" className="text-right pt-1">Blind input</Label>
-                <div className="col-span-3 flex flex-col gap-1">
-                    <div className="flex items-center space-x-2">
+            <div className="grid gap-1.5">
+                <Label htmlFor="blindInput">Blind input</Label>
+                <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
                         <Switch id="blindInput" name="blindInput" />
                         <Label htmlFor="blindInput" className="font-normal text-muted-foreground">
                             Hide others&apos; cards until input ends
@@ -438,7 +418,7 @@ export function CreateRetroDialog({ preselectedTeamId }: { preselectedTeamId?: s
           </div>
           </div>
           <DialogFooter className="shrink-0 border-t pt-4">
-            <Button type="submit">Create Session</Button>
+            <Button type="submit">Create and open</Button>
           </DialogFooter>
         </form>
       </DialogContent>

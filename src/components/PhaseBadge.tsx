@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
  * history page, and a bare enum on the board. Phases are also five states, not
  * the open/closed binary the dashboard collapsed them into.
  */
-const PHASE_LABEL: Record<string, string> = {
+export const PHASE_LABEL: Record<string, string> = {
   INPUT: 'Input',
   VOTING: 'Voting',
   REVIEW: 'Review',
@@ -28,7 +28,7 @@ const PHASE_STYLE: Record<string, string> = {
 }
 
 /** An icon per phase, so the state reads before the word does. */
-const PHASE_ICON: Record<string, LucideIcon> = {
+export const PHASE_ICON: Record<string, LucideIcon> = {
   INPUT: PenLine,
   VOTING: Vote,
   REVIEW: MessagesSquare,
@@ -41,7 +41,7 @@ export function PhaseBadge({ status, className }: { status: string; className?: 
   return (
     <span
       className={cn(
-        'inline-flex items-center justify-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
+        'inline-flex items-center justify-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold',
         PHASE_STYLE[status] ?? PHASE_STYLE.CLOSED,
         className
       )}

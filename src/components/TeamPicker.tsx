@@ -37,29 +37,29 @@ export function TeamPicker({
 
   if (teams.length <= CHIP_LIMIT) {
     return (
-      <div className="mb-5 flex flex-wrap gap-1.5">
+      <nav aria-label="Team" className="mb-10 flex flex-wrap gap-2">
         {teams.map((team) => (
           <Link
             key={team.id}
             href={`${basePath}?team=${team.id}`}
             aria-current={team.id === selectedId ? 'page' : undefined}
             className={cn(
-              'flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'flex items-center gap-2 rounded-full border py-1 pl-1 pr-3.5 text-sm font-medium transition-colors',
               team.id === selectedId
-                ? 'border-primary bg-primary/10 font-medium text-foreground'
-                : 'text-muted-foreground hover:bg-accent'
+                ? 'border-transparent bg-foreground text-background'
+                : 'bg-card text-muted-foreground shadow-[var(--shadow-card)] hover:bg-accent hover:text-foreground'
             )}
           >
-            <TeamMark team={team} size={16} />
+            <TeamMark team={team} size={24} />
             {team.name}
           </Link>
         ))}
-      </div>
+      </nav>
     )
   }
 
   return (
-    <div className="mb-5 flex items-center gap-2">
+    <div className="mb-10 flex items-center gap-2">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button

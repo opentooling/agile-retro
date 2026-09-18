@@ -8,14 +8,14 @@
   --color-foreground: hsl(var(--foreground));
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --color-sidebar-ring: hsl(var(--sidebar-ring));
-  --color-sidebar-border: hsl(var(--sidebar-border));
-  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
-  --color-sidebar-accent: hsl(var(--sidebar-accent));
-  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
-  --color-sidebar-primary: hsl(var(--sidebar-primary));
-  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
-  --color-sidebar: hsl(var(--sidebar));
+  --color-rail: hsl(var(--rail));
+  --color-rail-foreground: hsl(var(--rail-foreground));
+  --color-rail-muted: hsl(var(--rail-muted));
+  --color-rail-hover: hsl(var(--rail-hover));
+  --color-rail-border: hsl(var(--rail-border));
+  --color-rail-active: hsl(var(--rail-active));
+  --color-rail-active-foreground: hsl(var(--rail-active-foreground));
+  --color-note: hsl(var(--note));
   --color-chart-5: hsl(var(--chart-5));
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-3: hsl(var(--chart-3));
@@ -43,112 +43,117 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* Theme — warm and vibrant, after the ShoutOut palette: cream paper, teal
-   primary, sunny/coral/lilac/sky accents. Values are HSL triplets consumed via
-   hsl(var(--x)).
+/* Theme — "Stage & Desk" (v0.4).
 
-   Contrast was checked rather than eyeballed. Everything text-sized clears WCAG
-   AA on its own surface; the one value that did not survive the move is the
-   destructive red — ShoutOut's coral-strong (#d9503f) measures 4.06:1 on a
-   white card, so it is one step darker here. */
+   Paper and ink. The desk is a quiet off-white with hairline rules; the rail is
+   ink in both themes; colour is kept for meaning — the four phase tones and the
+   column sentiments — and the teal primary marks the one action a screen is
+   asking for. Values are HSL triplets consumed via hsl(var(--x)).
+
+   Every text/surface pair below was measured, not eyeballed: body and muted
+   text clear WCAG AA (4.5:1) on background, card and muted in both themes, and
+   each tone's -ink clears AA on its own -soft fill (see the brief). */
 :root {
-  --radius: 0.625rem;
-  --background: 38 100% 96%;        /* cream paper */
-  --foreground: 247 10% 18%;        /* ink */
+  --radius: 0.75rem;
+  --background: 40 33% 97%;         /* paper */
+  --foreground: 250 15% 14%;        /* ink */
   --card: 0 0% 100%;
-  --card-foreground: 247 10% 18%;
+  --card-foreground: 250 15% 14%;
   --popover: 0 0% 100%;
-  --popover-foreground: 247 10% 18%;
-  --primary: 177 62% 30%;           /* teal, strong */
+  --popover-foreground: 250 15% 14%;
+  --primary: 177 62% 29%;           /* teal — the one action */
   --primary-foreground: 43 100% 99%;
-  --secondary: 40 100% 92%;         /* warm sand */
-  --secondary-foreground: 247 10% 18%;
-  --muted: 40 100% 92%;
-  --muted-foreground: 251 7% 44%;
-  --accent: 43 100% 85%;            /* sunny, soft — hover wash */
-  --accent-foreground: 247 10% 18%;
-  --destructive: 7 67% 48%;         /* coral, darkened to clear AA on white */
-  --border: 40 57% 86%;
-  --input: 40 57% 86%;
-  --ring: 177 58% 39%;              /* teal */
-  /* Chart marks. Slots 2 and 3 are the pair the trend charts draw with, and
-     they are validated together for colour-vision separation against the card
-     surface (worst adjacent CVD ΔE 12.6 light, 13.7 dark; the target is 8). */
-  --chart-1: 40 100% 48%;           /* sunny */
-  --chart-2: 7 67% 55%;             /* coral */
-  --chart-3: 177 77% 36%;           /* teal */
-  --chart-4: 206 64% 46%;           /* sky */
-  --chart-5: 248 58% 59%;           /* lilac */
-  --sidebar: 43 100% 99%;
-  --sidebar-foreground: 247 10% 18%;
-  --sidebar-primary: 177 62% 30%;
-  --sidebar-primary-foreground: 43 100% 99%;
-  --sidebar-accent: 43 100% 85%;
-  --sidebar-accent-foreground: 247 10% 18%;
-  --sidebar-border: 40 57% 86%;
-  --sidebar-ring: 177 58% 39%;
+  --secondary: 40 24% 92%;
+  --secondary-foreground: 250 15% 14%;
+  --muted: 40 24% 93%;
+  --muted-foreground: 250 8% 38%;
+  --accent: 40 26% 90%;             /* hover wash */
+  --accent-foreground: 250 15% 14%;
+  --destructive: 7 67% 45%;
+  --border: 38 16% 86%;
+  --input: 38 14% 80%;
+  --ring: 177 58% 36%;
+  /* Chart marks. Slots 2 and 3 are the pair the trend charts draw with,
+     validated together for colour-vision separation on the card surface. */
+  --chart-1: 40 100% 48%;
+  --chart-2: 7 67% 55%;
+  --chart-3: 177 77% 36%;
+  --chart-4: 206 64% 46%;
+  --chart-5: 248 58% 59%;
+
+  /* The rail is ink in both themes: navigation recedes, the page leads. */
+  --rail: 250 20% 13%;
+  --rail-foreground: 40 30% 95%;
+  --rail-muted: 250 12% 72%;
+  --rail-hover: 250 16% 20%;
+  --rail-border: 250 14% 22%;
+  --rail-active: 177 50% 60%;
+  --rail-active-foreground: 250 25% 9%;
+
+  /* A card on a board lane: paper on a tinted lane. */
+  --note: 0 0% 100%;
+  /* Votes: the risk tone's amber, deep enough to read as a filled control
+     against a white card (3.4:1, WCAG 1.4.11). */
+  --vote: 36 95% 40%;
 
   /* Semantic tones — sentiment on cards and charts, board phases, column
-     accents. One family per meaning, each with a soft fill and an ink that
-     clears WCAG AA on that fill (measured, not guessed). Components reference
-     these instead of fixed Tailwind palettes, so a theme change reaches them. */
-  --tone-positive: 124 41% 55%;   --tone-positive-soft: 123 47% 91%;  --tone-positive-ink: 125 45% 32%;
-  --tone-negative: 6 100% 71%;    --tone-negative-soft: 9 100% 93%;   --tone-negative-ink: 9 68% 41%;
-  --tone-improve: 206 83% 65%;    --tone-improve-soft: 206 89% 93%;   --tone-improve-ink: 206 68% 38%;
-  --tone-risk: 41 100% 62%;       --tone-risk-soft: 43 100% 85%;      --tone-risk-ink: 40 100% 24%;
-  --tone-review: 249 80% 75%;     --tone-review-soft: 250 100% 95%;   --tone-review-ink: 248 48% 50%;
-  --tone-neutral: 251 7% 62%;     --tone-neutral-soft: 260 23% 92%;   --tone-neutral-ink: 250 9% 31%;
+     accents. One family per meaning: a mark colour, a soft fill, and an ink
+     that clears WCAG AA on that fill. */
+  --tone-positive: 124 41% 55%;   --tone-positive-soft: 123 47% 91%;  --tone-positive-ink: 125 45% 30%;
+  --tone-negative: 6 100% 71%;    --tone-negative-soft: 9 100% 93%;   --tone-negative-ink: 9 68% 40%;
+  --tone-improve: 206 83% 65%;    --tone-improve-soft: 206 89% 93%;   --tone-improve-ink: 206 68% 36%;
+  --tone-risk: 41 100% 55%;       --tone-risk-soft: 43 100% 88%;      --tone-risk-ink: 36 100% 24%;
+  --tone-review: 249 80% 72%;     --tone-review-soft: 250 100% 95%;   --tone-review-ink: 248 48% 48%;
+  --tone-neutral: 251 7% 62%;     --tone-neutral-soft: 260 23% 92%;   --tone-neutral-ink: 250 9% 30%;
 
-  /* Cards sit on a warm page, so their shadow is warm and soft rather than the
-     flat grey hairline shadcn ships with. */
-  --shadow-card: 0 1px 2px rgb(43 42 51 / 0.06), 0 8px 24px -14px rgb(43 42 51 / 0.22);
+  --shadow-card: 0 1px 2px rgb(30 28 40 / 0.06), 0 6px 18px -12px rgb(30 28 40 / 0.18);
+  --shadow-lift: 0 1px 2px rgb(30 28 40 / 0.08), 0 18px 40px -18px rgb(30 28 40 / 0.35);
 }
 
 .dark {
-  --background: 249 12% 12%;
-  --foreground: 40 45% 94%;         /* warm off-white, not grey */
-  --card: 247 11% 16%;
-  --card-foreground: 40 45% 94%;
-  --popover: 247 11% 16%;
-  --popover-foreground: 40 45% 94%;
-  --primary: 177 50% 58%;           /* teal, lifted for the dark surface */
-  --primary-foreground: 249 12% 12%;
-  --secondary: 251 11% 20%;
-  --secondary-foreground: 40 45% 94%;
-  --muted: 251 11% 20%;
-  --muted-foreground: 255 14% 72%;
-  --accent: 42 53% 19%;             /* sunny, deep — hover wash */
-  --accent-foreground: 42 100% 68%;
-  --destructive: 7 100% 77%;
-  --border: 249 10% 25%;
-  --input: 249 10% 25%;
-  --ring: 177 50% 58%;
-  /* Slots 2 and 3 are deeper than the UI coral and teal: ShoutOut's dark coral
-     sits outside the mark lightness band and lands only ΔE 4.6 from its teal
-     under protanopia — indistinguishable on a two-series chart. */
-  --chart-1: 42 100% 68%;           /* sunny */
-  --chart-2: 9 75% 56%;             /* coral */
-  --chart-3: 177 60% 41%;           /* teal */
-  --chart-4: 205 86% 73%;           /* sky */
-  --chart-5: 248 100% 83%;          /* lilac */
-  --sidebar: 247 11% 16%;
-  --sidebar-foreground: 40 45% 94%;
-  --sidebar-primary: 177 50% 58%;
-  --sidebar-primary-foreground: 249 12% 12%;
-  --sidebar-accent: 251 11% 20%;
-  --sidebar-accent-foreground: 40 45% 94%;
-  --sidebar-border: 249 10% 25%;
-  --sidebar-ring: 177 50% 58%;
+  --background: 250 14% 10%;
+  --foreground: 40 30% 94%;
+  --card: 250 12% 14%;
+  --card-foreground: 40 30% 94%;
+  --popover: 250 12% 15%;
+  --popover-foreground: 40 30% 94%;
+  --primary: 177 50% 56%;
+  --primary-foreground: 250 25% 9%;
+  --secondary: 250 11% 19%;
+  --secondary-foreground: 40 30% 94%;
+  --muted: 250 11% 17%;
+  --muted-foreground: 250 12% 70%;
+  --accent: 250 11% 21%;
+  --accent-foreground: 40 30% 94%;
+  --destructive: 7 100% 74%;
+  --border: 250 10% 22%;
+  --input: 250 10% 30%;
+  --ring: 177 50% 56%;
+  --chart-1: 42 100% 68%;
+  --chart-2: 9 75% 56%;
+  --chart-3: 177 60% 41%;
+  --chart-4: 205 86% 73%;
+  --chart-5: 248 100% 83%;
 
-  /* On the dark surface the family colour is legible on its own deep fill, so
-     ink and colour are the same step. */
-  --tone-positive: 124 46% 66%;   --tone-positive-soft: 126 30% 18%;  --tone-positive-ink: 124 46% 66%;
-  --tone-negative: 7 100% 77%;    --tone-negative-soft: 6 37% 21%;    --tone-negative-ink: 7 100% 77%;
-  --tone-improve: 205 86% 73%;    --tone-improve-soft: 207 43% 20%;   --tone-improve-ink: 205 86% 73%;
-  --tone-risk: 42 100% 68%;       --tone-risk-soft: 42 53% 19%;       --tone-risk-ink: 42 100% 68%;
-  --tone-review: 248 100% 83%;    --tone-review-soft: 248 32% 24%;    --tone-review-ink: 248 100% 83%;
-  --tone-neutral: 255 14% 72%;    --tone-neutral-soft: 251 11% 20%;   --tone-neutral-ink: 255 14% 72%;
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -14px rgb(0 0 0 / 0.6);
+  --rail: 250 18% 6%;
+  --rail-foreground: 40 30% 94%;
+  --rail-muted: 250 10% 68%;
+  --rail-hover: 250 14% 13%;
+  --rail-border: 250 12% 15%;
+  --rail-active: 177 50% 56%;
+  --rail-active-foreground: 250 25% 9%;
+
+  --note: 250 12% 17%;
+  --vote: 42 100% 64%;
+
+  --tone-positive: 124 46% 66%;   --tone-positive-soft: 126 30% 17%;  --tone-positive-ink: 124 46% 70%;
+  --tone-negative: 7 100% 77%;    --tone-negative-soft: 6 37% 20%;    --tone-negative-ink: 7 100% 80%;
+  --tone-improve: 205 86% 73%;    --tone-improve-soft: 207 43% 19%;   --tone-improve-ink: 205 86% 76%;
+  --tone-risk: 42 100% 64%;       --tone-risk-soft: 42 53% 17%;       --tone-risk-ink: 42 100% 68%;
+  --tone-review: 248 100% 83%;    --tone-review-soft: 248 32% 22%;    --tone-review-ink: 248 100% 85%;
+  --tone-neutral: 255 14% 72%;    --tone-neutral-soft: 251 11% 19%;   --tone-neutral-ink: 255 14% 76%;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.35), 0 6px 18px -12px rgb(0 0 0 / 0.6);
+  --shadow-lift: 0 1px 2px rgb(0 0 0 / 0.4), 0 18px 40px -18px rgb(0 0 0 / 0.8);
 }
 
 @layer base {
@@ -158,6 +163,33 @@
 
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "ss01" on, "cv11" on;
+  }
+
+  /* One focus style everywhere: a visible ring that survives both themes. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
   }
 }
-/* In-app Help page (rendered from docs/USER_GUIDE.md via src/lib/markdown.ts) */
+
+/* Small caps label above a heading or a figure. */
+@utility eyebrow {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Motion explains change; it is never required to understand it. With reduced
+   motion requested, transitions and animations collapse to an instant. */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
