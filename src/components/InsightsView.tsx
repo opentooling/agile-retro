@@ -2,6 +2,7 @@ import type { TeamInsights } from '@/lib/analytics'
 import type { TeamTrends } from '@/lib/trends'
 import { SENTIMENT_LABEL, type Sentiment } from '@/lib/column-sentiment'
 import { InsightsTrends } from '@/components/InsightsTrends'
+import { CalendarClock, CircleCheckBig, MessagesSquare, Gauge, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /** A single figure, with the interpretation next to it rather than in a legend. */
@@ -14,7 +15,13 @@ function Metric({
   tone?: 'neutral' | 'good' | 'warn'
 }) {
   return (
-    <div className="rounded-lg border bg-card px-4 py-3">
+    <div
+      className="rounded-lg border bg-card px-4 py-3 shadow-[var(--shadow-card)]"
+      style={{
+        borderLeftWidth: 3,
+        borderLeftColor: `hsl(var(--tone-${tone === 'good' ? 'positive' : tone === 'warn' ? 'risk' : 'improve'}))`,
+      }}
+    >
       <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className={cn(
         'mt-0.5 text-2xl font-bold tabular-nums',
@@ -34,6 +41,21 @@ const SENTIMENT_BAR: Record<Sentiment, string> = {
   improve: 'bg-[hsl(var(--tone-improve))]',
   risk: 'bg-[hsl(var(--tone-risk))]',
   neutral: 'bg-[hsl(var(--tone-neutral))]',
+}
+
+/** A section's heading: a tone-coloured icon chip and the title. */
+function SectionHeading({ icon: Icon, tone, children }: { icon: LucideIcon; tone: string; children: React.ReactNode }) {
+  return (
+    <h2 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <span
+        className="grid h-6 w-6 place-items-center rounded-lg"
+        style={{ background: `hsl(var(--tone-${tone}-soft))`, color: `hsl(var(--tone-${tone}-ink))` }}
+      >
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+      {children}
+    </h2>
+  )
 }
 
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`)
@@ -64,7 +86,7 @@ export function InsightsView({ insights, trends }: { insights: TeamInsights; tre
           the window's, because an open sidebar takes 256px of the window. */}
       <div className="space-y-6 @min-[1648px]:grid @min-[1648px]:grid-cols-[3fr_4fr] @min-[1648px]:gap-x-6 @min-[1648px]:gap-y-6 @min-[1648px]:space-y-0">
       <section>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Rhythm</h2>
+        <SectionHeading icon={CalendarClock} tone="improve">Rhythm</SectionHeading>
         <div className="grid gap-2 sm:grid-cols-3">
           <Metric label="Retrospectives" value={String(insights.retroCount)} />
           <Metric
@@ -87,9 +109,7 @@ export function InsightsView({ insights, trends }: { insights: TeamInsights; tre
       </section>
 
       <section>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Follow-through
-        </h2>
+        <SectionHeading icon={CircleCheckBig} tone="positive">Follow-through</SectionHeading>
         <div className="grid gap-2 sm:grid-cols-4">
           <Metric
             label="Completed"
@@ -112,9 +132,7 @@ export function InsightsView({ insights, trends }: { insights: TeamInsights; tre
       </section>
 
       <section>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          What the team talks about
-        </h2>
+        <SectionHeading icon={MessagesSquare} tone="review">What the team talks about</SectionHeading>
         {insights.sentiment.length === 0 ? (
           <p className="text-sm text-muted-foreground">No cards yet.</p>
         ) : (
@@ -142,9 +160,7 @@ export function InsightsView({ insights, trends }: { insights: TeamInsights; tre
       </section>
 
       <section>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          How the sessions run
-        </h2>
+        <SectionHeading icon={Gauge} tone="risk">How the sessions run</SectionHeading>
         <div className="grid gap-2 sm:grid-cols-4">
           <Metric label="Cards per retro" value={one(e.avgItemsPerRetro)} note="Average" />
           <Metric

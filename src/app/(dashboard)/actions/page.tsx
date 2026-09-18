@@ -1,7 +1,7 @@
 import * as db from '@/lib/db'
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { CheckCircle, Circle, User as UserIcon, Calendar } from 'lucide-react'
+import { CheckCircle, Circle, User as UserIcon, Calendar, ListTodo } from 'lucide-react'
 import { auth } from '@/auth'
 import { JiraActionButton } from "@/components/JiraActionButton"
 import { reconcileActions } from '@/lib/jira-sync'
@@ -10,7 +10,8 @@ import { setActionCompleted } from '@/app/actions'
 import { TeamMark } from '@/components/TeamMark'
 
 import Link from 'next/link'
-import { PageShell, PageHeader } from '@/components/PageHeader'
+import { PageShell } from '@/components/PageHeader'
+import { PageHero } from '@/components/PageHero'
 import { Pager, pageFromParams } from '@/components/Pager'
 
 export default async function ActionsPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
@@ -54,8 +55,10 @@ export default async function ActionsPage({ searchParams }: { searchParams: Prom
 
   return (
     <PageShell width="wide">
-      <PageHeader
+      <PageHero
+        icon={ListTodo}
         title="Action items"
+        subtitle="What the team agreed to do — and whether it happened."
         action={
           <div className="flex gap-2">
             <Link href="/actions?status=open">

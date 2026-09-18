@@ -16,7 +16,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { TeamMark } from '@/components/TeamMark'
-import { PhaseBadge } from '@/components/PhaseBadge'
+import { PhaseBadge, PHASE_TONE } from '@/components/PhaseBadge'
+import { Identicon } from '@/components/visual/Identicon'
+import { EmptyState } from '@/components/visual/EmptyState'
+import { EmptyBoard } from '@/components/visual/Illustration'
 import { deleteRetrospective } from '@/app/actions'
 import { cn } from '@/lib/utils'
 
@@ -80,9 +83,11 @@ export function SessionList({
 
   if (sessions.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
-        {emptyMessage}
-      </div>
+      <EmptyState
+        illustration={<EmptyBoard className="h-24 w-36" />}
+        title={emptyMessage}
+        hint="Sessions you create or join appear here."
+      />
     )
   }
 
@@ -106,18 +111,24 @@ export function SessionList({
             // Metadata appears by priority as the row itself widens — team, then
             // retention (actionable: the board will be deleted), then creator,
             // then tags — so the title always keeps ~230px or more.
-            <li key={session.id} className="@container group relative break-inside-avoid border-b last:border-b-0">
+            <li
+              key={session.id}
+              className="@container group relative break-inside-avoid border-b last:border-b-0"
+              // A 3px rail in the phase's own colour: the state of a row reads
+              // down the left edge before any of its text does.
+              style={{ boxShadow: `inset 3px 0 0 hsl(var(--tone-${PHASE_TONE[session.status] ?? 'neutral'}))` }}
+            >
               <Link
                 href={`/retro/${session.id}`}
-                className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 transition-colors hover:bg-accent/60 @md:flex-nowrap"
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 pl-4 pr-3 transition-colors hover:bg-accent/50 @md:flex-nowrap"
               >
-                <PhaseBadge status={session.status} className="w-16 shrink-0" />
+                <PhaseBadge status={session.status} className="w-[5.5rem] shrink-0" />
 
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{session.title}</span>
 
                 {session.team && (
                   <span className="hidden shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground @2xl:flex">
-                    <TeamMark team={session.team} size={16} />
+                    <TeamMark team={session.team} size={20} />
                     <span className="max-w-[10rem] truncate">{session.team.name}</span>
                   </span>
                 )}
@@ -125,7 +136,13 @@ export function SessionList({
                 {session.tags.length > 0 && (
                   <span className="hidden shrink-0 gap-1 @6xl:flex">
                     {session.tags.slice(0, 2).map((tag) => (
-                      <Badge key={tag} variant="secondary" className="font-normal">{tag}</Badge>
+                      <Badge
+                        key={tag}
+                        variant="secondary"
+                        className="border-transparent bg-[hsl(var(--tone-review-soft))] font-normal text-[hsl(var(--tone-review-ink))]"
+                      >
+                        {tag}
+                      </Badge>
                     ))}
                     {session.tags.length > 2 && (
                       <span className="text-[11px] text-muted-foreground">+{session.tags.length - 2}</span>
@@ -146,8 +163,9 @@ export function SessionList({
                   </span>
                 )}
 
-                <span className="hidden w-28 shrink-0 truncate text-right text-xs text-muted-foreground @4xl:block">
-                  {session.creator}
+                <span className="hidden w-32 shrink-0 items-center justify-end gap-1.5 text-xs text-muted-foreground @4xl:flex">
+                  <Identicon name={session.creator} size={20} />
+                  <span className="truncate">{session.creator}</span>
                 </span>
                 <span className="w-24 shrink-0 text-right text-xs text-muted-foreground">
                   {formatDistanceToNow(new Date(session.createdAt), { addSuffix: true })}

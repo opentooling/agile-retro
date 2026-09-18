@@ -1,9 +1,9 @@
 import Link from 'next/link'
 import {
   Eye, EyeOff, ListTodo, Play, Star, Users, Clock, Trash2, SmilePlus,
-  Shield, ExternalLink, LayoutDashboard, Pencil, Building2, RefreshCw,
-} from 'lucide-react'
-import { PageShell, PageHeader } from '@/components/PageHeader'
+  Shield, ExternalLink, LayoutDashboard, Pencil, Building2, RefreshCw, HelpCircle } from 'lucide-react'
+import { PageShell } from '@/components/PageHeader'
+import { PageHero } from '@/components/PageHero'
 import { RETRO_TEMPLATES } from '@/lib/retro-templates'
 import { RETENTION_OPTIONS } from '@/lib/retention'
 import { branding } from '@/lib/branding'
@@ -54,8 +54,10 @@ export default function HelpPage() {
 
   return (
     <PageShell width="prose">
-      <PageHeader
+      <PageHero
+        icon={HelpCircle}
         title="Help"
+        subtitle={`How ${name} runs a retrospective.`}
         action={
           <Link href="/" className="text-sm font-medium text-primary hover:underline">
             Back to dashboard

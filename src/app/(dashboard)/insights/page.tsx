@@ -4,7 +4,9 @@ import { authUserFromSession, canViewBoard } from '@/lib/authz'
 import { buildInsights } from '@/lib/analytics'
 import { buildTrends } from '@/lib/trends'
 import { InsightsView } from '@/components/InsightsView'
-import { PageShell, PageHeader } from '@/components/PageHeader'
+import { PageShell } from '@/components/PageHeader'
+import { PageHero } from '@/components/PageHero'
+import { TrendingUp } from 'lucide-react'
 import { TeamPicker } from '@/components/TeamPicker'
 
 export default async function InsightsPage({
@@ -49,7 +51,11 @@ export default async function InsightsPage({
 
   return (
     <PageShell width="wide">
-      <PageHeader title="Insights" />
+      <PageHero
+        icon={TrendingUp}
+        title="Insights"
+        subtitle="How this team's retrospectives are going, and which way they're heading."
+      />
 
       {teams.length === 0 ? (
         <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">

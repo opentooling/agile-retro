@@ -1,3 +1,4 @@
+import { Archive, CheckSquare, MessagesSquare, PenLine, Vote, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /**
@@ -26,16 +27,36 @@ const PHASE_STYLE: Record<string, string> = {
   CLOSED: 'bg-[hsl(var(--tone-neutral-soft))] text-[hsl(var(--tone-neutral-ink))]',
 }
 
+/** An icon per phase, so the state reads before the word does. */
+const PHASE_ICON: Record<string, LucideIcon> = {
+  INPUT: PenLine,
+  VOTING: Vote,
+  REVIEW: MessagesSquare,
+  ACTIONS: CheckSquare,
+  CLOSED: Archive,
+}
+
 export function PhaseBadge({ status, className }: { status: string; className?: string }) {
+  const Icon = PHASE_ICON[status] ?? PHASE_ICON.CLOSED
   return (
     <span
       className={cn(
-        'inline-block rounded-full px-2 py-0.5 text-center text-xs font-semibold',
+        'inline-flex items-center justify-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
         PHASE_STYLE[status] ?? PHASE_STYLE.CLOSED,
         className
       )}
     >
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
       {PHASE_LABEL[status] ?? status}
     </span>
   )
+}
+
+/** The tone family a phase is drawn in — for rails and accents elsewhere. */
+export const PHASE_TONE: Record<string, string> = {
+  INPUT: 'improve',
+  VOTING: 'risk',
+  REVIEW: 'review',
+  ACTIONS: 'positive',
+  CLOSED: 'neutral',
 }

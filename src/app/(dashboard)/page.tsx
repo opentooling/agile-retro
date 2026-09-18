@@ -4,32 +4,9 @@ import { auth } from '@/auth'
 import { authUserFromSession, canAdministerBoard, boardScopeFor } from '@/lib/authz'
 import { CreateRetroDialog } from '@/components/CreateRetroDialog'
 import { SessionList, type SessionSummary } from '@/components/SessionList'
-import { PageShell, PageHeader } from '@/components/PageHeader'
-import { LayoutDashboard, ListTodo, Users } from 'lucide-react'
-
-/** One compact metric. Three of these replace three full-height cards. */
-function Stat({
-  href,
-  icon: Icon,
-  label,
-  value,
-}: {
-  href: string
-  icon: typeof LayoutDashboard
-  label: string
-  value: number
-}) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-3 rounded-lg border bg-card px-4 py-2.5 transition-colors hover:bg-accent/60"
-    >
-      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-      <span className="text-2xl font-bold tabular-nums leading-none">{value}</span>
-      <span className="text-sm text-muted-foreground">{label}</span>
-    </Link>
-  )
-}
+import { PageShell } from '@/components/PageHeader'
+import { PageHero, HeroStat } from '@/components/PageHero'
+import { LayoutDashboard, ListTodo, Users, Sparkles } from 'lucide-react'
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const params = await searchParams
@@ -81,13 +58,18 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ [
 
   return (
     <PageShell width="wide">
-      <PageHeader title="Dashboard" action={<CreateRetroDialog />} />
-
-      <div className="mb-5 grid gap-2 sm:grid-cols-3">
-        <Stat href="/history" icon={LayoutDashboard} label="retrospectives" value={totalRetros} />
-        <Stat href="/history?status=active" icon={Users} label="active now" value={activeCount} />
-        <Stat href="/actions" icon={ListTodo} label="open actions" value={openActions} />
-      </div>
+      <PageHero
+        icon={Sparkles}
+        title="Dashboard"
+        subtitle="What your teams are reflecting on right now."
+        action={<CreateRetroDialog />}
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          <HeroStat href="/history" icon={LayoutDashboard} tone="improve" label="retrospectives" value={totalRetros} />
+          <HeroStat href="/history?status=active" icon={Users} tone="positive" label="active now" value={activeCount} />
+          <HeroStat href="/actions" icon={ListTodo} tone="risk" label="open actions" value={openActions} />
+        </div>
+      </PageHero>
 
       <div className="mb-2 flex items-baseline justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">

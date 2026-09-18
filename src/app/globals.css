@@ -98,6 +98,10 @@
   --tone-risk: 41 100% 62%;       --tone-risk-soft: 43 100% 85%;      --tone-risk-ink: 40 100% 24%;
   --tone-review: 249 80% 75%;     --tone-review-soft: 250 100% 95%;   --tone-review-ink: 248 48% 50%;
   --tone-neutral: 251 7% 62%;     --tone-neutral-soft: 260 23% 92%;   --tone-neutral-ink: 250 9% 31%;
+
+  /* Cards sit on a warm page, so their shadow is warm and soft rather than the
+     flat grey hairline shadcn ships with. */
+  --shadow-card: 0 1px 2px rgb(43 42 51 / 0.06), 0 8px 24px -14px rgb(43 42 51 / 0.22);
 }
 
 .dark {
@@ -144,6 +148,7 @@
   --tone-risk: 42 100% 68%;       --tone-risk-soft: 42 53% 19%;       --tone-risk-ink: 42 100% 68%;
   --tone-review: 248 100% 83%;    --tone-review-soft: 248 32% 24%;    --tone-review-ink: 248 100% 83%;
   --tone-neutral: 255 14% 72%;    --tone-neutral-soft: 251 11% 20%;   --tone-neutral-ink: 255 14% 72%;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -14px rgb(0 0 0 / 0.6);
 }
 
 @layer base {

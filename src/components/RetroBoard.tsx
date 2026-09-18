@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users, Calendar, User as UserIcon, ExternalLink, Pencil, Check, X, SmilePlus, EyeOff, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Star, ThumbsUp, Send, LayoutDashboard, Play, Eye, ListTodo, Archive, Download, Users, Calendar, User as UserIcon, ExternalLink, Pencil, Check, X, SmilePlus, EyeOff, ChevronLeft, ChevronRight, ThumbsDown, Lightbulb, AlertTriangle, StickyNote } from 'lucide-react'
 import { cn } from "@/lib/utils"
 import { columnSentiment } from "@/lib/column-sentiment"
 import { MentionInput, MentionText } from "@/components/Mentions"
@@ -118,6 +118,19 @@ const ACCENT_PALETTE = {
     border: 'border-l-[hsl(var(--tone-neutral))]',
   },
 } as const
+
+/** The icon a column wears: the sentiment, drawn. */
+const SENTIMENT_ICON = {
+  positive: ThumbsUp,
+  negative: ThumbsDown,
+  improve: Lightbulb,
+  risk: AlertTriangle,
+  neutral: StickyNote,
+} as const
+
+export function columnIcon(type: string) {
+  return SENTIMENT_ICON[columnSentiment(type)]
+}
 
 export function columnAccent(type: string): { badge: string; border: string } {
   // Sentiment lives in lib/column-sentiment.ts so analytics buckets a column
@@ -1549,12 +1562,26 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
             )}>
             {retro.columns.map((column) => (
                 <Card key={column.id} className="h-full flex flex-col gap-0 py-0 bg-slate-50/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 shadow-none">
-                <CardHeader className="py-2 px-3 [.border-b]:pb-2 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-t-lg">
-                    <CardTitle className={cn(
-                        "text-xs font-bold uppercase tracking-wider py-0.5 px-2.5 rounded-full w-fit border",
-                        columnAccent(column.type).badge
-                    )}>
-                        {column.title}
+                <CardHeader
+                    className="rounded-t-lg border-b px-3 py-2 [.border-b]:pb-2"
+                    style={{ background: `hsl(var(--tone-${columnSentiment(column.type)}-soft))` }}
+                >
+                    <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider">
+                        {(() => {
+                            const Icon = columnIcon(column.type)
+                            return (
+                                <span
+                                    className="grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-card/70"
+                                    style={{ color: `hsl(var(--tone-${columnSentiment(column.type)}-ink))` }}
+                                >
+                                    <Icon className="h-3.5 w-3.5" />
+                                </span>
+                            )
+                        })()}
+                        <span style={{ color: `hsl(var(--tone-${columnSentiment(column.type)}-ink))` }}>{column.title}</span>
+                        <span className="ml-auto rounded-full bg-card/70 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-muted-foreground">
+                            {column.items.length}
+                        </span>
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="flex-1 overflow-y-auto space-y-2 p-2.5">

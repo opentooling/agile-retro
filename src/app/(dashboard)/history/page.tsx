@@ -4,7 +4,9 @@ import Link from 'next/link'
 import { auth } from '@/auth'
 import { authUserFromSession, canAdministerBoard } from '@/lib/authz'
 import { SessionList, type SessionSummary } from '@/components/SessionList'
-import { PageShell, PageHeader } from '@/components/PageHeader'
+import { PageShell } from '@/components/PageHeader'
+import { PageHero } from '@/components/PageHero'
+import { History as HistoryIcon } from 'lucide-react'
 import { Pager, pageFromParams } from '@/components/Pager'
 
 export default async function HistoryPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
@@ -54,8 +56,10 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
 
   return (
     <PageShell width="wide">
-      <PageHeader
+      <PageHero
+        icon={HistoryIcon}
         title="Retrospective history"
+        subtitle="Every session your teams have run."
         action={
           <div className="flex gap-2">
             <Link href="/history">

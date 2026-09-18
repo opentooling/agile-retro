@@ -45,7 +45,12 @@ function NavItem({ href, icon: Icon, label, isActive, isCollapsed }: NavItemProp
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant={isActive ? 'secondary' : 'ghost'} size="icon" className="w-full" asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn('w-full', isActive && 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))] hover:text-[hsl(var(--primary-foreground))]')}
+              asChild
+            >
               <Link href={href}>
                 <Icon className="w-5 h-5" />
                 <span className="sr-only">{label}</span>
@@ -61,7 +66,14 @@ function NavItem({ href, icon: Icon, label, isActive, isCollapsed }: NavItemProp
   }
 
   return (
-    <Button variant={isActive ? 'secondary' : 'ghost'} className="justify-start w-full" asChild>
+    <Button
+      variant="ghost"
+      className={cn(
+        'w-full justify-start gap-2.5 font-medium',
+        isActive && 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-sm hover:bg-[hsl(var(--primary))] hover:text-[hsl(var(--primary-foreground))]',
+      )}
+      asChild
+    >
       <Link href={href}>
         <Icon className="w-5 h-5 mr-2" />
         {label}
@@ -164,8 +176,10 @@ export function Sidebar({ user, keycloakIssuer, keycloakClientId, appName }: Sid
     )}>
       <div className={cn("flex mb-4", isCollapsed ? "justify-center" : "items-center justify-between")}>
         {!isCollapsed && (
-          <div className="flex items-center gap-2 min-w-0">
-            <Coins className="w-6 h-6 text-primary shrink-0" />
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-[hsl(var(--primary))] to-[hsl(var(--tone-improve))] text-[hsl(var(--primary-foreground))] shadow-sm">
+              <Coins className="h-5 w-5" />
+            </span>
             <span className="text-lg font-bold tracking-tight truncate">{appName}</span>
           </div>
         )}

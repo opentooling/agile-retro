@@ -11,7 +11,8 @@ import { TeamMark } from '@/components/TeamMark'
 import { CreateRetroDialog } from "@/components/CreateRetroDialog"
 import { useSearchParams } from 'next/navigation'
 import { GroupsField, useKeycloakGroups } from "@/components/GroupsField"
-import { PageShell, PageHeader } from "@/components/PageHeader"
+import { PageShell } from "@/components/PageHeader"
+import { PageHero } from "@/components/PageHero"
 import {
     Dialog,
     DialogContent,
@@ -95,8 +96,10 @@ export default function TeamsPage() {
 
     return (
         <PageShell width="wide">
-            <PageHeader
+            <PageHero
+                icon={Users}
                 title="Teams"
+                subtitle="Who can open which boards. Access comes from your identity provider's groups."
                 action={
                     <Dialog open={createOpen} onOpenChange={setCreateOpen}>
                         <DialogTrigger asChild>

@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { LogIn, KeyRound, Coins } from "lucide-react"
+import { LogIn, KeyRound, Coins, Sparkles } from "lucide-react"
+import { BlobField, TeamScene } from "@/components/visual/Illustration"
 import { signIn, providerMap } from "@/auth"
 import { branding } from "@/lib/branding"
 
@@ -47,39 +48,53 @@ function getProviderIcon(id: string) {
 export default function LoginPage() {
   const { name, tagline } = branding()
   return (
-    <div className="flex items-center justify-center min-h-screen bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-2">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-              <Coins className="h-7 w-7 text-primary" />
+    <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
+      {/* Left: the pitch, on colour. Hidden on small screens, where the card
+          is the whole page. */}
+      <aside className="relative hidden overflow-hidden bg-gradient-to-br from-[hsl(var(--tone-improve-soft))] via-[hsl(var(--accent))] to-[hsl(var(--tone-review-soft))] p-12 lg:flex lg:flex-col lg:justify-center">
+        <BlobField stretch={false} className="pointer-events-none absolute inset-0 h-full w-full opacity-50" />
+        <div className="relative max-w-md">
+          <span className="inline-flex items-center gap-2 rounded-full bg-card/70 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground backdrop-blur">
+            <Sparkles className="h-3.5 w-3.5" /> Team retrospectives
+          </span>
+          <h2 className="mt-5 text-4xl font-bold leading-tight tracking-tight text-foreground">
+            Look back together,<br />then actually follow through.
+          </h2>
+          <p className="mt-4 text-base text-muted-foreground">{tagline}</p>
+          <TeamScene className="mt-10 w-full max-w-sm" />
+        </div>
+      </aside>
+
+      {/* Right: the sign-in itself. */}
+      <main className="flex items-center justify-center bg-background p-6">
+        <Card className="w-full max-w-md border-none bg-transparent shadow-none">
+          <CardHeader className="text-center">
+            <div className="flex justify-center mb-3">
+              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-md">
+                <Coins className="h-7 w-7" />
+              </div>
             </div>
-          </div>
-          <CardTitle className="text-2xl font-bold">Welcome to {name}</CardTitle>
-          <CardDescription>{tagline}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {Object.values(providerMap).map((provider) => (
-            <form
-              key={provider.id}
-              action={async () => {
-                "use server"
-                await signIn(provider.id, { redirectTo: "/" })
-              }}
-            >
-              <Button 
-                className="w-full gap-2" 
-                size="lg"
-                type="submit"
-                variant="outline"
+            <CardTitle className="text-2xl font-bold">Welcome to {name}</CardTitle>
+            <CardDescription>Sign in to create or join a retrospective.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {Object.values(providerMap).map((provider) => (
+              <form
+                key={provider.id}
+                action={async () => {
+                  "use server"
+                  await signIn(provider.id, { redirectTo: "/" })
+                }}
               >
-                {getProviderIcon(provider.id)}
-                Sign in with {provider.name}
-              </Button>
-            </form>
-          ))}
-        </CardContent>
-      </Card>
+                <Button className="w-full gap-2 shadow-sm" size="lg" type="submit" variant="outline">
+                  {getProviderIcon(provider.id)}
+                  Sign in with {provider.name}
+                </Button>
+              </form>
+            ))}
+          </CardContent>
+        </Card>
+      </main>
     </div>
   )
 }

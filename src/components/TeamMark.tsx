@@ -1,4 +1,4 @@
-import { Users } from "lucide-react"
+import { Identicon } from "@/components/visual/Identicon"
 
 /**
  * Small team badge: shows the team's uploaded logo, or a sensible default icon
@@ -26,12 +26,7 @@ export function TeamMark({
       />
     )
   }
-  return (
-    <span
-      style={dim}
-      className={`inline-flex shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary ${className}`}
-    >
-      <Users style={{ width: `${Math.round(size * 0.58)}px`, height: `${Math.round(size * 0.58)}px` }} />
-    </span>
-  )
+  // No logo uploaded: draw one from the team's name rather than showing the
+  // same grey glyph for every team.
+  return <Identicon name={team.name} size={size} className={className} />
 }

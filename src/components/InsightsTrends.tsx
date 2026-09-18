@@ -1,5 +1,6 @@
 import type { TeamTrends } from '@/lib/trends'
 import { TrendChart, type TrendDatum } from '@/components/TrendChart'
+import { TrendingUp } from 'lucide-react'
 
 // Formatted on the server in one locale and zone, so the tooltip, the table
 // and the axis all agree with each other and with the UTC month buckets.
@@ -37,7 +38,15 @@ export function InsightsTrends({ trends }: { trends: TeamTrends }) {
 
   return (
     <section>
-      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Over time</h2>
+      <h2 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <span
+          className="grid h-6 w-6 place-items-center rounded-lg"
+          style={{ background: 'hsl(var(--tone-negative-soft))', color: 'hsl(var(--tone-negative-ink))' }}
+        >
+          <TrendingUp className="h-3.5 w-3.5" />
+        </span>
+        Over time
+      </h2>
       {/* Charts get ~380px or more each: 2 across from 768px, 3 from 1200px of the view's own width. */}
       <div className="grid gap-3 @3xl:grid-cols-2 @min-[75rem]:grid-cols-3">
         <TrendChart
