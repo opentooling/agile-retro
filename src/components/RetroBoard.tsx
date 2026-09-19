@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { io, Socket } from 'socket.io-client'
 import Link from 'next/link'
 import { Button } from "@/components/ui/button"
@@ -281,6 +281,10 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
     setIsWarningDismissed(false)
   }, [retro.status, phaseDeadline])
 
+  // Who to join the board as, readable from the socket's connect handler, which
+  // is set up once and would otherwise only ever see the first render's values.
+  const joinAs = useRef<{ userId: string; username: string } | null>(null)
+
   useEffect(() => {
     // Identity: when authenticated, use the server-side viewer id so votes and
     // reactions (now keyed by the authenticated user) line up with the UI.
@@ -314,6 +318,20 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
         socketInstance.emit('join-retro', { retroId: retro.id, userId: storedUserId, username })
     }
 
+    // Join on every connection, not just the first. Socket.IO reconnects on its
+    // own after a dropped connection — a laptop lid, a proxy timeout, a
+    // redeploy — but the server sees a brand-new socket outside the board's
+    // room. Actions still reached the server, so the phase moved for everyone
+    // else, while this page never heard back: "Start voting" appeared to do
+    // nothing, and it was always the long-open, gone-into-overtime board that
+    // had lived through a reconnect. Rejoining also brings the page's board up
+    // to date (the server sends current state on join).
+    socketInstance.on('connect', () => {
+      if (joinAs.current) {
+        socketInstance.emit('join-retro', { retroId: retro.id, ...joinAs.current })
+      }
+    })
+
     socketInstance.on('retro-updated', (updatedRetro: RetroData) => {
       setRetro(updatedRetro)
     })
@@ -344,10 +362,11 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
 
   // Re-emit join when isJoined becomes true
   useEffect(() => {
+      joinAs.current = isJoined && username ? { userId, username } : null
       if (isJoined && socket && username) {
           socket.emit('join-retro', { retroId: retro.id, userId, username })
       }
-  }, [isJoined, socket, username])
+  }, [isJoined, socket, username, userId, retro.id])
 
   // Timer update effect
   const [now, setNow] = useState<number | null>(null)

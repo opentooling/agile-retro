@@ -317,6 +317,9 @@ app.prepare().then(() => {
             try {
                 // Phase changes are a management action.
                 if (!(await requireManage(retroId))) return;
+                // Only phases the app knows. Anything else left the board in a
+                // state no screen could render.
+                if (!["INPUT", "VOTING", "REVIEW", "ACTIONS", "CLOSED"].includes(status)) return;
 
                 const updatedRetro = await db.updateRetroStatus(retroId, status, new Date());
 
