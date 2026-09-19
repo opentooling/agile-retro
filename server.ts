@@ -9,12 +9,15 @@ import * as db from "./src/lib/db";
 import { redactRetroFull, applyBlindInput } from "./src/lib/sanitize";
 import { pushActionDoneState } from "./src/lib/jira-sync";
 import { purgeExpiredRetros } from "./src/lib/purge";
+import { placeBefore } from "./src/lib/board-order";
 import {
     authUserFromToken,
     canViewBoard,
     canContributeToBoard,
     canManageBoard,
     canEditItem,
+    canRearrangeItem,
+    canChangeActionItems,
     type AuthUser,
     type RetroRef,
 } from "./src/lib/authz";
@@ -383,38 +386,125 @@ app.prepare().then(() => {
             }
         });
 
-        socket.on("move-item", async ({ retroId, itemId, targetColumnId, newIndex }) => {
+        /**
+         * Load a board and one of its cards, confirming the card is really on
+         * that board. Every handler that takes an item id checks this: the
+         * access check covers the board the client *named*, so without it,
+         * access to any board — every open board counts — reached any card.
+         */
+        const loadItemOnBoard = async (retroId: string, itemId: string) => {
+            const retro = await db.getRetroFull(retroId);
+            if (!retro) return null;
+            const column = retro.columns.find((c) => c.items.some((i) => i.id === itemId));
+            if (!column) return null;
+            const item = column.items.find((i) => i.id === itemId)!;
+            const ref: RetroRef = { teamId: retro.teamId, creator: retro.creator, team: retro.team, status: retro.status };
+            return { retro, column, item, ref };
+        };
+
+        /**
+         * Move a card within its column or into another one.
+         *
+         * The position is "before this card" rather than an index: with blind
+         * input a participant sees only their own cards, so an index they
+         * computed refers to a column they cannot see. Previously this handler
+         * trusted the item id, the target column and the index as given, let
+         * any contributor move anyone's card, and ran in every phase.
+         */
+        socket.on("move-item", async ({ retroId, itemId, targetColumnId, beforeItemId }) => {
             try {
-                if (!(await requireContribute(retroId))) return;
-
-                // 1. Get the item to verify it exists and get its current column
-                const itemToMove = await db.getItem(itemId);
-                if (!itemToMove) return;
-
-                // 2. Update the item's column immediately (if changed)
-                if (itemToMove.columnId !== targetColumnId) {
-                    await db.updateItemColumn(itemId, targetColumnId);
+                const found = await loadItemOnBoard(retroId, itemId);
+                if (!found) return;
+                const { retro, item, ref } = found;
+                const target = retro.columns.find((c) => c.id === targetColumnId);
+                if (!target) return; // a column on some other board
+                if (!canRearrangeItem(user, ref, item)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
                 }
 
-                // 3. Reorder items in the target column
-                // Fetch all items in the target column (including the moved one)
-                const itemsInColumn = await db.listItemsInColumn(targetColumnId);
+                if (item.columnId !== target.id) {
+                    await db.updateItemColumn(itemId, target.id);
+                }
+                const order = placeBefore(
+                    target.items.map((i) => i.id),
+                    itemId,
+                    typeof beforeItemId === "string" ? beforeItemId : null,
+                );
+                await db.reorderItems(order);
 
-                // Remove the moved item from the array (if it's there - it might be if we just updated columnId)
-                const otherItems = itemsInColumn.filter((i) => i.id !== itemId);
-
-                // Insert at new index
-                // Clamp index to valid range
-                const insertIndex = Math.max(0, Math.min(newIndex, otherItems.length));
-                otherItems.splice(insertIndex, 0, { ...itemToMove, columnId: targetColumnId });
-
-                // Update order for all items in the column, atomically.
-                await db.reorderItems(otherItems.map((item) => item.id));
-
-                const updatedRetro = await db.getRetroFull(retroId);
-                await broadcastRetro(io, retroId, updatedRetro);
+                await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
             } catch (error) {
                 console.error("Error moving item:", error);
+            }
+        });
+
+        /** Delete a card while cards are still being written. */
+        socket.on("delete-item", async ({ retroId, itemId }) => {
+            try {
+                const found = await loadItemOnBoard(retroId, itemId);
+                if (!found) return;
+                if (!canRearrangeItem(user, found.ref, found.item)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
+                await db.deleteItem(itemId);
+                await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
+            } catch (error) {
+                console.error("Error deleting item:", error);
+            }
+        });
+
+        /** Load an action and confirm it belongs to the board named. */
+        const loadActionOnBoard = async (retroId: string, actionId: string) => {
+            const ref = await loadRetroRef(retroId);
+            if (!ref) return null;
+            const action = await db.getActionItem(actionId);
+            if (!action || action.retrospectiveId !== retroId) return null;
+            return { ref, action };
+        };
+
+        /** Rewrite an action's text, assignee or due date during the Actions phase. */
+        socket.on("update-action-item", async ({ retroId, actionId, content, assignee, dueDate }) => {
+            try {
+                const found = await loadActionOnBoard(retroId, actionId);
+                if (!found) return;
+                if (!canChangeActionItems(user, found.ref)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
+                const text = String(content ?? "").trim();
+                if (!text) return;
+                const due = dueDate ? new Date(dueDate) : null;
+                await db.updateActionItem(actionId, {
+                    content: text,
+                    assignee: assignee && String(assignee).trim() ? String(assignee).trim() : null,
+                    dueDate: due && !Number.isNaN(due.getTime()) ? due : null,
+                });
+                await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
+            } catch (error) {
+                console.error("Error updating action item:", error);
+            }
+        });
+
+        /**
+         * Delete an action during the Actions phase. A linked Jira issue is left
+         * alone: the app created it, but it may have gathered history of its
+         * own, and deleting work in someone else's tracker is not this button's
+         * job.
+         */
+        socket.on("delete-action-item", async ({ retroId, actionId }) => {
+            try {
+                const found = await loadActionOnBoard(retroId, actionId);
+                if (!found) return;
+                if (!canChangeActionItems(user, found.ref)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
+                await db.deleteActionItem(actionId);
+                await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
+            } catch (error) {
+                console.error("Error deleting action item:", error);
             }
         });
 

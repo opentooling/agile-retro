@@ -1,14 +1,11 @@
 'use client'
 
 import Link from "next/link"
-import { usePathname, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
-import { useSession, signIn, signOut } from "next-auth/react"
+import { useSession, signOut } from "next-auth/react"
 import { useTheme } from "next-themes"
-import {
-  Home, History, LogOut, LogIn, PanelLeftClose, PanelLeftOpen, Users, CheckSquare,
-  HelpCircle, TrendingUp, Sun, Moon, Monitor, MoreHorizontal, type LucideIcon,
-} from "lucide-react"
+import { Home, History, LogOut, LogIn, PanelLeftClose, PanelLeftOpen, Users, CheckSquare, HelpCircle, TrendingUp, Sun, Moon, Monitor, MoreHorizontal, type LucideIcon, UserRound } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LogoMark } from "@/components/visual/Logo"
 import { Identicon } from "@/components/visual/Identicon"
@@ -65,6 +62,7 @@ const NAV: NavEntry[] = [
  */
 export function Sidebar({ user, keycloakIssuer, keycloakClientId, appName }: SidebarProps) {
   const pathname = usePathname()
+  const router = useRouter()
   const searchParams = useSearchParams()
   const { data: session } = useSession()
   // On a board the rail is pure overhead: start collapsed there, so the stage
@@ -147,10 +145,19 @@ export function Sidebar({ user, keycloakIssuer, keycloakClientId, appName }: Sid
           </nav>
 
           <div className={cn("flex flex-col gap-1 border-t border-rail-border py-3", isCollapsed ? "items-center px-2" : "px-3")}>
+            {/* Who you are, the theme, and signing out — each its own visible
+                control. They used to share one menu behind your name, with
+                nothing to say it was a menu, and people could not find them. */}
             {user ? (
-              <UserMenu user={user} collapsed={isCollapsed} onSignOut={handleSignOut} />
+              <>
+                <ProfileLink user={user} collapsed={isCollapsed} active={pathname === '/profile'} />
+                <ThemeRailButton collapsed={isCollapsed} />
+                <RailButton icon={LogOut} label="Sign out" collapsed={isCollapsed} onClick={handleSignOut} />
+              </>
             ) : (
-              <RailButton icon={LogIn} label="Sign in" collapsed={isCollapsed} onClick={() => signIn("google")} />
+              // To the sign-in page, which lists whichever providers are
+              // configured — not straight to one provider, which may not exist.
+              <RailButton icon={LogIn} label="Sign in" collapsed={isCollapsed} onClick={() => router.push("/login")} />
             )}
             <RailButton
               icon={isCollapsed ? PanelLeftOpen : PanelLeftClose}
@@ -193,7 +200,7 @@ export function Sidebar({ user, keycloakIssuer, keycloakClientId, appName }: Sid
             {user ? (
               <UserMenu user={user} collapsed compact onSignOut={handleSignOut} />
             ) : (
-              <button type="button" onClick={() => signIn("google")} className="flex flex-col items-center gap-1 text-[11px] font-medium text-rail-muted">
+              <button type="button" onClick={() => router.push("/login")} className="flex flex-col items-center gap-1 text-[11px] font-medium text-rail-muted">
                 <LogIn className="h-5 w-5" aria-hidden /> Sign in
               </button>
             )}
@@ -258,7 +265,59 @@ function RailButton({
   )
 }
 
-/** Who you are, the theme, and signing out — one menu instead of three controls. */
+/** Your name and face, linking to your profile. */
+function ProfileLink({ user, collapsed, active }: { user: NonNullable<SidebarProps['user']>; collapsed: boolean; active: boolean }) {
+  const name = user.name || 'Guest'
+  const link = (
+    <Link
+      href="/profile"
+      aria-current={active ? 'page' : undefined}
+      aria-label={collapsed ? `Your profile — ${name}` : undefined}
+      className={cn(
+        "flex items-center gap-2.5 rounded-lg transition-colors focus-visible:outline-rail-active",
+        collapsed ? "h-10 w-10 justify-center" : "w-full px-2 py-1.5",
+        active ? "bg-rail-active text-rail-active-foreground" : "hover:bg-rail-hover",
+      )}
+    >
+      <Identicon name={name} size={collapsed ? 30 : 32} />
+      {!collapsed && (
+        <span className="flex min-w-0 flex-col text-left">
+          <span className={cn("truncate text-sm font-medium", active ? "" : "text-rail-foreground")}>{name}</span>
+          <span className={cn("truncate text-xs", active ? "opacity-80" : "text-rail-muted")}>View your profile</span>
+        </span>
+      )}
+    </Link>
+  )
+  if (!collapsed) return link
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{link}</TooltipTrigger>
+      <TooltipContent side="right">Your profile</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/**
+ * Light / dark, one press. The label says what pressing it will do. "System"
+ * stays available in the phone menu; on the rail a two-way switch is what
+ * people reach for.
+ */
+function ThemeRailButton({ collapsed }: { collapsed: boolean }) {
+  const { resolvedTheme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  const dark = mounted && resolvedTheme === 'dark'
+  return (
+    <RailButton
+      icon={dark ? Sun : Moon}
+      label={!mounted ? 'Theme' : dark ? 'Light mode' : 'Dark mode'}
+      collapsed={collapsed}
+      onClick={() => setTheme(dark ? 'light' : 'dark')}
+    />
+  )
+}
+
+/** The phone tab bar's "More": profile, theme, help and signing out. */
 function UserMenu({
   user, collapsed, compact, onSignOut,
 }: {
@@ -319,6 +378,9 @@ function UserMenu({
           <DropdownMenuRadioItem value="system"><Monitor className="h-4 w-4" /> System</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link href="/profile"><UserRound className="h-4 w-4" /> Your profile</Link>
+        </DropdownMenuItem>
         {compact && (
           <DropdownMenuItem asChild>
             <Link href="/help"><HelpCircle className="h-4 w-4" /> Help</Link>

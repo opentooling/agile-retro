@@ -397,3 +397,28 @@ export function boardScopeFor(
       .map((team) => team.id),
   };
 }
+
+/**
+ * May the user delete a card, move it to another column, or change its place
+ * in its column?
+ *
+ * Only while cards are being written. Once voting starts, a card's column and
+ * position are part of what people are voting on — moving or deleting one then
+ * would silently rearrange votes already cast. The same people who may edit a
+ * card (its author, the facilitator, a team-admin, an admin) may rearrange it.
+ */
+export function canRearrangeItem(user: AuthUser | null, retro: RetroRef, item: ItemRef): boolean {
+  return retro.status === "INPUT" && canEditItem(user, retro, item);
+}
+
+/**
+ * May the user edit or delete action items on this board?
+ *
+ * During the Actions phase, the same people who may add one. Action items carry
+ * no author, and drafting the list is a group activity in the meeting — it is
+ * the facilitator's job to close the phase, not to gatekeep each line. After
+ * the phase the list is the record; ticking items off stays possible elsewhere.
+ */
+export function canChangeActionItems(user: AuthUser | null, retro: RetroRef): boolean {
+  return retro.status === "ACTIONS" && canContributeToBoard(user, retro);
+}

@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Play, Eye, ListTodo, Archive, Download, ArrowLeft, Check, X, Pencil, Send, EyeOff,
-  Globe, Star, Type, Users, ArrowRight, ShieldAlert,
+  Globe, Star, Type, Users, ArrowRight, ShieldAlert, GripVertical, MoreHorizontal,
+  ArrowUp, ArrowDown, CornerDownRight, Trash2,
 } from 'lucide-react'
 import { cn } from "@/lib/utils"
 import { MentionInput, MentionText } from "@/components/Mentions"
@@ -32,16 +33,24 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  useDroppable,
   DragEndEvent
 } from '@dnd-kit/core';
 import {
-  arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
   useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
+import { placeBefore, neighbourFor } from '@/lib/board-order'
 
 // Re-exported: these moved into ./board/parts, and are imported from here by
 // tests and callers.
@@ -84,11 +93,23 @@ const NEXT_STEP: Record<string, { to: string; label: string; icon: typeof Play }
   ACTIONS: { to: 'CLOSED', label: 'Close retro', icon: Archive },
 }
 
-function SortableItem({ id, children, disabled }: { id: string, children: React.ReactNode, disabled?: boolean }) {
+type DragHandle = { ref: (el: HTMLElement | null) => void; props: Record<string, unknown> }
+
+/**
+ * A card that can be dragged — by its handle only.
+ *
+ * The whole card used to be the drag surface, with nothing to say so: you
+ * could not select its text, and nobody could tell it moved at all. The handle
+ * is visible, and it is also where keyboard dragging lives (Space to pick up,
+ * arrows to move, Space to drop). The card menu offers the same moves without
+ * dragging, for touch screens and anyone who would rather not.
+ */
+function SortableItem({ id, children, disabled }: { id: string, disabled?: boolean, children: (handle: DragHandle | null) => React.ReactNode }) {
   const {
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging
@@ -98,11 +119,31 @@ function SortableItem({ id, children, disabled }: { id: string, children: React.
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-    touchAction: 'none' // Prevent scrolling on mobile while dragging
+    position: 'relative' as const,
+    zIndex: isDragging ? 10 : undefined,
   };
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className="touch-none rounded-xl">
+    <div ref={setNodeRef} style={style} className="rounded-xl">
+      {children(disabled ? null : { ref: setActivatorNodeRef, props: { ...attributes, ...listeners } })}
+    </div>
+  );
+}
+
+/**
+ * A lane's card list as a drop target. Without it a card could only land by
+ * being dropped on another card, so an empty column could never receive one.
+ */
+function LaneDropZone({ id, children, enabled }: { id: string, children: React.ReactNode, enabled: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({ id, disabled: !enabled });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'min-h-16 space-y-2 rounded-xl transition-colors',
+        isOver && 'bg-card/50 outline-dashed outline-2 outline-offset-2 outline-[hsl(var(--primary)/0.5)]',
+      )}
+    >
       {children}
     </div>
   );
@@ -417,83 +458,55 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
     window.open(`/api/retro/${retro.id}/export`, '_blank')
   }
 
+  /**
+   * Move a card, optimistically, then tell the server. The position is "before
+   * this card" (or the end) — see lib/board-order for why not an index.
+   */
+  const moveItem = (itemId: string, targetColumnId: string, beforeItemId: string | null) => {
+    if (!socket) return
+    setRetro((prev) => {
+      const item = prev.columns.flatMap((c) => c.items).find((i) => i.id === itemId)
+      if (!item) return prev
+      const columns = prev.columns.map((c) => ({ ...c, items: c.items.filter((i) => i.id !== itemId) }))
+      const target = columns.find((c) => c.id === targetColumnId)
+      if (!target) return prev
+      const byId = new Map([...target.items, item].map((i) => [i.id, i]))
+      target.items = placeBefore(target.items.map((i) => i.id), itemId, beforeItemId).map((id) => byId.get(id)!)
+      return { ...prev, columns }
+    })
+    socket.emit('move-item', { retroId: retro.id, itemId, targetColumnId, beforeItemId })
+  }
+
   const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
+    const { active, over } = event
+    if (!over) return
+    const activeId = String(active.id)
+    const overId = String(over.id)
+    if (activeId === overId) return
 
-    if (!over || !socket) return;
+    const overColumn = retro.columns.find((c) => c.id === overId)
+    const dest = overColumn ?? retro.columns.find((c) => c.items.some((i) => i.id === overId))
+    if (!dest) return
 
-    const activeId = active.id as string;
-    const overId = over.id as string;
-
-    // Find source and destination columns
-    let sourceColumnId = '';
-    let destColumnId = '';
-    let activeItem: any = null;
-
-    retro.columns.forEach(col => {
-        const item = col.items.find(i => i.id === activeId);
-        if (item) {
-            sourceColumnId = col.id;
-            activeItem = item;
-        }
-    });
-
-    // Check if over is a column or an item
-    const overColumn = retro.columns.find(col => col.id === overId);
-    if (overColumn) {
-        destColumnId = overColumn.id;
-    } else {
-        // Over is likely an item, find its column
-        retro.columns.forEach(col => {
-            if (col.items.find(i => i.id === overId)) {
-                destColumnId = col.id;
-            }
-        });
+    let beforeItemId: string | null = null
+    if (!overColumn) {
+      const ids = dest.items.map((i) => i.id)
+      const overIndex = ids.indexOf(overId)
+      const activeIndex = ids.indexOf(activeId)
+      // Dragging down within a column settles after the card you let go on —
+      // that is what the sortable preview shows. Otherwise, before it.
+      beforeItemId = activeIndex !== -1 && activeIndex < overIndex ? (ids[overIndex + 1] ?? null) : overId
     }
+    moveItem(activeId, dest.id, beforeItemId)
+  }
 
-    if (!sourceColumnId || !destColumnId) return;
-
-    const sourceCol = retro.columns.find(c => c.id === sourceColumnId);
-    const destCol = retro.columns.find(c => c.id === destColumnId);
-
-    if (!sourceCol || !destCol || !activeItem) return;
-
-    // Calculate new index
-    let newIndex = 0;
-    if (overColumn) {
-        // Dropped on a column container -> append to end
-        newIndex = destCol.items.length;
-    } else {
-        // Dropped on an item -> find its index
-        const overItemIndex = destCol.items.findIndex(i => i.id === overId);
-        newIndex = overItemIndex >= 0 ? overItemIndex : destCol.items.length;
-    }
-
-    // Optimistic update
-    const newRetro = { ...retro };
-    const newSourceCol = newRetro.columns.find(c => c.id === sourceColumnId)!;
-    const newDestCol = newRetro.columns.find(c => c.id === destColumnId)!;
-
-    if (sourceColumnId === destColumnId) {
-        // Reordering within same column
-        const oldIndex = newSourceCol.items.findIndex(i => i.id === activeId);
-        newSourceCol.items = arrayMove(newSourceCol.items, oldIndex, newIndex);
-    } else {
-        // Moving to different column
-        newSourceCol.items = newSourceCol.items.filter(i => i.id !== activeId);
-        // Insert at new index
-        newDestCol.items.splice(newIndex, 0, activeItem);
-    }
-
-    setRetro(newRetro);
-
-    // Emit move event
-    socket.emit('move-item', {
-        retroId: retro.id,
-        itemId: activeId,
-        targetColumnId: destColumnId,
-        newIndex
-    });
+  const [pendingDelete, setPendingDelete] = useState<BoardItem | null>(null)
+  const confirmDeleteItem = () => {
+    if (!pendingDelete || !socket) return
+    const id = pendingDelete.id
+    setRetro((prev) => ({ ...prev, columns: prev.columns.map((c) => ({ ...c, items: c.items.filter((i) => i.id !== id) })) }))
+    socket.emit('delete-item', { retroId: retro.id, itemId: id })
+    setPendingDelete(null)
   }
 
   const totalVotesUsed = useMemo(() => {
@@ -582,11 +595,20 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
 
   // --- The phase content -----------------------------------------------------
 
-  const renderLiveCard = (item: BoardItem) => {
+  const renderLiveCard = (item: BoardItem, column: BoardColumn) => {
     const mine = item.votes.find(v => v.userId === userId)?.count || 0
     const editing = editingItems[item.id] !== undefined
+    // Moving and deleting belong to the Input phase, and to the people who
+    // may edit the card. The server enforces the same rule.
+    const canArrange = status === 'INPUT' && canEditItem(item)
+    const visibleIds = column.items.map((i) => i.id)
+    const up = neighbourFor(visibleIds, item.id, 'up')
+    const down = neighbourFor(visibleIds, item.id, 'down')
+    const otherColumns = retro.columns.filter((c) => c.id !== column.id)
+    const preview = item.content.length > 40 ? `${item.content.slice(0, 40)}…` : item.content
     return (
-      <SortableItem key={item.id} id={item.id} disabled={status !== 'INPUT'}>
+      <SortableItem key={item.id} id={item.id} disabled={!canArrange}>
+        {(handle) => (
         <article
           className={cn(
             'group space-y-2 rounded-xl bg-note p-2.5 shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-lift)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95',
@@ -618,12 +640,70 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
           )}
           <div className="flex items-center justify-between gap-2">
             <Author name={item.username} anonymous={retro.isAnonymous} />
-            {!editing && canEditItem(item) && (
+            {!editing && canArrange && (
+              // Always visible, not on hover: moving a card was possible
+              // before, and nobody could find it.
+              <div className="-my-1 -mr-1 flex shrink-0 items-center">
+                {handle && (
+                  <button
+                    type="button"
+                    ref={handle.ref}
+                    {...handle.props}
+                    aria-label={`Drag to move: ${preview}`}
+                    title="Drag to move"
+                    className="grid h-7 w-7 cursor-grab touch-none place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+                  >
+                    <GripVertical className="h-4 w-4" />
+                  </button>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={`Card options: ${preview}`}
+                      title="Edit, move or delete"
+                      className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem onSelect={() => startEditItem(item.id, item.content)}>
+                      <Pencil className="mr-2 h-4 w-4" /> Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem disabled={up === undefined} onSelect={() => up !== undefined && moveItem(item.id, column.id, up)}>
+                      <ArrowUp className="mr-2 h-4 w-4" /> Move up
+                    </DropdownMenuItem>
+                    <DropdownMenuItem disabled={down === undefined} onSelect={() => down !== undefined && moveItem(item.id, column.id, down)}>
+                      <ArrowDown className="mr-2 h-4 w-4" /> Move down
+                    </DropdownMenuItem>
+                    {otherColumns.length > 0 && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground">Move to</DropdownMenuLabel>
+                        {otherColumns.map((c) => (
+                          <DropdownMenuItem key={c.id} onSelect={() => moveItem(item.id, c.id, null)}>
+                            <CornerDownRight className="mr-2 h-4 w-4" /> {c.title}
+                          </DropdownMenuItem>
+                        ))}
+                      </>
+                    )}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => setPendingDelete(item)}
+                      className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" /> Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
+            {!editing && !canArrange && canEditItem(item) && (
               <button
                 type="button"
                 aria-label="Edit item"
                 className="-m-1 shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100"
-                onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => startEditItem(item.id, item.content)}
               >
                 <Pencil className="h-3.5 w-3.5" />
@@ -641,11 +721,13 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
             </>
           )}
         </article>
+        )}
       </SortableItem>
     )
   }
 
   const lanes = (
+    <>
     <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
       <LaneRow fill>
         {retro.columns.map((column) => (
@@ -679,13 +761,15 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
               </div>
             ) : undefined}
           >
-            <SortableContext
-              items={column.items.map(i => i.id)}
-              strategy={verticalListSortingStrategy}
-              disabled={status !== 'INPUT'}
-            >
-              {column.items.map(renderLiveCard)}
-            </SortableContext>
+            <LaneDropZone id={column.id} enabled={status === 'INPUT'}>
+              <SortableContext
+                items={column.items.map(i => i.id)}
+                strategy={verticalListSortingStrategy}
+                disabled={status !== 'INPUT'}
+              >
+                {column.items.map((item) => renderLiveCard(item, column))}
+              </SortableContext>
+            </LaneDropZone>
             {column.items.length === 0 && status !== 'INPUT' && (
               <p className="rounded-xl border border-dashed border-foreground/15 p-3 text-center text-xs text-muted-foreground">
                 Nothing raised here
@@ -695,6 +779,24 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
         ))}
       </LaneRow>
     </DndContext>
+    <Dialog open={pendingDelete !== null} onOpenChange={(open) => { if (!open) setPendingDelete(null) }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete this card?</DialogTitle>
+          <DialogDescription>It disappears for everyone on the board. This can&apos;t be undone.</DialogDescription>
+        </DialogHeader>
+        {pendingDelete && (
+          <blockquote className="whitespace-pre-wrap rounded-lg bg-muted px-3 py-2 text-sm">{pendingDelete.content}</blockquote>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setPendingDelete(null)}>Keep it</Button>
+          <Button variant="destructive" onClick={confirmDeleteItem} className="gap-2">
+            <Trash2 className="h-4 w-4" /> Delete card
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 
   const actionsStage = (
@@ -759,6 +861,10 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
               index={i + 1}
               names={mentionNames}
               jiraConfigured={Boolean(retro.team?.jiraConfigured)}
+              // Editable while the team is still drafting the list; after the
+              // phase it is the record.
+              onUpdate={status === 'ACTIONS' ? (data) => socket?.emit('update-action-item', { retroId: retro.id, actionId: action.id, ...data }) : undefined}
+              onDelete={status === 'ACTIONS' ? () => socket?.emit('delete-action-item', { retroId: retro.id, actionId: action.id }) : undefined}
             />
           ))}
         </ul>

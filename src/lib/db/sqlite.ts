@@ -18,6 +18,7 @@ import type {
   Team, TeamJiraConfig, TeamGroups, TeamCreateOptions, Retrospective, Column, Vote, Reaction, Item, ActionItem,
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro, TeamAnalyticsRaw,
+  UserActivityRaw,
 } from "./types";
 import type { BoardScope } from "../authz";
 import path from "node:path";
@@ -797,6 +798,29 @@ export function getActionItem(id: string): ActionItem | null {
   return r ? mapActionItem(r) : null;
 }
 
+export function deleteItem(id: string): void {
+  // No cascades in the schema, so the card's votes and reactions go first.
+  const db = getDb();
+  transaction(() => {
+    db.prepare(`DELETE FROM "Reaction" WHERE "itemId" = ?`).run(id);
+    db.prepare(`DELETE FROM "Vote" WHERE "itemId" = ?`).run(id);
+    db.prepare(`DELETE FROM "Item" WHERE "id" = ?`).run(id);
+  });
+}
+
+export function updateActionItem(
+  id: string,
+  data: { content: string; assignee: string | null; dueDate: Date | null }
+): void {
+  getDb()
+    .prepare(`UPDATE "ActionItem" SET "content" = ?, "assignee" = ?, "dueDate" = ? WHERE "id" = ?`)
+    .run(data.content, data.assignee, dateToDb(data.dueDate), id);
+}
+
+export function deleteActionItem(id: string): void {
+  getDb().prepare(`DELETE FROM "ActionItem" WHERE "id" = ?`).run(id);
+}
+
 export function updateActionCompleted(id: string, completed: boolean): void {
   // Record when it closed, and clear it again if the action is reopened.
   getDb()
@@ -831,6 +855,15 @@ function buildActionWhere(filter: ActionFilter): { clauses: string[]; params: an
   if (filter.assigneeContains) {
     clauses.push(`a."assignee" LIKE ?`);
     params.push(`%${filter.assigneeContains}%`);
+  }
+  if (filter.assigneeIn) {
+    const names = filter.assigneeIn.map((n) => n.trim().toLowerCase()).filter(Boolean);
+    if (names.length) {
+      clauses.push(`LOWER(a."assignee") IN (${names.map(() => "?").join(",")})`);
+      params.push(...names);
+    } else {
+      clauses.push("0");
+    }
   }
   if (filter.teamNameContains) {
     needsTeamJoin = true;
@@ -885,6 +918,56 @@ export function listActionItems(filter: ActionFilter): ActionItemWithRetro[] {
     }
     return { ...action, retrospective: retroCache.get(action.retrospectiveId)! };
   });
+}
+
+export function userActivity(userId: string, creatorNames: string[]): UserActivityRaw {
+  const db = getDb();
+  const creators = creatorNames.filter(Boolean);
+  const facilitated = creators.length
+    ? (db
+        .prepare(
+          `SELECT "id", "title", "status", "createdAt", "teamId" FROM "Retrospective"
+            WHERE "creator" IN (${creators.map(() => "?").join(",")}) ORDER BY "createdAt" DESC`
+        )
+        .all(...creators) as Row[])
+    : [];
+  const cards = db
+    .prepare(
+      `SELECT i."id", i."content", i."createdAt", c."title" AS columnTitle, c."type" AS columnType,
+              r."id" AS retroId, r."title" AS retroTitle, r."teamId" AS teamId, r."isAnonymous" AS isAnonymous
+         FROM "Item" i
+         JOIN "Column" c ON c."id" = i."columnId"
+         JOIN "Retrospective" r ON r."id" = c."retrospectiveId"
+        WHERE i."userId" = ?
+        ORDER BY i."createdAt" DESC`
+    )
+    .all(userId) as Row[];
+  const perBoard = (table: "Vote" | "Reaction", measure: string) =>
+    db
+      .prepare(
+        `SELECT r."id" AS retroId, r."teamId" AS teamId, ${measure} AS count
+           FROM "${table}" x
+           JOIN "Item" i ON i."id" = x."itemId"
+           JOIN "Column" c ON c."id" = i."columnId"
+           JOIN "Retrospective" r ON r."id" = c."retrospectiveId"
+          WHERE x."userId" = ?
+          GROUP BY r."id", r."teamId"`
+      )
+      .all(userId) as Row[];
+  return {
+    facilitated: facilitated.map((r) => ({
+      id: r.id as string, title: r.title as string, status: r.status as string,
+      createdAt: toDate(r.createdAt), teamId: (r.teamId as string | null) ?? null,
+    })),
+    cards: cards.map((r) => ({
+      id: r.id as string, content: r.content as string, createdAt: toDate(r.createdAt),
+      columnTitle: r.columnTitle as string, columnType: r.columnType as string,
+      retroId: r.retroId as string, retroTitle: r.retroTitle as string,
+      teamId: (r.teamId as string | null) ?? null, isAnonymous: toBool(r.isAnonymous),
+    })),
+    votes: perBoard("Vote", `COALESCE(SUM(x."count"), 0)`).map((r) => ({ retroId: r.retroId as string, teamId: (r.teamId as string | null) ?? null, count: Number(r.count) })),
+    reactions: perBoard("Reaction", `COUNT(*)`).map((r) => ({ retroId: r.retroId as string, teamId: (r.teamId as string | null) ?? null, count: Number(r.count) })),
+  };
 }
 
 export function countOpenActions(retroFilter: RetroFilter): number {

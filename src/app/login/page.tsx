@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button"
-import { LogIn, KeyRound } from "lucide-react"
+import Link from "next/link"
+import { LogIn, KeyRound, HelpCircle } from "lucide-react"
 import { StageScene } from "@/components/visual/Illustration"
 import { LogoMark } from "@/components/visual/Logo"
 import { ModeToggle } from "@/components/mode-toggle"
@@ -109,7 +110,10 @@ export default function LoginPage() {
             )}
           </div>
           <p className="mt-10 border-t pt-4 text-xs text-muted-foreground">
-            Your team&apos;s boards are visible to you through your identity provider&apos;s groups.
+            Your team&apos;s boards are visible to you through your identity provider&apos;s groups.{' '}
+            <Link href="/help" className="inline-flex items-center gap-1 font-medium text-primary hover:underline">
+              <HelpCircle className="h-3.5 w-3.5" aria-hidden /> How it works
+            </Link>
           </p>
         </div>
       </main>

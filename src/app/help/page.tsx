@@ -75,7 +75,7 @@ function Term({ children }: { children: React.ReactNode }) {
 }
 
 const PHASES = [
-  { id: 'INPUT', name: 'Input', text: 'Everyone adds cards to the columns. Drag to reorder or move between columns.' },
+  { id: 'INPUT', name: 'Input', text: 'Everyone adds cards to the columns. Drag a card by its handle, or use its ⋯ menu, to reorder, move or delete it.' },
   { id: 'VOTING', name: 'Voting', text: 'Spend your votes on the cards you most want to discuss. You have 10 to spread as you like.' },
   { id: 'REVIEW', name: 'Review', text: 'Cards are pooled and sorted by votes. Discuss them in order and capture notes on each.' },
   { id: 'ACTIONS', name: 'Actions', text: 'Agree what happens next. Action items carry into the team’s following retro until they’re done.' },
@@ -195,7 +195,9 @@ export default function HelpPage() {
         <Section id="actions" icon={ListTodo} title="Action items">
           <p>
             Add actions in the Actions phase, with an optional assignee and due date. Use
-            <Term> @</Term> to mention someone.
+            <Term> @</Term> to mention someone. While the phase is running anyone on the board can
+            edit or delete an action — drafting the list is a group job. Once the retro moves on,
+            the list is the record.
           </p>
           <p>
             Open actions from a team&apos;s previous retros appear at the top of its next board, so
@@ -300,6 +302,18 @@ export default function HelpPage() {
           <p>
             You can always edit your own cards. The facilitator, a team admin and administrators
             can edit anyone&apos;s card, change phase, extend the timer and delete the board.
+          </p>
+          <p>
+            During <Term>Input</Term> the same people can also move a card — to another column or up
+            and down within one — and delete it. Drag it by the <Term>⋮⋮</Term> handle, or use the
+            card&apos;s <Term>⋯</Term> menu, which works by keyboard and on touch screens too. Once
+            voting starts, cards stay where they are: moving or deleting one then would quietly
+            rearrange votes people have already cast.
+          </p>
+          <p>
+            Your <Link href="/profile" className="text-primary hover:underline">profile</Link> shows
+            what you have run, written and been assigned, and which teams and groups your access
+            comes from. Only you can see it.
           </p>
         </Section>
 

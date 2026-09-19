@@ -162,6 +162,12 @@ export type ActionFilter = {
   teamNameContains?: string;
   creatorContains?: string;
   assigneeContains?: string;
+  /**
+   * Exact assignee match, case-insensitive, against any of these names. For
+   * "assigned to me": the substring filter would count "Diana"'s actions as
+   * "ana"'s.
+   */
+  assigneeIn?: string[];
   retrospectiveId?: string;
   /** Exact team match — used to carry a team's open actions into its next retro. */
   teamId?: string;
@@ -236,6 +242,26 @@ export type TeamAnalyticsRaw = {
   }[];
 };
 
+/** One person's own footprint across the boards, for their profile page. */
+export type UserActivityRaw = {
+  facilitated: { id: string; title: string; status: string; createdAt: Date; teamId: string | null }[];
+  cards: {
+    id: string;
+    content: string;
+    createdAt: Date;
+    columnTitle: string;
+    columnType: string;
+    retroId: string;
+    retroTitle: string;
+    teamId: string | null;
+    isAnonymous: boolean;
+  }[];
+  /** Stars given, summed per board. */
+  votes: { retroId: string; teamId: string | null; count: number }[];
+  /** Reactions given, counted per board. */
+  reactions: { retroId: string; teamId: string | null; count: number }[];
+};
+
 export type RetroDurations = {
   inputDuration?: number;
   votingDuration?: number;
@@ -298,6 +324,8 @@ export interface DbApi {
   updateItemSummary(id: string, summary: string): MaybePromise<void>;
   updateItemColumn(id: string, columnId: string): MaybePromise<void>;
   reorderItems(orderedIds: string[]): MaybePromise<void>;
+  /** Delete a card with its votes and reactions, in one transaction. */
+  deleteItem(id: string): MaybePromise<void>;
   countItems(): MaybePromise<number>;
 
   // Votes
@@ -319,11 +347,20 @@ export interface DbApi {
     dueDate?: Date | null;
   }): MaybePromise<ActionItem>;
   getActionItem(id: string): MaybePromise<ActionItem | null>;
+  /** Rewrite an action's text, assignee and due date. */
+  updateActionItem(id: string, data: { content: string; assignee: string | null; dueDate: Date | null }): MaybePromise<void>;
+  deleteActionItem(id: string): MaybePromise<void>;
   updateActionCompleted(id: string, completed: boolean): MaybePromise<void>;
   setActionExternalLink(id: string, link: { externalUrl: string; externalKey: string }): MaybePromise<void>;
   listActionItems(filter: ActionFilter): MaybePromise<ActionItemWithRetro[]>;
   countActionItems(filter: ActionFilter): MaybePromise<number>;
   countOpenActions(retroFilter: RetroFilter): MaybePromise<number>;
+  /**
+   * Everything one person has done: boards they ran (matched on any of
+   * `creatorNames`, since a board records its creator by name or id), and the
+   * cards, stars and reactions attributed to `userId`.
+   */
+  userActivity(userId: string, creatorNames: string[]): MaybePromise<UserActivityRaw>;
 
   // Maintenance
   clearDatabase(): MaybePromise<void>;

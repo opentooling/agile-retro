@@ -56,9 +56,20 @@ type Tone = 'positive' | 'improve' | 'risk' | 'review' | 'negative' | 'neutral'
  * A row of headline numbers, separated by hairlines rather than boxed — the
  * figure is the content, so it gets the size a box would have taken.
  */
-export function Figures({ children, className }: { children: ReactNode; className?: string }) {
+export function Figures({ children, className, columns = 3 }: { children: ReactNode; className?: string; columns?: 3 | 5 }) {
   return (
-    <dl className={cn('grid grid-cols-3 divide-x border-b', className)}>
+    <dl
+      className={cn(
+        columns === 3
+          ? 'grid grid-cols-3 divide-x border-b'
+          // Five figures sit on one row, with hairlines between them, once the
+          // header is wide enough; before that they fall into two columns with
+          // no hairlines — a divider down a wrapped grid separates nothing,
+          // and the offset it brings knocks the second row out of line.
+          : 'grid grid-cols-2 gap-x-6 border-b @2xl:grid-cols-5 @2xl:gap-x-0 @2xl:divide-x [&>*]:!pl-0 @2xl:[&>*:not(:first-child)]:!pl-6',
+        className,
+      )}
+    >
       {children}
     </dl>
   )

@@ -8,8 +8,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
-  AlertTriangle, Calendar, ChevronDown, ExternalLink, History as HistoryIcon, Lightbulb,
-  SmilePlus, StickyNote, ThumbsDown, ThumbsUp,
+  AlertTriangle, Calendar, Check, ChevronDown, ExternalLink, History as HistoryIcon, Lightbulb,
+  Pencil, SmilePlus, StickyNote, ThumbsDown, ThumbsUp, Trash2, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -414,6 +414,8 @@ export function ActionCard({
   readOnly,
   onToggle,
   index,
+  onUpdate,
+  onDelete,
 }: {
   action: ActionData
   names: string[]
@@ -422,7 +424,34 @@ export function ActionCard({
   onToggle?: () => void
   /** Shown as the item's number when it has no checkbox. */
   index?: number
+  /** Present while the list may still be edited (the Actions phase). */
+  onUpdate?: (data: { content: string; assignee: string | null; dueDate: string | null }) => void
+  onDelete?: () => void
 }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState({ content: '', assignee: '', dueDate: '' })
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const startEdit = () => {
+    setDraft({
+      content: action.content,
+      assignee: action.assignee ?? '',
+      // <input type="date"> speaks yyyy-mm-dd.
+      dueDate: action.dueDate ? new Date(action.dueDate).toISOString().slice(0, 10) : '',
+    })
+    setConfirmDelete(false)
+    setEditing(true)
+  }
+  const saveEdit = () => {
+    if (!draft.content.trim() || !onUpdate) return
+    onUpdate({
+      content: draft.content.trim(),
+      assignee: draft.assignee.trim() || null,
+      dueDate: draft.dueDate || null,
+    })
+    setEditing(false)
+  }
+
   const [link, setLink] = useState<{ url: string; key: string } | null>(
     action.externalUrl && action.externalKey
       ? { url: action.externalUrl, key: action.externalKey }
@@ -461,6 +490,45 @@ export function ActionCard({
           {index ?? '•'}
         </span>
       )}
+      {editing ? (
+        <div className="min-w-0 flex-1 space-y-2">
+          <Textarea
+            value={draft.content}
+            onChange={(e) => setDraft((d) => ({ ...d, content: e.target.value }))}
+            aria-label="Action"
+            className="min-h-[64px] text-sm"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setEditing(false)
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) saveEdit()
+            }}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={draft.assignee}
+              onChange={(e) => setDraft((d) => ({ ...d, assignee: e.target.value }))}
+              placeholder="Assignee"
+              aria-label="Assignee"
+              className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm"
+            />
+            <input
+              type="date"
+              value={draft.dueDate}
+              onChange={(e) => setDraft((d) => ({ ...d, dueDate: e.target.value }))}
+              aria-label="Due date"
+              className="h-8 rounded-md border bg-background px-2 text-sm"
+            />
+            <div className="ml-auto flex gap-1">
+              <Button size="sm" variant="ghost" onClick={() => setEditing(false)} aria-label="Cancel editing">
+                <X className="h-4 w-4" />
+              </Button>
+              <Button size="sm" onClick={saveEdit} disabled={!draft.content.trim()} className="gap-1">
+                <Check className="h-4 w-4" /> Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="min-w-0 flex-1">
         <p className={cn('whitespace-pre-wrap font-medium leading-snug', action.completed && 'text-muted-foreground line-through')}>
           <MentionText text={action.content} names={names} />
@@ -498,6 +566,33 @@ export function ActionCard({
           {error && <span className="text-destructive">{error}</span>}
         </div>
       </div>
+      )}
+      {!editing && (onUpdate || onDelete) && (
+        confirmDelete ? (
+          <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Confirm deletion">
+            <span className="text-xs font-medium text-muted-foreground">Delete?</span>
+            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setConfirmDelete(false)}>
+              Keep
+            </Button>
+            <Button size="sm" variant="destructive" className="h-7 px-2" onClick={() => { setConfirmDelete(false); onDelete?.() }}>
+              Delete
+            </Button>
+          </div>
+        ) : (
+          <div className="flex shrink-0 gap-0.5">
+            {onUpdate && (
+              <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground" onClick={startEdit} aria-label={`Edit action: ${action.content}`}>
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {onDelete && (
+              <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => setConfirmDelete(true)} aria-label={`Delete action: ${action.content}`}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        )
+      )}
     </li>
   )
 }

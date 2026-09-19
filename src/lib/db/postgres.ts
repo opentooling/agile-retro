@@ -22,6 +22,7 @@ import type {
   Team, TeamJiraConfig, TeamGroups, TeamCreateOptions, Retrospective, Column, Vote, Reaction, Item, ActionItem,
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro, TeamAnalyticsRaw,
+  UserActivityRaw,
 } from "./types";
 import type { BoardScope } from "../authz";
 
@@ -816,6 +817,29 @@ export async function getActionItem(id: string): Promise<ActionItem | null> {
   return row ? mapActionItem(row as Row) : null;
 }
 
+export async function deleteItem(id: string): Promise<void> {
+  // No cascades in the schema, so the card's votes and reactions go first.
+  await withTransaction(async (client) => {
+    await client.query(`DELETE FROM "Reaction" WHERE "itemId" = $1`, [id]);
+    await client.query(`DELETE FROM "Vote" WHERE "itemId" = $1`, [id]);
+    await client.query(`DELETE FROM "Item" WHERE "id" = $1`, [id]);
+  });
+}
+
+export async function updateActionItem(
+  id: string,
+  data: { content: string; assignee: string | null; dueDate: Date | null }
+): Promise<void> {
+  await query(
+    `UPDATE "ActionItem" SET "content" = $2, "assignee" = $3, "dueDate" = $4 WHERE "id" = $1`,
+    [id, data.content, data.assignee, data.dueDate]
+  );
+}
+
+export async function deleteActionItem(id: string): Promise<void> {
+  await query(`DELETE FROM "ActionItem" WHERE "id" = $1`, [id]);
+}
+
 export async function updateActionCompleted(id: string, completed: boolean): Promise<void> {
   // Record when it closed, and clear it again if the action is reopened, so
   // "time to close" always reflects the completion it belongs to.
@@ -864,6 +888,10 @@ function buildActionWhere(
   if (filter.assigneeContains) {
     clauses.push(`a."assignee" ILIKE $${params.push(`%${filter.assigneeContains}%`)}`);
   }
+  if (filter.assigneeIn) {
+    const names = filter.assigneeIn.map((n) => n.trim().toLowerCase()).filter(Boolean);
+    clauses.push(names.length ? `LOWER(a."assignee") = ANY($${params.push(names)})` : "FALSE");
+  }
   if (filter.teamNameContains) {
     needsTeamJoin = true;
     clauses.push(`t."name" ILIKE $${params.push(`%${filter.teamNameContains}%`)}`);
@@ -909,6 +937,56 @@ export async function listActionItems(filter: ActionFilter): Promise<ActionItemW
     ...mapActionItem(row),
     retrospective: retroById.get(row.retrospectiveId)!,
   }));
+}
+
+export async function userActivity(userId: string, creatorNames: string[]): Promise<UserActivityRaw> {
+  const creators = creatorNames.filter(Boolean);
+  const facilitated = creators.length
+    ? await query(
+        `SELECT "id", "title", "status", "createdAt", "teamId" FROM "Retrospective"
+          WHERE "creator" = ANY($1) ORDER BY "createdAt" DESC`,
+        [creators]
+      )
+    : [];
+  const cards = await query(
+    `SELECT i."id", i."content", i."createdAt", c."title" AS "columnTitle", c."type" AS "columnType",
+            r."id" AS "retroId", r."title" AS "retroTitle", r."teamId", r."isAnonymous"
+       FROM "Item" i
+       JOIN "Column" c ON c."id" = i."columnId"
+       JOIN "Retrospective" r ON r."id" = c."retrospectiveId"
+      WHERE i."userId" = $1
+      ORDER BY i."createdAt" DESC`,
+    [userId]
+  );
+  const perBoard = (table: "Vote" | "Reaction", measure: string) =>
+    query(
+      `SELECT r."id" AS "retroId", r."teamId", ${measure} AS "count"
+         FROM "${table}" x
+         JOIN "Item" i ON i."id" = x."itemId"
+         JOIN "Column" c ON c."id" = i."columnId"
+         JOIN "Retrospective" r ON r."id" = c."retrospectiveId"
+        WHERE x."userId" = $1
+        GROUP BY r."id", r."teamId"`,
+      [userId]
+    );
+  const [votes, reactions] = await Promise.all([
+    perBoard("Vote", `COALESCE(SUM(x."count"), 0)::int`),
+    perBoard("Reaction", `COUNT(*)::int`),
+  ]);
+  return {
+    facilitated: facilitated.map((r) => ({
+      id: r.id as string, title: r.title as string, status: r.status as string,
+      createdAt: r.createdAt as Date, teamId: (r.teamId as string | null) ?? null,
+    })),
+    cards: cards.map((r) => ({
+      id: r.id as string, content: r.content as string, createdAt: r.createdAt as Date,
+      columnTitle: r.columnTitle as string, columnType: r.columnType as string,
+      retroId: r.retroId as string, retroTitle: r.retroTitle as string,
+      teamId: (r.teamId as string | null) ?? null, isAnonymous: Boolean(r.isAnonymous),
+    })),
+    votes: votes.map((r) => ({ retroId: r.retroId as string, teamId: (r.teamId as string | null) ?? null, count: Number(r.count) })),
+    reactions: reactions.map((r) => ({ retroId: r.retroId as string, teamId: (r.teamId as string | null) ?? null, count: Number(r.count) })),
+  };
 }
 
 export async function countOpenActions(retroFilter: RetroFilter): Promise<number> {
