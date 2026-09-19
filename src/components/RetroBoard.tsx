@@ -1020,8 +1020,9 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
     const minutes = Math.floor(abs / 60)
     const seconds = abs % 60
     const isLowTime = !over && remainingSeconds < 60
-    // Doubles as a snooze: dismissing hides it until the deadline moves,
-    // extending pushes the deadline out 5 min.
+    // Doubles as a snooze: dismissing hides it until the deadline moves;
+    // snoozing gives five minutes from the later of the deadline and now, so
+    // in overtime it means five minutes from now (lib/phase-timer).
     const showPrompt = isOwner && (isLowTime || over) && !isWarningDismissed
 
     return (

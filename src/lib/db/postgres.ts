@@ -23,6 +23,7 @@ import type {
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro, TeamAnalyticsRaw,
   UserActivityRaw,
+  RetroDurations,
 } from "./types";
 import type { BoardScope } from "../authz";
 
@@ -606,7 +607,7 @@ export async function updateRetroStatus(
 /** Update timer durations. Returns full nested retro. */
 export async function updateRetroDurations(
   id: string,
-  durations: { inputDuration?: number; votingDuration?: number; reviewDuration?: number }
+  durations: RetroDurations
 ): Promise<RetroFull | null> {
   const sets: string[] = [];
   const params: unknown[] = [id];
@@ -618,6 +619,9 @@ export async function updateRetroDurations(
   }
   if (durations.reviewDuration !== undefined) {
     sets.push(`"reviewDuration" = $${params.push(durations.reviewDuration)}`);
+  }
+  if (durations.phaseStartTime !== undefined) {
+    sets.push(`"phaseStartTime" = $${params.push(durations.phaseStartTime)}`);
   }
   if (sets.length > 0) {
     await query(`UPDATE "Retrospective" SET ${sets.join(", ")} WHERE "id" = $1`, params);

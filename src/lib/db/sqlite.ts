@@ -19,6 +19,7 @@ import type {
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro, TeamAnalyticsRaw,
   UserActivityRaw,
+  RetroDurations,
 } from "./types";
 import type { BoardScope } from "../authz";
 import path from "node:path";
@@ -576,7 +577,7 @@ export function updateRetroStatus(id: string, status: string, phaseStartTime: Da
 /** Update timer durations. Returns full nested retro. */
 export function updateRetroDurations(
   id: string,
-  durations: { inputDuration?: number; votingDuration?: number; reviewDuration?: number }
+  durations: RetroDurations
 ): RetroFull | null {
   const sets: string[] = [];
   const params: any[] = [];
@@ -591,6 +592,10 @@ export function updateRetroDurations(
   if (durations.reviewDuration !== undefined) {
     sets.push(`"reviewDuration" = ?`);
     params.push(durations.reviewDuration);
+  }
+  if (durations.phaseStartTime !== undefined) {
+    sets.push(`"phaseStartTime" = ?`);
+    params.push(dateToDb(durations.phaseStartTime));
   }
   if (sets.length > 0) {
     params.push(id);

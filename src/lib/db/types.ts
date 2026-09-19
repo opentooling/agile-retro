@@ -266,6 +266,8 @@ export type RetroDurations = {
   inputDuration?: number;
   votingDuration?: number;
   reviewDuration?: number;
+  /** Moved together with a duration when a snooze lands the deadline exactly. */
+  phaseStartTime?: Date;
 };
 
 /**

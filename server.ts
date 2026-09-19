@@ -10,6 +10,7 @@ import { redactRetroFull, applyBlindInput } from "./src/lib/sanitize";
 import { pushActionDoneState } from "./src/lib/jira-sync";
 import { purgeExpiredRetros } from "./src/lib/purge";
 import { placeBefore } from "./src/lib/board-order";
+import { snoozePhase } from "./src/lib/phase-timer";
 import {
     authUserFromToken,
     canViewBoard,
@@ -516,18 +517,22 @@ app.prepare().then(() => {
                 const retro = await db.getRetro(retroId);
                 if (!retro) return;
 
-                const updateData: { inputDuration?: number; votingDuration?: number; reviewDuration?: number } = {};
-                if (retro.status === 'INPUT') {
-                    updateData.inputDuration = (retro.inputDuration || 0) + 5;
-                } else if (retro.status === 'VOTING') {
-                    updateData.votingDuration = (retro.votingDuration || 0) + 5;
-                } else if (retro.status === 'REVIEW') {
-                    updateData.reviewDuration = (retro.reviewDuration || 0) + 5;
-                } else {
-                    return; // No timer for other phases
-                }
+                const field = ({ INPUT: 'inputDuration', VOTING: 'votingDuration', REVIEW: 'reviewDuration' } as const)[
+                    retro.status as 'INPUT' | 'VOTING' | 'REVIEW'
+                ];
+                if (!field) return; // No timer for other phases
 
-                const updatedRetro = await db.updateRetroDurations(retroId, updateData);
+                // Five more minutes from the later of the deadline and now — in
+                // overtime, from now (see lib/phase-timer).
+                const snoozed = snoozePhase(
+                    retro.phaseStartTime ? new Date(retro.phaseStartTime) : null,
+                    retro[field] ?? null,
+                    new Date(),
+                );
+                const updatedRetro = await db.updateRetroDurations(retroId, {
+                    [field]: snoozed.durationMinutes,
+                    phaseStartTime: snoozed.phaseStart,
+                });
                 await broadcastRetro(io, retroId, updatedRetro);
             } catch (error) {
                 console.error("Error extending timer:", error);
