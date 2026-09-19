@@ -24,16 +24,20 @@ export const USERS = {
 } as const
 type Who = keyof typeof USERS
 
+const columnsOf: Record<string, string[]> = {}
+
 async function board(
   title: string,
   status: string,
   cards: [column: number, who: Who, content: string][] = [],
   timer?: { minutesAgo: number; duration: number },
+  teamId: string | null = null,
+  creator = 'fay',
 ) {
   const started = timer ? new Date(Date.now() - timer.minutesAgo * 60_000) : new Date()
   const r = await db.createRetrospectiveWithColumns(
     {
-      title, tags: 'e2e', creator: 'fay', teamId: null,
+      title, tags: 'e2e', creator, teamId,
       inputDuration: timer?.duration ?? 10, votingDuration: 5, reviewDuration: 10,
       isAnonymous: false, blindInput: false, expiresAt: null, phaseStartTime: started,
     },
@@ -41,6 +45,7 @@ async function board(
   )
   if (status !== 'INPUT') await db.updateRetroStatus(r.id, status, started)
   const columns = (await db.getRetroFull(r.id))!.columns
+  columnsOf[r.id] = columns.map((c) => c.id)
   const order = new Map<number, number>()
   for (const [col, who, content] of cards) {
     const n = order.get(col) ?? 0
@@ -63,7 +68,12 @@ async function board(
     actions: await board('E2E actions', 'ACTIONS'),
     closed: await board('E2E closed', 'CLOSED'),
     overtime: await board('E2E overtime', 'INPUT', [], { minutesAgo: 67, duration: 10 }),
+    sockets: await board('E2E sockets', 'INPUT', [[0, 'ana', 'Ana socket card']]),
+    // A team board none of the seeded users belong to.
+    private: await board('E2E private', 'INPUT', [], undefined,
+      (await db.createTeam('E2E private team', { createdBy: null, memberGroups: ['/e2e-private'], adminGroups: [] })).id, 'nobody'),
   }
+  await db.createItem({ content: 'Private card', columnId: columnsOf[boards.private][0], userId: 'owner@e2e.test', username: 'owner', order: 0 })
   for (const [key, content] of [['actions', 'Fix the flaky test'], ['actions', 'Book the next retro'], ['closed', 'Archived action']] as const) {
     await db.createActionItem({ content, retrospectiveId: boards[key], assignee: 'amy', dueDate: null })
   }
@@ -77,6 +87,7 @@ async function board(
       salt: 'authjs.session-token',
     })
   }
-  writeFileSync('e2e/.data/seed.json', JSON.stringify({ boards, sessions }, null, 2))
+  const columns = Object.fromEntries(Object.entries(boards).map(([k, id]) => [k, columnsOf[id]]))
+  writeFileSync('e2e/.data/seed.json', JSON.stringify({ boards, columns, sessions }, null, 2))
   process.exit(0)
 })().catch((e) => { console.error(e); process.exit(1) })

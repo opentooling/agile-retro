@@ -11,6 +11,7 @@ import { pushActionDoneState } from "./src/lib/jira-sync";
 import { purgeExpiredRetros } from "./src/lib/purge";
 import { placeBefore } from "./src/lib/board-order";
 import { snoozePhase } from "./src/lib/phase-timer";
+import { acceptText } from "./src/lib/text-limits";
 import {
     authUserFromToken,
     canViewBoard,
@@ -230,14 +231,24 @@ app.prepare().then(() => {
 
         socket.on("add-item", async ({ retroId, columnId, content }) => {
             try {
-                if (!(await requireContribute(retroId))) return;
+                const ref = await requireContribute(retroId);
+                if (!ref) return;
+                // Cards are written during Input — the only phase that offers it.
+                if (ref.status !== "INPUT") return;
+                const text = acceptText(content);
+                if (!text) return;
+                // The column must be on the board named. The access check above
+                // is for that board; without this, contributing to any open
+                // board let you plant cards on another team's private board.
+                const retro = await db.getRetroFull(retroId);
+                if (!retro?.columns.some((c) => c.id === columnId)) return;
 
                 // Get max order in this column
                 const nextOrder = (await db.itemMaxOrder(columnId) ?? -1) + 1;
 
                 // Authorship is taken from the authenticated session, not the client.
                 await db.createItem({
-                    content,
+                    content: text,
                     columnId,
                     userId: user.id,
                     username: user.name ?? user.id,
@@ -264,7 +275,7 @@ app.prepare().then(() => {
                     socket.emit("access-denied", { retroId });
                     return;
                 }
-                const trimmed = String(content ?? "").trim();
+                const trimmed = acceptText(content);
                 if (!trimmed) return;
                 await db.updateItemContent(itemId, trimmed);
 
@@ -345,11 +356,14 @@ app.prepare().then(() => {
         socket.on("add-action-item", async ({ retroId, content, assignee, dueDate }) => {
             try {
                 if (!(await requireContribute(retroId))) return;
+                const text = acceptText(content);
+                if (!text) return;
+                const due = dueDate ? new Date(dueDate) : null;
                 await db.createActionItem({
-                    content,
+                    content: text,
                     retrospectiveId: retroId,
                     assignee: assignee && String(assignee).trim() ? String(assignee).trim() : null,
-                    dueDate: dueDate ? new Date(dueDate) : null,
+                    dueDate: due && !Number.isNaN(due.getTime()) ? due : null,
                 });
 
                 const updatedRetro = await db.getRetroFull(retroId);
@@ -487,7 +501,7 @@ app.prepare().then(() => {
                     socket.emit("access-denied", { retroId });
                     return;
                 }
-                const text = String(content ?? "").trim();
+                const text = acceptText(content);
                 if (!text) return;
                 const due = dueDate ? new Date(dueDate) : null;
                 await db.updateActionItem(actionId, {
