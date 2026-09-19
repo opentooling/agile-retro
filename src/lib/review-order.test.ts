@@ -1,4 +1,4 @@
-import { isCustomOrder, moveInReview, orderedForReview } from './review-order'
+import { isCustomOrder, moveInReview, orderedForReview, placeInReview } from './review-order'
 
 const entry = (id: string, total: number, reviewOrder?: number | null) => ({ id, total, reviewOrder })
 
@@ -57,5 +57,37 @@ describe('moveInReview', () => {
 
   it('ignores a card that is not on the board', () => {
     expect(moveInReview(board, 'ghost', -1)).toBeNull()
+  })
+})
+
+describe('placeInReview', () => {
+  const board = [entry('top', 5), entry('mid', 3), entry('low', 1), entry('none', 0), entry('none2', 0)]
+
+  it('drops a card in front of another', () => {
+    expect(placeInReview(board, 'low', 'mid')).toEqual(['top', 'low', 'mid', 'none', 'none2'])
+  })
+
+  it('drops a card at the end of its group', () => {
+    expect(placeInReview(board, 'none', null)).toEqual(['top', 'mid', 'low', 'none2', 'none'])
+  })
+
+  it('refuses a drop that would cross the "Also raised" line', () => {
+    // A voted card cannot land among the unvoted ones, or the other way round.
+    expect(placeInReview(board, 'top', null)).toBeNull()
+    expect(placeInReview(board, 'none', 'mid')).toBeNull()
+  })
+
+  it('leaves the queue alone when a card is dropped on itself', () => {
+    expect(placeInReview(board, 'mid', 'mid')).toBeNull()
+  })
+
+  it('ignores cards that are not in this queue', () => {
+    expect(placeInReview(board, 'ghost', 'mid')).toBeNull()
+    expect(placeInReview(board, 'mid', 'ghost')).toBeNull()
+  })
+
+  it('works inside an order the facilitator already set', () => {
+    const arranged = [entry('a', 5, 0), entry('b', 1, 1), entry('c', 3, 2)]
+    expect(placeInReview(arranged, 'c', 'b')).toEqual(['a', 'c', 'b'])
   })
 })

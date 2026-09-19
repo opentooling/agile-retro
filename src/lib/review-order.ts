@@ -73,3 +73,37 @@ export function moveInReview(
   moved.splice(to, 0, card)
   return moved.map((e) => e.id)
 }
+
+/**
+ * The queue after dropping one card in front of another (`null` for the end).
+ *
+ * The same rule as the arrows, expressed for a drag: the voted cards and those
+ * nobody voted for are drawn under separate headings, so an order that mixed
+ * them would put a card under a heading that does not describe it. Any drop
+ * that would do so is refused rather than quietly corrected — the card springs
+ * back, which is honest about what the queue allows.
+ */
+export function placeInReview(
+  entries: readonly Orderable[],
+  itemId: string,
+  beforeItemId: string | null,
+): string[] | null {
+  const queue = orderedForReview(entries)
+  const from = queue.findIndex((e) => e.id === itemId)
+  if (from === -1) return null
+  if (beforeItemId === itemId) return null
+
+  const rest = queue.filter((e) => e.id !== itemId)
+  const at = beforeItemId === null ? rest.length : rest.findIndex((e) => e.id === beforeItemId)
+  if (at === -1) return null // dropped on a card that is not in this queue
+
+  const moved = [...rest.slice(0, at), queue[from], ...rest.slice(at)]
+
+  // Every voted card must still come before every card with no votes.
+  let seenUnvoted = false
+  for (const entry of moved) {
+    if (entry.total === 0) seenUnvoted = true
+    else if (seenUnvoted) return null
+  }
+  return moved.map((e) => e.id)
+}

@@ -121,6 +121,21 @@ test.describe('arranging the review queue', () => {
   const arranged = (retroId: string) =>
     storedQueue(retroId).filter((r) => r.reviewOrder !== null).map((r) => r.content)
 
+  /** A card's id on a board, by its text. */
+  function cardOn(retroId: string, content: string) {
+    const db = new DatabaseSync('e2e/.data/e2e.db', { readOnly: true })
+    try {
+      return (db
+        .prepare(
+          `SELECT i."id" FROM "Item" i JOIN "Column" c ON c."id" = i."columnId"
+            WHERE c."retrospectiveId" = ? AND i."content" = ?`,
+        )
+        .get(retroId, content) as { id: string }).id
+    } finally {
+      db.close()
+    }
+  }
+
   let facilitator: Socket
   test.beforeAll(async () => {
     facilitator = io('http://localhost:3000', {
@@ -157,6 +172,34 @@ test.describe('arranging the review queue', () => {
     expect(arranged(boards.review).length).toBeGreaterThan(0)
     facilitator.emit('reset-review-order', { retroId: boards.review })
     await expect.poll(() => arranged(boards.review)).toEqual([])
+  })
+
+  test('a drop that would cross the "Also raised" line is refused', async () => {
+    const { boards } = seed()
+    const db = new DatabaseSync('e2e/.data/e2e.db', { readOnly: true })
+    const card = (content: string) =>
+      (db
+        .prepare(
+          `SELECT i."id" FROM "Item" i JOIN "Column" c ON c."id" = i."columnId"
+            WHERE c."retrospectiveId" = ? AND i."content" = ?`,
+        )
+        .get(boards.review, content) as { id: string }).id
+    const top = card('Queue top')
+    const unvoted = card('Queue unvoted')
+    db.close()
+
+    // Dropping the most-voted card in among the cards with no votes would put
+    // it under a heading that does not describe it.
+    facilitator.emit('reorder-review', { retroId: boards.review, itemId: top, beforeItemId: null })
+    await settle()
+    expect(arranged(boards.review)).toEqual([])
+
+    // …while a drop inside its own half is obeyed.
+    facilitator.emit('reorder-review', { retroId: boards.review, itemId: top, beforeItemId: cardOn(boards.review, 'Queue bottom') })
+    await expect.poll(() => arranged(boards.review).slice(0, 2)).toEqual(['Queue middle', 'Queue top'])
+    facilitator.emit('reset-review-order', { retroId: boards.review })
+    await expect.poll(() => arranged(boards.review)).toEqual([])
+    expect(unvoted).toBeDefined()
   })
 
   test('not on a board that has moved past review', async () => {

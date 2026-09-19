@@ -607,6 +607,9 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
   const handleReorderReview = (itemId: string, delta: -1 | 1) => {
     socket?.emit('reorder-review', { retroId: retro.id, itemId, delta })
   }
+  const handleDropInReview = (itemId: string, beforeItemId: string | null) => {
+    socket?.emit('reorder-review', { retroId: retro.id, itemId, beforeItemId })
+  }
   const handleResetReviewOrder = () => {
     socket?.emit('reset-review-order', { retroId: retro.id })
   }
@@ -1257,6 +1260,7 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                 canReorder={isOwner}
                 customOrder={queueIsArranged}
                 onReorder={handleReorderReview}
+                onDropBefore={handleDropInReview}
                 onResetOrder={handleResetReviewOrder}
               />
             ) : status === 'ACTIONS' ? actionsStage : closed ? record : lanes}

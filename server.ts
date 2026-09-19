@@ -10,7 +10,7 @@ import { redactRetroFull, applyBlindInput } from "./src/lib/sanitize";
 import { pushActionDoneState } from "./src/lib/jira-sync";
 import { purgeExpiredRetros } from "./src/lib/purge";
 import { placeBefore } from "./src/lib/board-order";
-import { moveInReview } from "./src/lib/review-order";
+import { moveInReview, placeInReview } from "./src/lib/review-order";
 import { snoozePhase } from "./src/lib/phase-timer";
 import { acceptText } from "./src/lib/text-limits";
 import {
@@ -489,9 +489,10 @@ app.prepare().then(() => {
          * the room's agenda, not one person's view — and only while the board
          * is in Review, where it is the thing on screen.
          *
-         * The move is sent as a direction, not a finished order, so two people
-         * pressing at once cannot write a queue computed from a stale board:
-         * the server applies each move to the order it holds.
+         * The move is sent as an intent — a direction from the arrows, or "put
+         * it in front of that one" from a drag — never a finished order, so
+         * two people arranging at once cannot write a queue computed from a
+         * stale board: the server applies each move to the order it holds.
          */
         const reviewEntriesOf = (retro: db.RetroFull) =>
             retro.columns.flatMap((c) =>
@@ -502,9 +503,11 @@ app.prepare().then(() => {
                 })),
             );
 
-        socket.on("reorder-review", async ({ retroId, itemId, delta }) => {
+        socket.on("reorder-review", async ({ retroId, itemId, delta, beforeItemId }) => {
             try {
-                if (delta !== -1 && delta !== 1) return;
+                const stepped = delta === -1 || delta === 1;
+                const dropped = beforeItemId === null || typeof beforeItemId === "string";
+                if (!stepped && !dropped) return;
                 const found = await loadItemOnBoard(retroId, itemId);
                 if (!found) return;
                 const { retro, ref } = found;
@@ -514,8 +517,11 @@ app.prepare().then(() => {
                 }
                 if (retro.status !== "REVIEW") return;
 
-                const order = moveInReview(reviewEntriesOf(retro), itemId, delta);
-                if (!order) return; // already at the end of its group
+                const entries = reviewEntriesOf(retro);
+                const order = stepped
+                    ? moveInReview(entries, itemId, delta)
+                    : placeInReview(entries, itemId, beforeItemId ?? null);
+                if (!order) return; // the move would leave the card's own group
 
                 await db.setReviewOrder(order);
                 await broadcastRetro(io, retroId, await db.getRetroFull(retroId));

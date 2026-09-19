@@ -97,6 +97,8 @@ async function reviewBoard(title = 'E2E review queue') {
     review: await reviewBoard(),
     // A second one, so the live test and the solo tests cannot disturb each other.
     live: await reviewBoard('E2E review live'),
+    'drag-queue': await reviewBoard('E2E review drag'),
+    'drag-line': await reviewBoard('E2E review drag line'),
     sockets: await board('E2E sockets', 'INPUT', [[0, 'ana', 'Ana socket card']]),
     // A team board none of the seeded users belong to.
     private: await board('E2E private', 'INPUT', [], undefined,

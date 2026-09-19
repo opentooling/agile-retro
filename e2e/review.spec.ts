@@ -52,6 +52,62 @@ test.describe('the review queue', () => {
       await expect(page.getByRole('button', { name: 'Move topic 3 down' })).toBeDisabled()
       await expect(page.getByRole('button', { name: 'Move topic 4 up' })).toBeDisabled()
     })
+
+    test('a topic can be dragged to a new place in the queue', async ({ page }) => {
+      await openBoard(page, 'drag-queue')
+      expect(await queue(page)).toEqual(VOTE_ORDER)
+
+      // Drag the third topic above the first.
+      const handle = page.getByRole('button', { name: 'Drag to reorder topic 3' })
+      const target = page.getByRole('button', { name: 'Drag to reorder topic 1' })
+      const from = (await handle.boundingBox())!
+      const to = (await target.boundingBox())!
+      await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+      await page.mouse.down()
+      // dnd-kit starts a drag after 8px; move in steps like a hand would.
+      await page.mouse.move(from.x, from.y - 20, { steps: 5 })
+      await page.mouse.move(to.x + to.width / 2, to.y - 4, { steps: 20 })
+      await page.mouse.up()
+
+      await expect.poll(() => queue(page)).toEqual(
+        ['Queue bottom', 'Queue top', 'Queue middle', 'Queue unvoted', 'Queue unvoted two'],
+      )
+      await page.reload()
+      await expect.poll(() => queue(page)).toEqual(
+        ['Queue bottom', 'Queue top', 'Queue middle', 'Queue unvoted', 'Queue unvoted two'],
+      )
+    })
+
+    test('a drag across the "Also raised" line is refused, and the card springs back', async ({ page }) => {
+      await openBoard(page, 'drag-line')
+      const handle = page.getByRole('button', { name: 'Drag to reorder topic 1' })
+      const target = page.getByRole('button', { name: 'Drag to reorder topic 5' })
+      const from = (await handle.boundingBox())!
+      const to = (await target.boundingBox())!
+      await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(from.x, from.y + 20, { steps: 5 })
+      await page.mouse.move(to.x + to.width / 2, to.y + 20, { steps: 20 })
+      await page.mouse.up()
+
+      await page.waitForTimeout(1000)
+      expect(await queue(page)).toEqual(VOTE_ORDER)
+      await expect(page.getByText('Queue · by votes')).toBeVisible()
+
+      // …while a drag that stays inside the ranked half lands, on the same
+      // page, so the refusal above cannot be the drag simply not working.
+      const second = page.getByRole('button', { name: 'Drag to reorder topic 2' })
+      const first = (await handle.boundingBox())!
+      const legal = (await second.boundingBox())!
+      await page.mouse.move(legal.x + legal.width / 2, legal.y + legal.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(legal.x, legal.y - 20, { steps: 5 })
+      await page.mouse.move(first.x + first.width / 2, first.y - 4, { steps: 20 })
+      await page.mouse.up()
+      await expect.poll(() => queue(page)).toEqual(
+        ['Queue middle', 'Queue top', 'Queue bottom', 'Queue unvoted', 'Queue unvoted two'],
+      )
+    })
   })
 
   test('the order is the room\'s: everyone\'s queue moves together', async ({ browser }) => {

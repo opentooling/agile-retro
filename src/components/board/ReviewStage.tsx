@@ -1,7 +1,15 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, MessageSquareText, RotateCcw, Star } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, GripVertical, MessageSquareText, RotateCcw, Star } from 'lucide-react'
+import {
+  DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { Button } from '@/components/ui/button'
 import { MentionText } from '@/components/Mentions'
 import { cn } from '@/lib/utils'
@@ -15,6 +23,42 @@ function isTyping(target: EventTarget | null) {
   const el = target as HTMLElement | null
   if (!el) return false
   return el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)
+}
+
+type DragHandle = { ref: (el: HTMLElement | null) => void; props: Record<string, unknown> }
+
+/**
+ * A queue row that can be dragged to a new place.
+ *
+ * The handle is separate from the row's own click target — the whole row
+ * selects the topic — so picking a card up and choosing one stay different
+ * gestures. With dragging off, this is a plain list item.
+ */
+function SortableRow({
+  id,
+  disabled,
+  children,
+}: {
+  id: string
+  disabled: boolean
+  children: (handle: DragHandle | null) => React.ReactNode
+}) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
+    useSortable({ id, disabled })
+  return (
+    <li
+      ref={setNodeRef}
+      className="relative"
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+        zIndex: isDragging ? 10 : undefined,
+      }}
+    >
+      {children(disabled ? null : { ref: setActivatorNodeRef, props: { ...attributes, ...listeners } })}
+    </li>
+  )
 }
 
 /**
@@ -46,6 +90,7 @@ export function ReviewStage({
   canReorder = false,
   customOrder = false,
   onReorder,
+  onDropBefore,
   onResetOrder,
 }: {
   entries: ReviewEntry[]
@@ -60,6 +105,8 @@ export function ReviewStage({
   /** Is the queue in the facilitator's order rather than the vote ranking? */
   customOrder?: boolean
   onReorder?: (itemId: string, delta: -1 | 1) => void
+  /** A drag: put this card in front of that one, or last (null). */
+  onDropBefore?: (itemId: string, beforeItemId: string | null) => void
   onResetOrder?: () => void
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -67,6 +114,29 @@ export function ReviewStage({
   const current = entries[index]
   const voted = useMemo(() => entries.filter((e) => e.total > 0), [entries])
   const unvoted = useMemo(() => entries.filter((e) => e.total === 0), [entries])
+
+  const sensors = useSensors(
+    // 8px before a drag starts, so a click on a row still selects the topic.
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  /**
+   * A card was dropped. Send where it landed as "in front of this one", which
+   * survives the board changing under the drag; the server decides whether the
+   * move is allowed and tells everyone. Nothing moves optimistically — a
+   * refused drop should spring back, not settle and then jump.
+   */
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return
+    const ids = entries.map((e) => e.item.id)
+    const from = ids.indexOf(String(active.id))
+    const to = ids.indexOf(String(over.id))
+    if (from === -1 || to === -1) return
+    const rest = ids.filter((id) => id !== String(active.id))
+    const landing = rest.indexOf(String(over.id)) + (from < to ? 1 : 0)
+    onDropBefore?.(String(active.id), rest[landing] ?? null)
+  }
 
   const go = (delta: number) => {
     const next = entries[Math.min(entries.length - 1, Math.max(0, index + delta))]
@@ -102,7 +172,8 @@ export function ReviewStage({
     const reactions = new Map<string, number>()
     for (const r of entry.item.reactions ?? []) reactions.set(r.emoji, (reactions.get(r.emoji) ?? 0) + 1)
     return (
-      <li key={entry.item.id} className="relative">
+      <SortableRow key={entry.item.id} id={entry.item.id} disabled={!canReorder}>
+        {(handle) => (<>
         <div
           className={cn(
             'flex gap-3 rounded-xl border px-3 py-2.5 transition-colors',
@@ -110,6 +181,18 @@ export function ReviewStage({
           )}
           style={selected ? { boxShadow: `inset 3px 0 0 hsl(var(--tone-${t})), var(--shadow-lift)` } : undefined}
         >
+          {handle && (
+            <button
+              type="button"
+              ref={handle.ref}
+              {...handle.props}
+              aria-label={`Drag to reorder topic ${rank}`}
+              title="Drag to reorder"
+              className="relative z-10 -my-1 -ml-1 grid h-7 w-5 shrink-0 cursor-grab touch-none place-items-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+            >
+              <GripVertical className="h-4 w-4" aria-hidden />
+            </button>
+          )}
           <span className="w-5 shrink-0 pt-0.5 text-right font-mono text-xs tabular-nums text-muted-foreground">{rank}</span>
           <div className="min-w-0 flex-1">
             <div className={cn('line-clamp-2 whitespace-pre-wrap text-sm leading-snug', selected ? 'font-semibold' : 'font-medium')}>
@@ -166,7 +249,8 @@ export function ReviewStage({
           aria-label={`Discuss topic ${rank}`}
           className="absolute inset-0 rounded-xl"
         />
-      </li>
+        </>)}
+      </SortableRow>
     )
   }
 
@@ -259,6 +343,8 @@ export function ReviewStage({
             </Button>
           )}
         </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={entries.map((e) => e.item.id)} strategy={verticalListSortingStrategy}>
         <ol className="min-h-0 flex-1 space-y-1 overflow-y-auto pb-2 pr-1">
           {voted.map((entry, i) => row(entry, i + 1, i, voted.length))}
           {unvoted.length > 0 && (
@@ -272,6 +358,8 @@ export function ReviewStage({
           )}
           {unvoted.map((entry, i) => row(entry, voted.length + i + 1, i, unvoted.length))}
         </ol>
+        </SortableContext>
+        </DndContext>
       </nav>
     </div>
   )
