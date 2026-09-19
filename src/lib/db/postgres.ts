@@ -146,6 +146,8 @@ ALTER TABLE "Retrospective" ADD COLUMN IF NOT EXISTS "expiresAt" TIMESTAMPTZ;
 -- are simply unknown, rather than being invented.
 ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "completedAt" TIMESTAMPTZ;
+-- The facilitator's own order for the review queue; null means "by votes".
+ALTER TABLE "Item" ADD COLUMN IF NOT EXISTS "reviewOrder" INTEGER;
 `;
 
 // Cache the pool and the one-time schema init on globalThis so dev/HMR and
@@ -346,6 +348,7 @@ const mapItem = (r: Row): Item => ({
   username: r.username,
   columnId: r.columnId,
   order: r.order,
+  reviewOrder: r.reviewOrder ?? null,
   createdAt: r.createdAt,
   votes: [],
   reactions: [],
@@ -725,6 +728,25 @@ export async function reorderItems(orderedIds: string[]): Promise<void> {
       await client.query(`UPDATE "Item" SET "order" = $2 WHERE "id" = $1`, [orderedIds[i], i]);
     }
   });
+}
+
+/** Arrange the review queue: positions follow the given id sequence. */
+export async function setReviewOrder(orderedIds: string[]): Promise<void> {
+  if (orderedIds.length === 0) return;
+  await withTransaction(async (client) => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await client.query(`UPDATE "Item" SET "reviewOrder" = $2 WHERE "id" = $1`, [orderedIds[i], i]);
+    }
+  });
+}
+
+/** Forget a board's arranged queue, returning it to the vote ranking. */
+export async function clearReviewOrder(retroId: string): Promise<void> {
+  await query(
+    `UPDATE "Item" SET "reviewOrder" = NULL WHERE "columnId" IN
+       (SELECT "id" FROM "Column" WHERE "retrospectiveId" = $1)`,
+    [retroId]
+  );
 }
 
 export async function countItems(): Promise<number> {

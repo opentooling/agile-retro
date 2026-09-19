@@ -55,6 +55,27 @@ async function board(
   return r.id
 }
 
+/**
+ * A board in Review whose queue has both halves: three cards ranked by votes
+ * and one nobody voted for, under "Also raised".
+ */
+async function reviewBoard(title = 'E2E review queue') {
+  const id = await board(title, 'REVIEW', [
+    [0, 'ana', 'Queue top'],
+    [0, 'ana', 'Queue middle'],
+    [0, 'amy', 'Queue bottom'],
+    [1, 'amy', 'Queue unvoted'],
+    [1, 'ana', 'Queue unvoted two'],
+  ])
+  const columns = (await db.getRetroFull(id))!.columns
+  const byContent = new Map(columns.flatMap((c) => c.items).map((i) => [i.content, i.id]))
+  const votes: [string, number][] = [['Queue top', 3], ['Queue middle', 2], ['Queue bottom', 1]]
+  for (const [content, count] of votes) {
+    await db.createVote({ itemId: byContent.get(content)!, userId: USERS.fay.email, count })
+  }
+  return id
+}
+
 ;(async () => {
   const mine: [number, Who, string][] = [[0, 'ana', 'Ana first'], [0, 'ana', 'Ana second'], [0, 'amy', 'Amy card']]
   const boards = {
@@ -72,6 +93,10 @@ async function board(
     overtimeReconnect: await board('E2E overtime reconnect', 'INPUT', [[0, 'ana', 'Before voting']], { minutesAgo: 30, duration: 10 }),
     // Freshly started, for the test that skews the browser's clock.
     freshTimer: await board('E2E fresh timer', 'INPUT', [], { minutesAgo: 0, duration: 10 }),
+    // A review queue with a voted half and an "Also raised" half.
+    review: await reviewBoard(),
+    // A second one, so the live test and the solo tests cannot disturb each other.
+    live: await reviewBoard('E2E review live'),
     sockets: await board('E2E sockets', 'INPUT', [[0, 'ana', 'Ana socket card']]),
     // A team board none of the seeded users belong to.
     private: await board('E2E private', 'INPUT', [], undefined,

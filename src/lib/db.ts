@@ -76,6 +76,8 @@ export const updateItemContent = bind("updateItemContent");
 export const updateItemSummary = bind("updateItemSummary");
 export const updateItemColumn = bind("updateItemColumn");
 export const reorderItems = bind("reorderItems");
+export const setReviewOrder = bind("setReviewOrder");
+export const clearReviewOrder = bind("clearReviewOrder");
 export const countItems = bind("countItems");
 
 // Votes

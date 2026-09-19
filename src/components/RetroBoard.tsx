@@ -52,6 +52,7 @@ import {
 } from '@/components/ui/dialog'
 import { placeBefore, neighbourFor } from '@/lib/board-order'
 import { clockOffset } from '@/lib/phase-timer'
+import { isCustomOrder, orderedForReview } from '@/lib/review-order'
 
 // Re-exported: these moved into ./board/parts, and are imported from here by
 // tests and callers.
@@ -585,15 +586,30 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
     return Array.from(names)
   }, [participants, username, retro])
 
-  // Every card, pooled and ranked by votes — Review, Actions and the record use it.
+  // Every card, pooled and ranked — Review, Actions and the record use it. By
+  // votes, unless the facilitator has arranged the review queue by hand.
   const ranked: ReviewEntry[] = useMemo(
     () =>
-      retro.columns
-        .flatMap(col => col.items.map(item => ({ item, column: col })))
-        .map(entry => ({ ...entry, total: entry.item.votes.reduce((acc, v) => acc + v.count, 0) }))
-        .sort((a, b) => b.total - a.total),
+      orderedForReview(
+        retro.columns
+          .flatMap(col => col.items.map(item => ({ item, column: col })))
+          .map(entry => ({
+            ...entry,
+            id: entry.item.id,
+            total: entry.item.votes.reduce((acc, v) => acc + v.count, 0),
+            reviewOrder: entry.item.reviewOrder,
+          })),
+      ),
     [retro.columns]
   )
+  const queueIsArranged = useMemo(() => isCustomOrder(ranked.map((e) => e.item)), [ranked])
+
+  const handleReorderReview = (itemId: string, delta: -1 | 1) => {
+    socket?.emit('reorder-review', { retroId: retro.id, itemId, delta })
+  }
+  const handleResetReviewOrder = () => {
+    socket?.emit('reset-review-order', { retroId: retro.id })
+  }
 
   if (!isJoined) {
     return (
@@ -1238,6 +1254,10 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
                 canEdit={canEditItem}
                 onReact={handleToggleReaction}
                 onSummary={handleUpdateSummary}
+                canReorder={isOwner}
+                customOrder={queueIsArranged}
+                onReorder={handleReorderReview}
+                onResetOrder={handleResetReviewOrder}
               />
             ) : status === 'ACTIONS' ? actionsStage : closed ? record : lanes}
           </div>

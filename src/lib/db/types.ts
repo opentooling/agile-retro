@@ -95,6 +95,11 @@ export type Item = {
   username: string;
   columnId: string;
   order: number;
+  /**
+   * The facilitator's position for this card in the review queue, when they
+   * have arranged it. Null everywhere means the queue is ranked by votes.
+   */
+  reviewOrder: number | null;
   createdAt: Date;
   votes: Vote[];
   reactions: Reaction[];
@@ -326,6 +331,10 @@ export interface DbApi {
   updateItemSummary(id: string, summary: string): MaybePromise<void>;
   updateItemColumn(id: string, columnId: string): MaybePromise<void>;
   reorderItems(orderedIds: string[]): MaybePromise<void>;
+  /** Arrange the review queue: positions follow the given id sequence. */
+  setReviewOrder(orderedIds: string[]): MaybePromise<void>;
+  /** Forget a board's arranged queue, returning it to the vote ranking. */
+  clearReviewOrder(retroId: string): MaybePromise<void>;
   /** Delete a card with its votes and reactions, in one transaction. */
   deleteItem(id: string): MaybePromise<void>;
   countItems(): MaybePromise<number>;

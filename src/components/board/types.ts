@@ -6,6 +6,8 @@ export type BoardItem = {
   userId?: string
   username: string
   votes: { userId: string; count: number }[]
+  /** The facilitator's place for this card in the review queue, if they set one. */
+  reviewOrder?: number | null
   reactions?: { userId: string; emoji: string }[]
 }
 

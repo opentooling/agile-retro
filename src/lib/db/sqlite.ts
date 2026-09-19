@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS "Item" (
     "username" TEXT NOT NULL DEFAULT 'Anonymous',
     "columnId" TEXT NOT NULL,
     "order" INTEGER NOT NULL DEFAULT 0,
+    "reviewOrder" INTEGER,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "Item_columnId_fkey" FOREIGN KEY ("columnId") REFERENCES "Column" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
@@ -159,6 +160,7 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE "Retrospective" ADD COLUMN "expiresAt" DATETIME`,
   `ALTER TABLE "ActionItem" ADD COLUMN "createdAt" DATETIME`,
   `ALTER TABLE "ActionItem" ADD COLUMN "completedAt" DATETIME`,
+  `ALTER TABLE "Item" ADD COLUMN "reviewOrder" INTEGER`,
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -342,6 +344,7 @@ const mapItem = (r: Row): Item => ({
   username: r.username,
   columnId: r.columnId,
   order: r.order,
+  reviewOrder: r.reviewOrder ?? null,
   createdAt: toDate(r.createdAt),
   votes: [],
   reactions: [],
@@ -703,6 +706,25 @@ export function reorderItems(orderedIds: string[]): void {
   transaction(() => {
     orderedIds.forEach((id, index) => updateItemOrder(id, index));
   });
+}
+
+/** Arrange the review queue: positions follow the given id sequence. */
+export function setReviewOrder(orderedIds: string[]): void {
+  if (orderedIds.length === 0) return;
+  const stmt = getDb().prepare(`UPDATE "Item" SET "reviewOrder" = ? WHERE "id" = ?`);
+  transaction(() => {
+    orderedIds.forEach((id, index) => stmt.run(index, id));
+  });
+}
+
+/** Forget a board's arranged queue, returning it to the vote ranking. */
+export function clearReviewOrder(retroId: string): void {
+  getDb()
+    .prepare(
+      `UPDATE "Item" SET "reviewOrder" = NULL WHERE "columnId" IN
+         (SELECT "id" FROM "Column" WHERE "retrospectiveId" = ?)`
+    )
+    .run(retroId);
 }
 
 export function countItems(): number {

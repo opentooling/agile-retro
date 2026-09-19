@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, MessageSquareText, Star } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, MessageSquareText, RotateCcw, Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { MentionText } from '@/components/Mentions'
 import { cn } from '@/lib/utils'
@@ -29,6 +29,11 @@ function isTyping(target: EventTarget | null) {
  * Which topic is in the spotlight is each viewer's own choice — the facilitator
  * usually shares their screen, and anyone else can look ahead without moving
  * the room.
+ *
+ * The order of the queue, by contrast, is the room's: the facilitator can lift
+ * a topic up or drop it down — within its own half, so nothing crosses the
+ * "Also raised" line and disappears — and everyone's queue moves with it. The
+ * reset puts the vote ranking back.
  */
 export function ReviewStage({
   entries,
@@ -38,6 +43,10 @@ export function ReviewStage({
   canEdit,
   onReact,
   onSummary,
+  canReorder = false,
+  customOrder = false,
+  onReorder,
+  onResetOrder,
 }: {
   entries: ReviewEntry[]
   anonymous: boolean
@@ -46,6 +55,12 @@ export function ReviewStage({
   canEdit: (item: BoardItem) => boolean
   onReact: (itemId: string, emoji: string) => void
   onSummary: (itemId: string, summary: string) => void
+  /** Only whoever is running the session arranges the queue. */
+  canReorder?: boolean
+  /** Is the queue in the facilitator's order rather than the vote ranking? */
+  customOrder?: boolean
+  onReorder?: (itemId: string, delta: -1 | 1) => void
+  onResetOrder?: () => void
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const index = Math.max(0, entries.findIndex((e) => e.item.id === selectedId))
@@ -80,7 +95,8 @@ export function ReviewStage({
   const tone = toneOf(current.column.type)
   const Icon = columnIcon(current.column.type)
 
-  const row = (entry: ReviewEntry, rank: number) => {
+  /** `place` is where the row sits inside its own half of the queue. */
+  const row = (entry: ReviewEntry, rank: number, place: number, groupSize: number) => {
     const selected = entry.item.id === current.item.id
     const t = toneOf(entry.column.type)
     const reactions = new Map<string, number>()
@@ -120,6 +136,28 @@ export function ReviewStage({
           )}>
             <Star className={cn('h-3 w-3', entry.total > 0 && 'fill-current')} aria-hidden /> {entry.total}
           </span>
+          {canReorder && (
+            // Above the click-anywhere overlay below, or these would never be
+            // reachable by mouse.
+            <div className="relative z-10 -my-1 flex shrink-0 flex-col">
+              {([-1, 1] as const).map((delta) => {
+                const Arrow = delta === -1 ? ChevronUp : ChevronDown
+                const stuck = delta === -1 ? place === 0 : place === groupSize - 1
+                return (
+                  <button
+                    key={delta}
+                    type="button"
+                    disabled={stuck}
+                    onClick={() => onReorder?.(entry.item.id, delta)}
+                    aria-label={`Move topic ${rank} ${delta === -1 ? 'up' : 'down'}`}
+                    className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+                  >
+                    <Arrow className="h-4 w-4" aria-hidden />
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
         <button
           type="button"
@@ -208,9 +246,21 @@ export function ReviewStage({
 
       {/* The queue. */}
       <nav aria-label="Discussion queue" className="flex min-h-0 flex-col @min-[60rem]/stage:order-1">
-        <p className="eyebrow mb-2 px-1">Queue · by votes</p>
+        <div className="mb-2 flex items-center justify-between gap-2 px-1">
+          <p className="eyebrow">Queue · {customOrder ? 'your order' : 'by votes'}</p>
+          {canReorder && customOrder && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onResetOrder?.()}
+              className="h-6 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden /> Reset order
+            </Button>
+          )}
+        </div>
         <ol className="min-h-0 flex-1 space-y-1 overflow-y-auto pb-2 pr-1">
-          {voted.map((entry, i) => row(entry, i + 1))}
+          {voted.map((entry, i) => row(entry, i + 1, i, voted.length))}
           {unvoted.length > 0 && (
             <li role="presentation" className="flex items-center gap-3 px-1 pb-1 pt-3">
               <span className="h-px flex-1 bg-border" />
@@ -220,7 +270,7 @@ export function ReviewStage({
               <span className="h-px flex-1 bg-border" />
             </li>
           )}
-          {unvoted.map((entry, i) => row(entry, voted.length + i + 1))}
+          {unvoted.map((entry, i) => row(entry, voted.length + i + 1, i, unvoted.length))}
         </ol>
       </nav>
     </div>

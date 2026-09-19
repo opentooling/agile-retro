@@ -10,6 +10,7 @@ import { redactRetroFull, applyBlindInput } from "./src/lib/sanitize";
 import { pushActionDoneState } from "./src/lib/jira-sync";
 import { purgeExpiredRetros } from "./src/lib/purge";
 import { placeBefore } from "./src/lib/board-order";
+import { moveInReview } from "./src/lib/review-order";
 import { snoozePhase } from "./src/lib/phase-timer";
 import { acceptText } from "./src/lib/text-limits";
 import {
@@ -476,6 +477,67 @@ app.prepare().then(() => {
                 await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
             } catch (error) {
                 console.error("Error moving item:", error);
+            }
+        });
+
+        /**
+         * Reorder the review queue, or put it back the way the votes had it.
+         *
+         * The queue is ranked by votes, but the facilitator running the session
+         * often knows better: two cards are really one conversation, or the
+         * quick win should go first. Only they can rearrange it — the queue is
+         * the room's agenda, not one person's view — and only while the board
+         * is in Review, where it is the thing on screen.
+         *
+         * The move is sent as a direction, not a finished order, so two people
+         * pressing at once cannot write a queue computed from a stale board:
+         * the server applies each move to the order it holds.
+         */
+        const reviewEntriesOf = (retro: db.RetroFull) =>
+            retro.columns.flatMap((c) =>
+                c.items.map((i) => ({
+                    id: i.id,
+                    total: i.votes.reduce((acc, v) => acc + v.count, 0),
+                    reviewOrder: i.reviewOrder,
+                })),
+            );
+
+        socket.on("reorder-review", async ({ retroId, itemId, delta }) => {
+            try {
+                if (delta !== -1 && delta !== 1) return;
+                const found = await loadItemOnBoard(retroId, itemId);
+                if (!found) return;
+                const { retro, ref } = found;
+                if (!canManageBoard(user, ref)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
+                if (retro.status !== "REVIEW") return;
+
+                const order = moveInReview(reviewEntriesOf(retro), itemId, delta);
+                if (!order) return; // already at the end of its group
+
+                await db.setReviewOrder(order);
+                await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
+            } catch (error) {
+                console.error("Error reordering the review queue:", error);
+            }
+        });
+
+        socket.on("reset-review-order", async ({ retroId }) => {
+            try {
+                const ref = await loadRetroRef(retroId);
+                if (!ref) return;
+                if (!canManageBoard(user, ref)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
+                if (ref.status !== "REVIEW") return;
+
+                await db.clearReviewOrder(retroId);
+                await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
+            } catch (error) {
+                console.error("Error resetting the review queue:", error);
             }
         });
 
