@@ -51,6 +51,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { placeBefore, neighbourFor } from '@/lib/board-order'
+import { clockOffset } from '@/lib/phase-timer'
 
 // Re-exported: these moved into ./board/parts, and are imported from here by
 // tests and callers.
@@ -377,6 +378,33 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
   }, [])
 
   /**
+   * How far this device's clock sits from the server's, in milliseconds.
+   *
+   * Phase starts are stamped by the server, so the clock has to be read
+   * against the server's time. Otherwise a device — or a server — whose clock
+   * is off shows a timer wrong by exactly that difference: a server running
+   * behind opens a brand-new board deep in overtime, and a laptop running fast
+   * watches every phase end early. Measured on every connect, because a
+   * machine that has slept can come back with a different answer.
+   */
+  const [skew, setSkew] = useState(0)
+  useEffect(() => {
+    if (!socket) return
+    const ask = () => socket.emit('time-check', { sentAt: Date.now() })
+    const answer = ({ sentAt, serverTime }: { sentAt?: number; serverTime?: number }) => {
+      if (typeof sentAt !== 'number' || typeof serverTime !== 'number') return
+      setSkew(clockOffset(sentAt, serverTime, Date.now()))
+    }
+    socket.on('time-reply', answer)
+    socket.on('connect', ask)
+    if (socket.connected) ask()
+    return () => {
+      socket.off('time-reply', answer)
+      socket.off('connect', ask)
+    }
+  }, [socket])
+
+  /**
    * Timing for the current phase.
    *
    * The clock deliberately keeps running past the deadline rather than moving
@@ -385,8 +413,8 @@ export default function RetroBoard({ initialData, user, viewer }: { initialData:
    * negative once the phase is in overtime.
    */
   const remainingSeconds = useMemo(
-    () => (phaseDeadline === null || now === null ? null : Math.ceil((phaseDeadline - now) / 1000)),
-    [phaseDeadline, now]
+    () => (phaseDeadline === null || now === null ? null : Math.ceil((phaseDeadline - (now + skew)) / 1000)),
+    [phaseDeadline, now, skew]
   )
 
   const isOvertime = remainingSeconds !== null && remainingSeconds < 0

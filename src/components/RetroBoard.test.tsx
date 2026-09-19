@@ -7,8 +7,10 @@ import { getCarriedOverActions, completeCarriedOverAction } from '@/app/actions'
 jest.mock('socket.io-client', () => {
   const mSocket = {
     on: jest.fn(),
+    off: jest.fn(),
     emit: jest.fn(),
     disconnect: jest.fn(),
+    connected: true,
   }
   return {
     io: jest.fn(() => mSocket),

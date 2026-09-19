@@ -51,4 +51,31 @@ test.describe('moving the board on', () => {
     await page.getByRole('button', { name: 'Start voting' }).click()
     await expect(page.getByText(step(2))).toBeVisible()
   })
+
+  test('the clock follows the server, not a device whose own clock is wrong', async ({ page }) => {
+    // Phase starts are stamped by the server, so a clock that disagrees lands
+    // straight on the timer: this used to open a brand-new board hours into
+    // overtime. Put this browser three hours ahead and the 10-minute phase
+    // should still read as roughly ten minutes left.
+    await page.addInitScript((skewMs) => {
+      const Real = Date
+      // `new Date()` and `Date.now()` run fast; everything else is the real
+      // thing, so parsing the board's timestamps still works.
+      function Skewed(...args: unknown[]) {
+        // @ts-expect-error forwarding the real constructor's own overloads
+        return args.length ? new Real(...args) : new Real(Real.now() + skewMs)
+      }
+      Skewed.now = () => Real.now() + skewMs
+      Skewed.parse = Real.parse
+      Skewed.UTC = Real.UTC
+      Skewed.prototype = Real.prototype
+      window.Date = Skewed as unknown as DateConstructor
+    }, 3 * 60 * 60 * 1000)
+
+    await openBoard(page, 'freshTimer')
+    const clock = page.getByRole('timer')
+    await expect(clock).toBeVisible()
+    await expect(page.getByText('Overtime', { exact: true })).toHaveCount(0)
+    await expect(clock).toHaveText(/^0[89]:[0-5][0-9]$/)
+  })
 })

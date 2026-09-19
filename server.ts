@@ -137,6 +137,15 @@ app.prepare().then(() => {
         const user = socket.data.user as AuthUser;
         console.log("Client connected", socket.id, user.id);
 
+        // The phase clock counts against the server's clock, not the device's.
+        // Phase starts are stamped here, so a browser whose clock disagrees —
+        // or a server whose own has drifted — otherwise reads the timer wrong,
+        // by exactly the difference. The client times the round trip and
+        // corrects for it (lib/phase-timer clockOffset).
+        socket.on("time-check", (payload: { sentAt?: number } | undefined) => {
+            socket.emit("time-reply", { sentAt: payload?.sentAt, serverTime: Date.now() });
+        });
+
         socket.on("join-retro", async ({ retroId }) => {
             try {
                 const ref = await loadRetroRef(retroId);

@@ -1,4 +1,4 @@
-import { snoozePhase } from './phase-timer'
+import { clockOffset, snoozePhase } from './phase-timer'
 
 const MIN = 60_000
 const start = new Date('2026-09-19T10:00:00Z')
@@ -37,5 +37,34 @@ describe('snoozePhase', () => {
     const now = new Date(start.getTime() + 3 * MIN)
     expect(deadlineOf(snoozePhase(start, null, now)) - now.getTime()).toBe(5 * MIN)
     expect(deadlineOf(snoozePhase(null, null, now)) - now.getTime()).toBe(5 * MIN)
+  })
+})
+
+describe('clockOffset', () => {
+  it('is zero when the clocks agree', () => {
+    expect(clockOffset(1_000, 1_020, 1_040)).toBe(0)
+  })
+
+  it('measures a server that is behind, discounting the flight time', () => {
+    // Server six hours behind; 40ms round trip, so it answered at the midpoint.
+    const behind = -6 * 60 * 60_000
+    expect(clockOffset(1_000, 1_020 + behind, 1_040)).toBe(behind)
+  })
+
+  it('measures a server that is ahead', () => {
+    expect(clockOffset(1_000, 1_020 + 90_000, 1_040)).toBe(90_000)
+  })
+
+  it('corrects a phase deadline back to the truth', () => {
+    // The board opened "now" by the server's clock, which is 6h16m behind this
+    // browser's. Without the offset the 10-minute phase looks 367 minutes over.
+    const skew = -(6 * 60 + 16) * MIN
+    const browserNow = Date.now()
+    const phaseStart = browserNow + skew
+    const deadline = phaseStart + 10 * MIN
+    expect(Math.round((deadline - browserNow) / MIN)).toBe(-366)
+
+    const offset = clockOffset(browserNow, browserNow + skew, browserNow)
+    expect(Math.round((deadline - (browserNow + offset)) / MIN)).toBe(10)
   })
 })

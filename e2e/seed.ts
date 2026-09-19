@@ -70,6 +70,8 @@ async function board(
     overtime: await board('E2E overtime', 'INPUT', [], { minutesAgo: 67, duration: 10 }),
     overtimeAdvance: await board('E2E overtime advance', 'INPUT', [[0, 'ana', 'Before voting']], { minutesAgo: 30, duration: 10 }),
     overtimeReconnect: await board('E2E overtime reconnect', 'INPUT', [[0, 'ana', 'Before voting']], { minutesAgo: 30, duration: 10 }),
+    // Freshly started, for the test that skews the browser's clock.
+    freshTimer: await board('E2E fresh timer', 'INPUT', [], { minutesAgo: 0, duration: 10 }),
     sockets: await board('E2E sockets', 'INPUT', [[0, 'ana', 'Ana socket card']]),
     // A team board none of the seeded users belong to.
     private: await board('E2E private', 'INPUT', [], undefined,

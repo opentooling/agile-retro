@@ -24,3 +24,22 @@ export function snoozePhase(
   const minutes = Math.ceil((target - start.getTime()) / MIN)
   return { durationMinutes: minutes, phaseStart: new Date(target - minutes * MIN) }
 }
+
+/**
+ * How far this browser's clock sits from the server's, in milliseconds, so the
+ * phase clock can count against the server's time rather than the device's.
+ *
+ * Phase starts are stamped by the server, so any disagreement between the two
+ * clocks lands straight on the timer: a server running six hours behind (a
+ * sleeping VM whose clock drifted, say) puts a brand-new board hours into
+ * overtime, and a participant whose own laptop is ten minutes fast watches
+ * every phase end early.
+ *
+ * Measured the way NTP does it, from a round trip: the reply was written at
+ * some point between the request leaving and the answer arriving, and taking
+ * the midpoint of those two cancels the flight time as long as it is roughly
+ * symmetric. Add the result to a local timestamp to get the server's.
+ */
+export function clockOffset(sentAt: number, serverTime: number, receivedAt: number): number {
+  return serverTime - (sentAt + receivedAt) / 2
+}
