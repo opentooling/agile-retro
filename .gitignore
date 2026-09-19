@@ -55,3 +55,6 @@ next-env.d.ts
 /e2e/.data/
 /playwright-report/
 /test-results/
+
+# k6 fixtures: contain signed session tokens for the target deployment
+/loadtest/data.json

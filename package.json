@@ -15,7 +15,8 @@
     "lint": "eslint",
     "test": "jest",
     "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "loadtest": "loadtest/run.sh"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
