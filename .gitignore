@@ -50,3 +50,8 @@ next-env.d.ts
 
 # Claude Code agent worktrees (full checkouts of other branches)
 .claude/worktrees/
+
+# Playwright
+/e2e/.data/
+/playwright-report/
+/test-results/

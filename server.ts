@@ -152,6 +152,19 @@ app.prepare().then(() => {
                 socket.join(retroId);
                 console.log(`Socket ${socket.id} joined retro ${retroId} as ${user.name ?? user.id}`);
 
+                // Catch the newcomer up. Their page's board was read when the
+                // page rendered; anything that changed between then and joining
+                // this room was broadcast to a room they were not yet in, and
+                // stayed invisible to them until the next change. Same
+                // redaction as a broadcast, including blind input.
+                const current = redactRetroFull(await db.getRetroFull(retroId));
+                if (current) {
+                    socket.emit(
+                        "retro-updated",
+                        current.blindInput && current.status === "INPUT" ? applyBlindInput(current, user.id) : current,
+                    );
+                }
+
                 const status = await db.getRetroStatus(retroId);
                 if (status?.status === 'CLOSED') {
                     return;
