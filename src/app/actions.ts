@@ -5,7 +5,7 @@ import type { Team } from '@/lib/db/types'
 import { getPlugin } from '@/lib/plugins/registry'
 import { pushActionDoneState } from '@/lib/jira-sync'
 import { auth } from '@/auth'
-import { authUserFromSession, canViewBoard, canAdministerBoard, canAdministerTeam, teamAccessLevel, type RetroRef } from '@/lib/authz'
+import { authUserFromSession, boardScopeFor, canViewBoard, canAdministerBoard, canAdministerTeam, teamAccessLevel, type RetroRef } from '@/lib/authz'
 import { revalidatePath } from 'next/cache'
 import { templateById } from '@/lib/retro-templates'
 import { RETENTION_OPTIONS, expiryFromRetention } from '@/lib/retention'
@@ -543,6 +543,21 @@ export async function getTeamInsights(teamId: string): Promise<TeamInsights | nu
     if (!canViewBoard(authUser, ref)) return null
 
     return buildInsights(await db.teamAnalytics(teamId))
+}
+
+/**
+ * What the filter can suggest: the facilitators, teams and tags that actually
+ * occur in the boards this viewer may see.
+ *
+ * Scoped like every listing — a suggestion that named a team whose boards the
+ * viewer cannot open would leak the team through the filter — and, because the
+ * values come from those same boards, every suggestion returns rows.
+ */
+export async function getFilterOptions() {
+    const authUser = authUserFromSession(await auth())
+    if (!authUser) return { creators: [], teamNames: [], tags: [] }
+    const scope = boardScopeFor(authUser, await db.listTeams())
+    return db.listFilterFacets(scope)
 }
 
 export async function getUniqueTags() {

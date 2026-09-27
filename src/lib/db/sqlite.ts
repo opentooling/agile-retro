@@ -20,8 +20,10 @@ import type {
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro, TeamAnalyticsRaw,
   UserActivityRaw,
   RetroDurations,
+  FilterFacets,
 } from "./types";
 import type { BoardScope } from "../authz";
+import { splitTags } from "./facets";
 import path from "node:path";
 import fs from "node:fs";
 
@@ -637,6 +639,45 @@ export function countRetrospectives(filter: RetroFilter): number {
 }
 
 /** Raw `tags` strings of every retrospective (used to derive unique/popular tags). */
+/** Distinct values across the boards in scope, for the filter's suggestions. */
+export function listFilterFacets(scope: BoardScope): FilterFacets {
+  const db = getDb();
+  // Each statement needs its own parameter list: the scope clause pushes into
+  // whichever array it is given.
+  const scoped = (alias: string, params: any[]) => {
+    const clause = scopeClause(scope, `${alias}."teamId"`, params);
+    return clause ? `WHERE ${clause}` : "";
+  };
+
+  const creatorParams: any[] = [];
+  const creatorWhere = scoped("r", creatorParams);
+  const creators = db
+    .prepare(`SELECT DISTINCT r."creator" AS v FROM "Retrospective" r ${creatorWhere} ORDER BY v`)
+    .all(...creatorParams)
+    .map((row: Row) => row.v as string)
+    .filter(Boolean);
+
+  const teamParams: any[] = [];
+  const teamWhere = scoped("r", teamParams);
+  const teamNames = db
+    .prepare(
+      `SELECT DISTINCT t."name" AS v FROM "Retrospective" r
+         JOIN "Team" t ON t."id" = r."teamId" ${teamWhere} ORDER BY v`
+    )
+    .all(...teamParams)
+    .map((row: Row) => row.v as string)
+    .filter(Boolean);
+
+  const tagParams: any[] = [];
+  const tagWhere = scoped("r", tagParams);
+  const tagStrings = db
+    .prepare(`SELECT r."tags" AS v FROM "Retrospective" r ${tagWhere}`)
+    .all(...tagParams)
+    .map((row: Row) => row.v as string);
+
+  return { creators, teamNames, tags: splitTags(tagStrings) };
+}
+
 export function getAllTagStrings(): string[] {
   return getDb()
     .prepare(`SELECT "tags" FROM "Retrospective"`)

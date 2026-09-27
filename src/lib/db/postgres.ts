@@ -24,8 +24,10 @@ import type {
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro, TeamAnalyticsRaw,
   UserActivityRaw,
   RetroDurations,
+  FilterFacets,
 } from "./types";
 import type { BoardScope } from "../authz";
+import { splitTags } from "./facets";
 
 // ---------------------------------------------------------------------------
 // Connection + schema bootstrap
@@ -666,6 +668,40 @@ export async function countRetrospectives(filter: RetroFilter): Promise<number> 
 }
 
 /** Raw `tags` strings of every retrospective (used to derive unique/popular tags). */
+/** Distinct values across the boards in scope, for the filter's suggestions. */
+export async function listFilterFacets(scope: BoardScope): Promise<FilterFacets> {
+  // Each statement needs its own parameter list: the scope clause pushes into
+  // whichever array it is given.
+  const where = (params: unknown[]) => {
+    const clause = scopeClause(scope, `r."teamId"`, params);
+    return clause ? `WHERE ${clause}` : "";
+  };
+
+  const creatorParams: unknown[] = [];
+  const creatorWhere = where(creatorParams);
+  const creators = (
+    await query(`SELECT DISTINCT r."creator" AS v FROM "Retrospective" r ${creatorWhere} ORDER BY v`, creatorParams)
+  ).map((r) => r.v as string).filter(Boolean);
+
+  const teamParams: unknown[] = [];
+  const teamWhere = where(teamParams);
+  const teamNames = (
+    await query(
+      `SELECT DISTINCT t."name" AS v FROM "Retrospective" r
+         JOIN "Team" t ON t."id" = r."teamId" ${teamWhere} ORDER BY v`,
+      teamParams
+    )
+  ).map((r) => r.v as string).filter(Boolean);
+
+  const tagParams: unknown[] = [];
+  const tagWhere = where(tagParams);
+  const tagStrings = (
+    await query(`SELECT r."tags" AS v FROM "Retrospective" r ${tagWhere}`, tagParams)
+  ).map((r) => r.v as string);
+
+  return { creators, teamNames, tags: splitTags(tagStrings) };
+}
+
 export async function getAllTagStrings(): Promise<string[]> {
   return (await query(`SELECT "tags" FROM "Retrospective"`)).map((r) => r.tags as string);
 }

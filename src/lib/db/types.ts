@@ -145,6 +145,12 @@ export type RetroFull = Retrospective & {
   team: Team | null;
 };
 
+export type FilterFacets = {
+  creators: string[];
+  teamNames: string[];
+  tags: string[];
+};
+
 export type RetroFilter = {
   /** Restrict to boards the viewer may see (see boardScopeFor in authz). */
   scope?: BoardScope;
@@ -315,6 +321,13 @@ export interface DbApi {
   ): MaybePromise<(Retrospective & { team: Team | null })[]>;
   countRetrospectives(filter: RetroFilter): MaybePromise<number>;
   getAllTagStrings(): MaybePromise<string[]>;
+  /**
+   * The values that actually occur in the boards a viewer may see, for the
+   * filter's suggestions: facilitator names, team names and tags. Scoped like
+   * every other listing, so a suggestion never names a team whose boards the
+   * viewer cannot open — and never suggests a filter that returns nothing.
+   */
+  listFilterFacets(scope: BoardScope): MaybePromise<FilterFacets>;
 
   // Items
   itemMaxOrder(columnId: string): MaybePromise<number | null>;

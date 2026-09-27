@@ -100,6 +100,9 @@ async function reviewBoard(title = 'E2E review queue') {
     'drag-queue': await reviewBoard('E2E review drag'),
     'drag-line': await reviewBoard('E2E review drag line'),
     sockets: await board('E2E sockets', 'INPUT', [[0, 'ana', 'Ana socket card']]),
+    // A team fay runs, so the filter has a team it may suggest to her.
+    teamBoard: await board('E2E team board', 'INPUT', [], undefined,
+      (await db.createTeam('E2E visible team', { createdBy: USERS.fay.email, memberGroups: [], adminGroups: [] })).id),
     // A team board none of the seeded users belong to.
     private: await board('E2E private', 'INPUT', [], undefined,
       (await db.createTeam('E2E private team', { createdBy: null, memberGroups: ['/e2e-private'], adminGroups: [] })).id, 'nobody'),

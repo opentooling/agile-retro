@@ -66,6 +66,7 @@ export const teamAnalytics = bind("teamAnalytics");
 export const listRetrospectives = bind("listRetrospectives");
 export const countRetrospectives = bind("countRetrospectives");
 export const getAllTagStrings = bind("getAllTagStrings");
+export const listFilterFacets = bind("listFilterFacets");
 
 // Items
 export const itemMaxOrder = bind("itemMaxOrder");
