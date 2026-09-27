@@ -41,6 +41,8 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "agile-retro.serviceAccountName" . }}
+      # The app never calls the Kubernetes API, so it gets no token for it.
+      automountServiceAccountToken: false
       {{- with .Values.hostAliases }}
       hostAliases:
         {{- toYaml . | nindent 8 }}

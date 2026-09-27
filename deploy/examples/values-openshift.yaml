@@ -1,0 +1,95 @@
+# Agile Retro on a company OpenShift cluster — a starting point.
+#
+# docs/OPENSHIFT.md explains each block and what to ask your platform team
+# for. Replace every example.com value. CI renders this file on every commit
+# and checks it does what the comments say, so it cannot drift from the chart.
+#
+#   helm install agile-retro oci://ghcr.io/opentooling/charts/agile-retro \
+#     -n agile-retro -f values-openshift.yaml
+
+image:
+  # Your mirror, if the cluster cannot reach ghcr.io.
+  repository: ghcr.io/opentooling/agile-retro
+  # Defaults to the chart's appVersion — the image CI built with that chart.
+  # tag: sha-1983420
+# imagePullSecrets:
+#   - name: corp-registry
+
+# restricted-v2: no fixed UIDs, so OpenShift assigns them from the project's
+# range. A Route instead of an Ingress.
+openshift:
+  enabled: true
+  route:
+    enabled: true
+    host: retro.apps.ocp.example.com
+    tls:
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect
+    # timeout: 1h is the chart's default, for the board's WebSocket.
+ingress:
+  enabled: false
+
+# The company's CA bundle, so the app trusts the identity provider's (and the
+# database's) certificates. OpenShift fills a ConfigMap carrying this label
+# with the cluster's trusted bundle, under ca-bundle.crt.
+extraObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: agile-retro-trusted-ca
+      labels:
+        config.openshift.io/inject-trusted-cabundle: "true"
+extraCaCerts:
+  configMap: agile-retro-trusted-ca
+  key: ca-bundle.crt
+
+# Sign-in through the company's Keycloak (or Red Hat build of Keycloak).
+auth:
+  groupsClaim: user_roles
+  adminGroups:
+    - /Retro-Admins
+  keycloak:
+    enabled: true
+    clientId: agile-retro
+    issuer: https://sso.corp.example.com/realms/corp
+    # oc create secret generic agile-retro-oidc --from-literal=keycloak-client-secret=...
+    existingSecret: agile-retro-oidc
+    existingSecretKey: keycloak-client-secret
+
+# A database run by whoever runs databases. The connection string lives in a
+# Secret you create:
+#   oc create secret generic agile-retro-db \
+#     --from-literal=database-url='postgres://USER:PASSWORD@HOST:5432/DB?sslmode=verify-full'
+postgresql:
+  enabled: false
+externalDatabase:
+  existingSecret: agile-retro-db
+  existingSecretKey: database-url
+
+# Or the bundled database, on Red Hat's image. A subscribed cluster's global
+# pull secret already covers registry.redhat.io, so no imagePullSecrets are
+# needed for it. Swap this in for the two blocks above.
+# postgresql:
+#   enabled: true
+#   image: registry.redhat.io/rhel9/postgresql-16
+#   persistence:
+#     size: 10Gi
+
+# Only the OpenShift router may reach the app; the app may reach DNS (always
+# allowed by the chart), the identity provider and the database.
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          policy-group.network.openshift.io/ingress: ""
+  egressTo:
+    # HTTPS to the identity provider. Narrow with an ipBlock once you know
+    # its addresses.
+    - ports:
+        - port: 443
+          protocol: TCP
+    # PostgreSQL.
+    - ports:
+        - port: 5432
+          protocol: TCP

@@ -25,7 +25,7 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 - [docs/KEYCLOAK_GROUPS.md](docs/KEYCLOAK_GROUPS.md) — team access control via identity-provider groups (member/admin groups, the `groups` claim, the optional picker).
 - [docs/JIRA_INTEGRATION.md](docs/JIRA_INTEGRATION.md) — linking action items to Jira and the two-way "done" sync.
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — deploying with the Helm chart: private CAs, OpenShift, external databases, air-gapped registries, and the local k3d stack.
-- [DEPLOY_OPENSHIFT.md](DEPLOY_OPENSHIFT.md) — building the image inside OpenShift (S2I / binary builds).
+- [docs/OPENSHIFT.md](docs/OPENSHIFT.md) — running it on a company OpenShift cluster: what to ask for, Keycloak, a worked values file, the security review, troubleshooting.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

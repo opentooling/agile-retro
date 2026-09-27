@@ -86,6 +86,10 @@ refused rather than resolved silently.
 
 ## 5. OpenShift
 
+For a company cluster, **[OPENSHIFT.md](OPENSHIFT.md)** is the full walk-through —
+what to ask the platform and identity teams for, the Keycloak client, a worked
+values file, a security-review summary and troubleshooting. The short version:
+
 ```yaml
 openshift:
   enabled: true              # no fixed UIDs; restricted-v2 assigns them

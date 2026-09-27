@@ -6,6 +6,10 @@ metadata:
   labels:
     {{- include "agile-retro.labels" . | nindent 4 }}
     app.kubernetes.io/component: sqlite
+  annotations:
+    # Kept by `helm uninstall`: this holds every retrospective. A
+    # reinstall under the same release name picks it up again.
+    helm.sh/resource-policy: keep
 spec:
   accessModes:
     - ReadWriteOnce

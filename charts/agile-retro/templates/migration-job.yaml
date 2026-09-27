@@ -49,6 +49,7 @@ spec:
         app.kubernetes.io/component: migration
     spec:
       restartPolicy: Never
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

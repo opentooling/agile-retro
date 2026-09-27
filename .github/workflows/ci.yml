@@ -173,6 +173,41 @@ jobs:
           print("The OpenShift example renders as documented.")
           PY
 
+      # The example docs/OPENSHIFT.md walks through, held to what its comments
+      # say: a Route and no Ingress, the cluster's trusted CA injected into a
+      # ConfigMap the chart never writes data into and mounted where Node reads
+      # it, the database and client secret from Secrets, only the router let
+      # in, and no fixed UIDs.
+      - name: Render the company OpenShift example
+        run: |
+          helm lint charts/agile-retro -f deploy/examples/values-openshift.yaml
+          helm template agile-retro charts/agile-retro -n agile-retro \
+            -f deploy/examples/values-openshift.yaml > example.yaml
+          python3 - <<'PY'
+          import yaml
+          docs = [d for d in yaml.safe_load_all(open("example.yaml")) if d]
+          kinds = {d["kind"] for d in docs}
+          assert "Route" in kinds and "Ingress" not in kinds, kinds
+          cm = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "agile-retro-trusted-ca")
+          assert cm["metadata"]["labels"]["config.openshift.io/inject-trusted-cabundle"] == "true", cm
+          assert "data" not in cm, "the chart must not write data OpenShift injects"
+          app = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "agile-retro")
+          pod = app["spec"]["template"]["spec"]
+          c = pod["containers"][0]
+          env = {e["name"]: e for e in c["env"]}
+          assert env["NODE_EXTRA_CA_CERTS"]["value"] == "/etc/agile-retro/ca/ca-bundle.crt", env["NODE_EXTRA_CA_CERTS"]
+          assert {v["name"]: v for v in pod["volumes"]}["extra-ca"]["configMap"]["name"] == "agile-retro-trusted-ca"
+          assert env["DATABASE_URL"]["valueFrom"]["secretKeyRef"] == {"name": "agile-retro-db", "key": "database-url"}
+          assert env["AUTH_KEYCLOAK_SECRET"]["valueFrom"]["secretKeyRef"]["name"] == "agile-retro-oidc"
+          assert env["AUTH_URL"]["value"] == "https://retro.apps.ocp.example.com", env["AUTH_URL"]
+          assert not {"runAsUser", "runAsGroup", "fsGroup"} & set(pod["securityContext"]), pod["securityContext"]
+          assert not any(d["kind"] == "Deployment" and d["metadata"]["name"].endswith("-postgres") for d in docs)
+          policy = next(d for d in docs if d["kind"] == "NetworkPolicy")
+          sel = policy["spec"]["ingress"][0]["from"][0]["namespaceSelector"]["matchLabels"]
+          assert "policy-group.network.openshift.io/ingress" in sel, sel
+          print("The company OpenShift example renders as documented.")
+          PY
+
       # On OpenShift the bundled database has to be an image that runs under
       # an arbitrary UID, with that family's own settings and data path.
       - name: Render OpenShift with the bundled database
@@ -209,6 +244,16 @@ jobs:
           ingress = next(d for d in docs if d["kind"] == "Ingress")
           port = ingress["spec"]["rules"][0]["http"]["paths"][0]["backend"]["service"]["port"]["number"]
           assert port == 3000, ingress
+          # Nothing in the release calls the Kubernetes API, so no pod gets a token.
+          for d in docs:
+              spec = d.get("spec", {})
+              pod = spec if d["kind"] == "Pod" else spec.get("template", {}).get("spec")
+              if pod:
+                  assert pod.get("automountServiceAccountToken") is False, (d["kind"], d["metadata"]["name"])
+          # The data, and the password that opens it, outlive `helm uninstall`.
+          kept = {(d["kind"], d["metadata"]["name"]) for d in docs
+                  if (d["metadata"].get("annotations") or {}).get("helm.sh/resource-policy") == "keep"}
+          assert kept == {("PersistentVolumeClaim", "agile-retro-postgres"), ("Secret", "agile-retro-postgres")}, kept
           print("The default install renders as documented.")
           PY
 

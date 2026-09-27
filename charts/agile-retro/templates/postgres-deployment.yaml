@@ -21,6 +21,8 @@ spec:
         {{- include "agile-retro.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: postgres
     spec:
+      # PostgreSQL has no use for a Kubernetes API token.
+      automountServiceAccountToken: false
       securityContext:
         {{- if .Values.postgresql.podSecurityContext }}
         {{- toYaml .Values.postgresql.podSecurityContext | nindent 8 }}
