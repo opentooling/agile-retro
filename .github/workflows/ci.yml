@@ -313,7 +313,7 @@ jobs:
           exit 1
 
       - name: Trivy vulnerability scan (fails on fixable high/critical)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: agile-retro:ci
           severity: HIGH,CRITICAL
