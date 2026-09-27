@@ -1,3 +1,4 @@
+import type { BoardScope } from "../authz";
 /**
  * Shared types for the data-access layer.
  *
@@ -94,6 +95,11 @@ export type Item = {
   username: string;
   columnId: string;
   order: number;
+  /**
+   * The facilitator's position for this card in the review queue, when they
+   * have arranged it. Null everywhere means the queue is ranked by votes.
+   */
+  reviewOrder: number | null;
   createdAt: Date;
   votes: Vote[];
   reactions: Reaction[];
@@ -139,7 +145,15 @@ export type RetroFull = Retrospective & {
   team: Team | null;
 };
 
+export type FilterFacets = {
+  creators: string[];
+  teamNames: string[];
+  tags: string[];
+};
+
 export type RetroFilter = {
+  /** Restrict to boards the viewer may see (see boardScopeFor in authz). */
+  scope?: BoardScope;
   creatorContains?: string;
   creatorEquals?: string;
   tagsContains?: string;
@@ -148,10 +162,23 @@ export type RetroFilter = {
 };
 
 export type ActionFilter = {
+  /**
+   * Which boards' actions may be returned. Required, not optional: an action
+   * listing that forgets it returns every team's actions to whoever asked —
+   * which is exactly what the Actions page used to do. System callers that
+   * are already gated some other way pass `{ kind: "all" }` and say why.
+   */
+  scope: BoardScope;
   completed?: boolean;
   teamNameContains?: string;
   creatorContains?: string;
   assigneeContains?: string;
+  /**
+   * Exact assignee match, case-insensitive, against any of these names. For
+   * "assigned to me": the substring filter would count "Diana"'s actions as
+   * "ana"'s.
+   */
+  assigneeIn?: string[];
   retrospectiveId?: string;
   /** Exact team match — used to carry a team's open actions into its next retro. */
   teamId?: string;
@@ -207,12 +234,51 @@ export type TeamAnalyticsRaw = {
   };
   /** Seconds spent in each phase, per board, from the phase log. */
   phaseDurations: { phase: string; seconds: number }[];
+  /** One entry per board that had cards, oldest first — the trend lines. */
+  perRetro: {
+    at: Date;
+    title: string;
+    cards: number;
+    /** Cards that got notes in Review. */
+    discussed: number;
+    /** Distinct contributors; null on anonymous boards, which are never counted. */
+    contributors: number | null;
+  }[];
+  /** Each action, dated by the board that agreed it and by when it was closed. */
+  actionTimeline: {
+    agreedAt: Date;
+    completed: boolean;
+    /** Null while open, and for completions that predate the timestamp. */
+    completedAt: Date | null;
+  }[];
+};
+
+/** One person's own footprint across the boards, for their profile page. */
+export type UserActivityRaw = {
+  facilitated: { id: string; title: string; status: string; createdAt: Date; teamId: string | null }[];
+  cards: {
+    id: string;
+    content: string;
+    createdAt: Date;
+    columnTitle: string;
+    columnType: string;
+    retroId: string;
+    retroTitle: string;
+    teamId: string | null;
+    isAnonymous: boolean;
+  }[];
+  /** Stars given, summed per board. */
+  votes: { retroId: string; teamId: string | null; count: number }[];
+  /** Reactions given, counted per board. */
+  reactions: { retroId: string; teamId: string | null; count: number }[];
 };
 
 export type RetroDurations = {
   inputDuration?: number;
   votingDuration?: number;
   reviewDuration?: number;
+  /** Moved together with a duration when a snooze lands the deadline exactly. */
+  phaseStartTime?: Date;
 };
 
 /**
@@ -255,6 +321,15 @@ export interface DbApi {
   ): MaybePromise<(Retrospective & { team: Team | null })[]>;
   countRetrospectives(filter: RetroFilter): MaybePromise<number>;
   getAllTagStrings(): MaybePromise<string[]>;
+  /** Cheapest possible round trip, for the readiness probe. */
+  ping(): MaybePromise<void>;
+  /**
+   * The values that actually occur in the boards a viewer may see, for the
+   * filter's suggestions: facilitator names, team names and tags. Scoped like
+   * every other listing, so a suggestion never names a team whose boards the
+   * viewer cannot open — and never suggests a filter that returns nothing.
+   */
+  listFilterFacets(scope: BoardScope): MaybePromise<FilterFacets>;
 
   // Items
   itemMaxOrder(columnId: string): MaybePromise<number | null>;
@@ -271,6 +346,12 @@ export interface DbApi {
   updateItemSummary(id: string, summary: string): MaybePromise<void>;
   updateItemColumn(id: string, columnId: string): MaybePromise<void>;
   reorderItems(orderedIds: string[]): MaybePromise<void>;
+  /** Arrange the review queue: positions follow the given id sequence. */
+  setReviewOrder(orderedIds: string[]): MaybePromise<void>;
+  /** Forget a board's arranged queue, returning it to the vote ranking. */
+  clearReviewOrder(retroId: string): MaybePromise<void>;
+  /** Delete a card with its votes and reactions, in one transaction. */
+  deleteItem(id: string): MaybePromise<void>;
   countItems(): MaybePromise<number>;
 
   // Votes
@@ -292,11 +373,20 @@ export interface DbApi {
     dueDate?: Date | null;
   }): MaybePromise<ActionItem>;
   getActionItem(id: string): MaybePromise<ActionItem | null>;
+  /** Rewrite an action's text, assignee and due date. */
+  updateActionItem(id: string, data: { content: string; assignee: string | null; dueDate: Date | null }): MaybePromise<void>;
+  deleteActionItem(id: string): MaybePromise<void>;
   updateActionCompleted(id: string, completed: boolean): MaybePromise<void>;
   setActionExternalLink(id: string, link: { externalUrl: string; externalKey: string }): MaybePromise<void>;
   listActionItems(filter: ActionFilter): MaybePromise<ActionItemWithRetro[]>;
   countActionItems(filter: ActionFilter): MaybePromise<number>;
   countOpenActions(retroFilter: RetroFilter): MaybePromise<number>;
+  /**
+   * Everything one person has done: boards they ran (matched on any of
+   * `creatorNames`, since a board records its creator by name or id), and the
+   * cards, stars and reactions attributed to `userId`.
+   */
+  userActivity(userId: string, creatorNames: string[]): MaybePromise<UserActivityRaw>;
 
   // Maintenance
   clearDatabase(): MaybePromise<void>;

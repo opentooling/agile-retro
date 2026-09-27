@@ -11,3 +11,5 @@ README.md
 charts
 data/dev.db
 *.db
+# Claude Code state, including agent worktrees (whole repo copies on other branches)
+.claude

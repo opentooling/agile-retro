@@ -1,0 +1,15 @@
+{{- /*
+Extra manifests from values (custom resources, an OpenShift Route with your own
+annotations, a SealedSecret, whatever your cluster needs that this chart does
+not model). Each item is either a YAML object or a string; both are rendered
+with `tpl`, so they can use template expressions such as
+{{ include "agile-retro.fullname" $ }} and {{ .Release.Namespace }}.
+*/}}
+{{- range .Values.extraObjects }}
+---
+{{- if typeIs "string" . }}
+{{ tpl . $ }}
+{{- else }}
+{{ tpl (toYaml .) $ }}
+{{- end }}
+{{- end }}

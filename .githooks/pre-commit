@@ -1,0 +1,37 @@
+#!/bin/sh
+# Blocks a commit when a dependency has a known high or critical vulnerability.
+#
+# Runs on every commit, not only when package files change: a dependency that
+# was clean when it went in becomes vulnerable when an advisory is published,
+# without anyone touching the lockfile.
+#
+# If the audit can't reach the registry (offline, airgapped, proxy trouble) it
+# warns and lets the commit through — CI runs the same audit on every push and
+# fails hard, so nothing reaches main unchecked. Blocking here instead would
+# only teach people to reach for --no-verify.
+#
+# Installed by `npm install` (the "prepare" script sets core.hooksPath).
+# Emergency bypass: git commit --no-verify
+
+if [ ! -x node_modules/.bin/tsx ]; then
+  echo "pre-commit: dependencies not installed — skipping the vulnerability check (run npm install)." >&2
+  exit 0
+fi
+
+echo "pre-commit: checking dependencies for known vulnerabilities..."
+npm run --silent audit
+status=$?
+
+case $status in
+  0) exit 0 ;;
+  1)
+    echo "" >&2
+    echo "pre-commit: commit blocked — fix the vulnerabilities above first." >&2
+    echo "            (git commit --no-verify skips this check; CI will still fail.)" >&2
+    exit 1 ;;
+  *)
+    echo "" >&2
+    echo "pre-commit: WARNING — the vulnerability check could not run (see above)." >&2
+    echo "            Committing anyway; CI audits every push." >&2
+    exit 0 ;;
+esac

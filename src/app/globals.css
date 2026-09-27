@@ -8,14 +8,14 @@
   --color-foreground: hsl(var(--foreground));
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --color-sidebar-ring: hsl(var(--sidebar-ring));
-  --color-sidebar-border: hsl(var(--sidebar-border));
-  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
-  --color-sidebar-accent: hsl(var(--sidebar-accent));
-  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
-  --color-sidebar-primary: hsl(var(--sidebar-primary));
-  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
-  --color-sidebar: hsl(var(--sidebar));
+  --color-rail: hsl(var(--rail));
+  --color-rail-foreground: hsl(var(--rail-foreground));
+  --color-rail-muted: hsl(var(--rail-muted));
+  --color-rail-hover: hsl(var(--rail-hover));
+  --color-rail-border: hsl(var(--rail-border));
+  --color-rail-active: hsl(var(--rail-active));
+  --color-rail-active-foreground: hsl(var(--rail-active-foreground));
+  --color-note: hsl(var(--note));
   --color-chart-5: hsl(var(--chart-5));
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-3: hsl(var(--chart-3));
@@ -43,76 +43,124 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* Default theme — steel-blue primary with copper/gold accents on cool graphite
-   neutrals. Values are HSL triplets consumed via hsl(var(--x)). */
+/* Theme — "Stage & Desk" (v0.4).
+
+   Paper and ink. The desk is a quiet off-white with hairline rules; the rail is
+   ink in both themes; colour is kept for meaning — the four phase tones and the
+   column sentiments — and the teal primary marks the one action a screen is
+   asking for. Values are HSL triplets consumed via hsl(var(--x)).
+
+   Every text/surface pair below was measured, not eyeballed: body and muted
+   text clear WCAG AA (4.5:1) on background, card and muted in both themes, and
+   each tone's -ink clears AA on its own -soft fill (see the brief). */
 :root {
-  --radius: 0.625rem;
-  --background: 210 20% 99%;
-  --foreground: 215 28% 15%;
+  --radius: 0.75rem;
+  --background: 40 33% 97%;         /* paper */
+  --foreground: 250 15% 14%;        /* ink */
   --card: 0 0% 100%;
-  --card-foreground: 215 28% 15%;
+  --card-foreground: 250 15% 14%;
   --popover: 0 0% 100%;
-  --popover-foreground: 215 28% 15%;
-  --primary: 212 52% 27%;
-  --primary-foreground: 210 30% 98%;
-  --secondary: 210 16% 93%;
-  --secondary-foreground: 215 28% 20%;
-  --muted: 210 16% 95%;
-  --muted-foreground: 215 14% 40%;
-  --accent: 28 50% 92%;
-  --accent-foreground: 24 55% 28%;
-  --destructive: 0 72% 48%;
-  --border: 214 18% 88%;
-  --input: 214 18% 88%;
-  --ring: 212 52% 35%;
-  --chart-1: 43 74% 49%;   /* gold */
-  --chart-2: 22 65% 48%;   /* copper */
-  --chart-3: 212 45% 33%;  /* steel */
-  --chart-4: 210 9% 55%;   /* silver */
-  --chart-5: 30 45% 42%;   /* bronze */
-  --sidebar: 210 20% 98%;
-  --sidebar-foreground: 215 20% 26%;
-  --sidebar-primary: 212 52% 27%;
-  --sidebar-primary-foreground: 210 30% 98%;
-  --sidebar-accent: 210 16% 93%;
-  --sidebar-accent-foreground: 215 28% 20%;
-  --sidebar-border: 214 18% 88%;
-  --sidebar-ring: 212 52% 35%;
+  --popover-foreground: 250 15% 14%;
+  --primary: 177 62% 29%;           /* teal — the one action */
+  --primary-foreground: 43 100% 99%;
+  --secondary: 40 24% 92%;
+  --secondary-foreground: 250 15% 14%;
+  --muted: 40 24% 93%;
+  --muted-foreground: 250 8% 38%;
+  --accent: 40 26% 90%;             /* hover wash */
+  --accent-foreground: 250 15% 14%;
+  --destructive: 7 67% 45%;
+  --border: 38 16% 86%;
+  --input: 38 14% 80%;
+  --ring: 177 58% 36%;
+  /* Chart marks. Slots 2 and 3 are the pair the trend charts draw with,
+     validated together for colour-vision separation on the card surface. */
+  --chart-1: 40 100% 48%;
+  --chart-2: 7 67% 55%;
+  --chart-3: 177 77% 36%;
+  --chart-4: 206 64% 46%;
+  --chart-5: 248 58% 59%;
+
+  /* The rail is ink in both themes: navigation recedes, the page leads. */
+  --rail: 250 20% 13%;
+  --rail-foreground: 40 30% 95%;
+  --rail-muted: 250 12% 72%;
+  --rail-hover: 250 16% 20%;
+  --rail-border: 250 14% 22%;
+  --rail-active: 177 50% 60%;
+  --rail-active-foreground: 250 25% 9%;
+
+  /* A card on a board lane: paper on a tinted lane. */
+  --note: 0 0% 100%;
+  /* Votes: the risk tone's amber, deep enough to read as a filled control
+     against a white card (3.4:1, WCAG 1.4.11). */
+  --vote: 36 95% 40%;
+
+  /* Semantic tones — sentiment on cards and charts, board phases, column
+     accents. One family per meaning: a mark colour, a soft fill, and an ink
+     that clears WCAG AA on that fill. */
+  --tone-positive: 124 41% 55%;   --tone-positive-soft: 123 47% 91%;  --tone-positive-ink: 125 45% 30%;
+  --tone-negative: 6 100% 71%;    --tone-negative-soft: 9 100% 93%;   --tone-negative-ink: 9 68% 40%;
+  --tone-improve: 206 83% 65%;    --tone-improve-soft: 206 89% 93%;   --tone-improve-ink: 206 68% 36%;
+  --tone-risk: 41 100% 55%;       --tone-risk-soft: 43 100% 88%;      --tone-risk-ink: 36 100% 24%;
+  --tone-review: 249 80% 72%;     --tone-review-soft: 250 100% 95%;   --tone-review-ink: 248 48% 48%;
+  --tone-neutral: 251 7% 62%;     --tone-neutral-soft: 260 23% 92%;   --tone-neutral-ink: 250 9% 30%;
+
+  --shadow-card: 0 1px 2px rgb(30 28 40 / 0.06), 0 6px 18px -12px rgb(30 28 40 / 0.18);
+  --shadow-lift: 0 1px 2px rgb(30 28 40 / 0.08), 0 18px 40px -18px rgb(30 28 40 / 0.35);
 }
 
 .dark {
-  --background: 220 18% 10%;
-  --foreground: 210 16% 92%;
-  --card: 220 16% 13%;
-  --card-foreground: 210 16% 92%;
-  --popover: 220 16% 13%;
-  --popover-foreground: 210 16% 92%;
-  --primary: 210 45% 62%;
-  --primary-foreground: 220 35% 12%;
-  --secondary: 217 20% 20%;
-  --secondary-foreground: 210 16% 92%;
-  --muted: 217 18% 20%;
-  --muted-foreground: 215 15% 65%;
-  --accent: 24 38% 24%;
-  --accent-foreground: 30 55% 82%;
-  --destructive: 0 62% 47%;
-  --border: 217 18% 22%;
-  --input: 217 18% 22%;
-  --ring: 210 45% 55%;
-  --chart-1: 43 70% 55%;   /* gold */
-  --chart-2: 22 65% 55%;   /* copper */
-  --chart-3: 210 45% 58%;  /* steel */
-  --chart-4: 210 10% 65%;  /* silver */
-  --chart-5: 30 50% 55%;   /* bronze */
-  --sidebar: 220 20% 12%;
-  --sidebar-foreground: 210 16% 90%;
-  --sidebar-primary: 43 70% 55%;
-  --sidebar-primary-foreground: 220 35% 12%;
-  --sidebar-accent: 217 18% 20%;
-  --sidebar-accent-foreground: 210 16% 92%;
-  --sidebar-border: 217 18% 22%;
-  --sidebar-ring: 210 45% 55%;
+  /* Night is navy, not black: the same paper-and-ink structure as the light
+     theme, lit by a deep blue rather than a neutral grey. Hue stays around
+     217–220 across every surface so the tint reads as one material and not as
+     a blue cast on top of grey; lightness carries the depth, as before. */
+  --background: 218 38% 10%;
+  --foreground: 210 30% 94%;
+  --card: 217 31% 15%;
+  --card-foreground: 210 30% 94%;
+  --popover: 217 31% 16%;
+  --popover-foreground: 210 30% 94%;
+  --primary: 177 50% 56%;
+  --primary-foreground: 218 40% 9%;
+  --secondary: 217 26% 21%;
+  --secondary-foreground: 210 30% 94%;
+  --muted: 217 27% 19%;
+  --muted-foreground: 213 22% 73%;
+  --accent: 217 25% 24%;
+  --accent-foreground: 210 30% 94%;
+  --destructive: 7 100% 74%;
+  --border: 217 22% 24%;
+  --input: 215 22% 45%;
+  --ring: 177 50% 56%;
+  --chart-1: 42 100% 68%;
+  --chart-2: 9 75% 56%;
+  --chart-3: 177 60% 41%;
+  --chart-4: 205 86% 73%;
+  --chart-5: 248 100% 83%;
+
+  --rail: 220 45% 7%;
+  --rail-foreground: 210 30% 94%;
+  --rail-muted: 213 20% 70%;
+  --rail-hover: 219 34% 14%;
+  --rail-border: 218 28% 17%;
+  --rail-active: 177 50% 56%;
+  --rail-active-foreground: 218 40% 9%;
+
+  --note: 217 29% 17%;
+  --vote: 42 100% 64%;
+
+  --tone-positive: 124 46% 66%;   --tone-positive-soft: 137 27% 18%;  --tone-positive-ink: 124 46% 70%;
+  --tone-negative: 7 100% 77%;    --tone-negative-soft: 3 34% 21%;    --tone-negative-ink: 7 100% 80%;
+  --tone-improve: 205 86% 73%;    --tone-improve-soft: 209 44% 21%;   --tone-improve-ink: 205 86% 76%;
+  --tone-risk: 42 100% 64%;       --tone-risk-soft: 39 42% 19%;       --tone-risk-ink: 42 100% 68%;
+  --tone-review: 248 100% 83%;    --tone-review-soft: 244 34% 24%;    --tone-review-ink: 248 100% 85%;
+  --tone-neutral: 214 18% 74%;    --tone-neutral-soft: 217 22% 21%;   --tone-neutral-ink: 214 18% 78%;
+  /* Shadows fall towards the same navy, so nothing sits on a grey halo. */
+  --shadow-card: 0 1px 2px rgb(2 6 20 / 0.4), 0 6px 18px -12px rgb(2 6 20 / 0.65);
+  --shadow-lift: 0 1px 2px rgb(2 6 20 / 0.45), 0 18px 40px -18px rgb(2 6 20 / 0.85);
 }
+
 
 @layer base {
   * {
@@ -121,6 +169,33 @@
 
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "ss01" on, "cv11" on;
+  }
+
+  /* One focus style everywhere: a visible ring that survives both themes. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
   }
 }
-/* In-app Help page (rendered from docs/USER_GUIDE.md via src/lib/markdown.ts) */
+
+/* Small caps label above a heading or a figure. */
+@utility eyebrow {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Motion explains change; it is never required to understand it. With reduced
+   motion requested, transitions and animations collapse to an instant. */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

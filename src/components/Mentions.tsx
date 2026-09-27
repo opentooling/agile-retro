@@ -33,7 +33,7 @@ export function MentionText({ text, names = [] }: { text: string; names?: string
         seg && seg.startsWith('@') ? (
           <span
             key={i}
-            className="font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 rounded px-0.5"
+            className="rounded bg-[hsl(var(--tone-review-soft))] px-0.5 font-medium text-[hsl(var(--tone-review-ink))]"
           >
             {seg}
           </span>
@@ -55,6 +55,11 @@ type MentionInputProps = {
   disabled?: boolean
   /** Called on Enter when the suggestion dropdown is not open. */
   onEnter?: () => void
+  /** Accessible name, for fields whose only visible hint is the placeholder. */
+  ariaLabel?: string
+  /** Open the suggestions above the field — for composers docked at the bottom of a scroll area. */
+  menuPlacement?: 'below' | 'above'
+  id?: string
 }
 
 /**
@@ -71,6 +76,9 @@ export function MentionInput({
   multiline = false,
   disabled = false,
   onEnter,
+  ariaLabel,
+  menuPlacement = 'below',
+  id,
 }: MentionInputProps) {
   const ref = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null)
   const [query, setQuery] = useState<string | null>(null)
@@ -161,6 +169,8 @@ export function MentionInput({
     placeholder,
     disabled,
     className,
+    id,
+    'aria-label': ariaLabel,
     onChange: handleChange,
     onKeyDown: handleKeyDown,
     onBlur: () => setTimeout(() => setQuery(null), 120),
@@ -172,7 +182,10 @@ export function MentionInput({
     <div className="relative w-full">
       {multiline ? <Textarea {...commonProps} /> : <Input {...commonProps} />}
       {open && (
-        <ul className="absolute z-50 mt-1 max-h-48 w-56 overflow-auto rounded-md border bg-popover p-1 text-sm shadow-md">
+        <ul className={cn(
+          'absolute z-50 max-h-48 w-56 overflow-auto rounded-md border bg-popover p-1 text-sm shadow-md',
+          menuPlacement === 'above' ? 'bottom-full mb-1' : 'mt-1',
+        )}>
           {matches.map((name, i) => (
             <li key={name}>
               <button

@@ -95,3 +95,66 @@ export function phaseDurationsFromRows(phaseRows: Row[]): TeamAnalyticsRaw["phas
   }
   return out;
 }
+
+/** node:sqlite returns 0/1 and ISO strings; pg returns booleans and Dates. */
+const asBool = (v: unknown): boolean => v === true || v === 1 || v === "1";
+const asDateOrNull = (v: unknown): Date | null =>
+  v == null || v === "" ? null : new Date(v as string | Date);
+
+/**
+ * One point per board, for the per-session trend lines.
+ *
+ * Boards with no cards are left out, matching the "cards per retro" average:
+ * an empty board is almost always a test or an abandoned one, and plotting it
+ * as a zero would drag the line down for a session that never happened.
+ */
+export function perRetroFromRows(retros: Row[], itemRows: Row[]): TeamAnalyticsRaw["perRetro"] {
+  const cards = new Map<string, number>();
+  const discussed = new Map<string, number>();
+  const people = new Map<string, Set<string>>();
+  for (const row of itemRows) {
+    const retro = row.retro as string;
+    cards.set(retro, (cards.get(retro) ?? 0) + 1);
+    if (asBool(row.summarised)) discussed.set(retro, (discussed.get(retro) ?? 0) + 1);
+    const set = people.get(retro) ?? new Set<string>();
+    set.add(String(row.userId ?? ""));
+    people.set(retro, set);
+  }
+
+  return retros
+    .filter((r) => cards.has(r.id as string))
+    .map((r) => {
+      const id = r.id as string;
+      return {
+        at: new Date(r.createdAt as string | Date),
+        title: String(r.title ?? ""),
+        cards: cards.get(id)!,
+        discussed: discussed.get(id) ?? 0,
+        // Same promise as engagementFromRows: an anonymous board's authors are
+        // stored, but they never become a number.
+        contributors: asBool(r.isAnonymous) ? null : people.get(id)!.size,
+      };
+    })
+    .sort((a, b) => a.at.getTime() - b.at.getTime());
+}
+
+/**
+ * Every action placed on the timeline.
+ *
+ * "Agreed" is dated by the board it came out of rather than the action's own
+ * createdAt. The two are the same for anything raised in the session, and the
+ * board's date is always present — action timestamps were only added later,
+ * so older rows carry a backfilled value that would pile them all into one
+ * month.
+ */
+export function actionTimelineFromRows(retros: Row[], actionRows: Row[]): TeamAnalyticsRaw["actionTimeline"] {
+  const heldAt = new Map(retros.map((r) => [r.id as string, new Date(r.createdAt as string | Date)]));
+  const out: TeamAnalyticsRaw["actionTimeline"] = [];
+  for (const a of actionRows) {
+    const agreedAt = heldAt.get(a.retro as string);
+    if (!agreedAt) continue;
+    const completed = asBool(a.completed);
+    out.push({ agreedAt, completed, completedAt: completed ? asDateOrNull(a.completedAt) : null });
+  }
+  return out;
+}

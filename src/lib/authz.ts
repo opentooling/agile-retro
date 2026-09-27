@@ -270,6 +270,32 @@ export function isTeamAdmin(user: AuthUser, retro: RetroRef): boolean {
   return groupsMatch(user.groups, team.adminGroups);
 }
 
+/** What a viewer may do with the *team itself*, as opposed to its boards. */
+export type TeamAccessLevel = "admin" | "member" | "none";
+
+export function teamAccessLevel(
+  user: AuthUser | null,
+  team: TeamRef,
+): TeamAccessLevel {
+  if (!user || !team) return "none";
+  const ref: RetroRef = { teamId: team.id, creator: "", team };
+  if (user.isAdmin || isTeamAdmin(user, ref)) return "admin";
+  if (isTeamMember(user, ref)) return "member";
+  return "none";
+}
+
+/**
+ * May the viewer change this team's own settings — its name, logo, access
+ * groups or Jira binding?
+ *
+ * Team-admins and global admins only. Membership is not enough: a member
+ * participates in the team's boards, but rewiring who can reach them is an
+ * administrative act.
+ */
+export function canAdministerTeam(user: AuthUser | null, team: TeamRef): boolean {
+  return teamAccessLevel(user, team) === "admin";
+}
+
 /** True when the user created (facilitates) the board. */
 export function isFacilitator(user: AuthUser, retro: RetroRef): boolean {
   const c = norm(retro.creator);
@@ -342,4 +368,57 @@ export function canEditItem(user: AuthUser | null, retro: RetroRef, item: ItemRe
   if (item.userId && norm(item.userId) === user.id) return true;
   if (user.name && norm(item.username) === norm(user.name)) return true;
   return false;
+}
+
+/**
+ * The boards whose contents a viewer may see, as a filter a query can apply.
+ *
+ * `all` for global admins; otherwise open boards (no team) plus the teams the
+ * viewer can view. Mirrors canViewBoard exactly — it is canViewBoard applied
+ * to every team at once, so a listing can be filtered in the database rather
+ * than after paging (which would make every page short and every total wrong).
+ * An unauthenticated caller gets nothing, not even open boards.
+ */
+export type BoardScope =
+  | { kind: "all" }
+  | { kind: "some"; openBoards: boolean; teamIds: string[] };
+
+export function boardScopeFor(
+  user: AuthUser | null,
+  teams: NonNullable<TeamRef>[],
+): BoardScope {
+  if (!user) return { kind: "some", openBoards: false, teamIds: [] };
+  if (user.isAdmin) return { kind: "all" };
+  return {
+    kind: "some",
+    openBoards: true,
+    teamIds: teams
+      .filter((team) => canViewBoard(user, { teamId: team.id, creator: "", team }))
+      .map((team) => team.id),
+  };
+}
+
+/**
+ * May the user delete a card, move it to another column, or change its place
+ * in its column?
+ *
+ * Only while cards are being written. Once voting starts, a card's column and
+ * position are part of what people are voting on — moving or deleting one then
+ * would silently rearrange votes already cast. The same people who may edit a
+ * card (its author, the facilitator, a team-admin, an admin) may rearrange it.
+ */
+export function canRearrangeItem(user: AuthUser | null, retro: RetroRef, item: ItemRef): boolean {
+  return retro.status === "INPUT" && canEditItem(user, retro, item);
+}
+
+/**
+ * May the user edit or delete action items on this board?
+ *
+ * During the Actions phase, the same people who may add one. Action items carry
+ * no author, and drafting the list is a group activity in the meeting — it is
+ * the facilitator's job to close the phase, not to gatekeep each line. After
+ * the phase the list is the record; ticking items off stays possible elsewhere.
+ */
+export function canChangeActionItems(user: AuthUser | null, retro: RetroRef): boolean {
+  return retro.status === "ACTIONS" && canContributeToBoard(user, retro);
 }

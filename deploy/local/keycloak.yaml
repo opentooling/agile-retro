@@ -1,0 +1,152 @@
+# Local Keycloak for deploy/local/deploy.sh: dev mode, in-memory, with a
+# seeded realm. Convenience only — production points auth.keycloak.issuer at a
+# real Keycloak.
+#
+# The issuer has to be the same URL for the browser and for the app's pods,
+# because Keycloak writes it into every token and the app compares it. The
+# browser reaches http://auth.localtest.me:8089 through the k3d load balancer;
+# the app pod reaches the very same URL through a hostAliases entry pointing at
+# this Service, which therefore listens on 8089 too. KC_HOSTNAME pins the URL
+# so Keycloak never derives a different one from a request.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+data:
+  retro.json: |
+    {
+      "realm": "retro",
+      "enabled": true,
+      "sslRequired": "none",
+      "registrationAllowed": false,
+      "roles": { "realm": [ { "name": "admin", "description": "Agile Retro global admin" } ] },
+      "groups": [
+        { "name": "Eng", "subGroups": [ { "name": "Platform" }, { "name": "Payments" } ] },
+        { "name": "Retro-Admins" }
+      ],
+      "clients": [
+        {
+          "clientId": "agile-retro",
+          "name": "Agile Retro",
+          "enabled": true,
+          "publicClient": false,
+          "secret": "agile-retro-local-secret",
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": true,
+          "redirectUris": ["http://retro.localtest.me:8089/api/auth/callback/keycloak"],
+          "webOrigins": ["http://retro.localtest.me:8089"],
+          "attributes": { "post.logout.redirect.uris": "http://retro.localtest.me:8089/*" },
+          "protocolMappers": [
+            {
+              "name": "user_roles",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-group-membership-mapper",
+              "config": {
+                "claim.name": "user_roles",
+                "full.path": "true",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            }
+          ]
+        }
+      ],
+      "users": [
+        {
+          "username": "service-account-agile-retro",
+          "enabled": true,
+          "serviceAccountClientId": "agile-retro",
+          "clientRoles": { "realm-management": ["query-groups", "view-realm"] }
+        },
+        { "username": "alice", "firstName": "Alice", "lastName": "Admin", "email": "alice@localtest.me", "emailVerified": true, "enabled": true,
+          "credentials": [ { "type": "password", "value": "retro", "temporary": false } ],
+          "realmRoles": ["admin"], "groups": ["/Eng/Platform", "/Retro-Admins"] },
+        { "username": "bob", "firstName": "Bob", "lastName": "Platform", "email": "bob@localtest.me", "emailVerified": true, "enabled": true,
+          "credentials": [ { "type": "password", "value": "retro", "temporary": false } ],
+          "groups": ["/Eng/Platform"] },
+        { "username": "carol", "firstName": "Carol", "lastName": "Payments", "email": "carol@localtest.me", "emailVerified": true, "enabled": true,
+          "credentials": [ { "type": "password", "value": "retro", "temporary": false } ],
+          "groups": ["/Eng/Payments"] },
+        { "username": "dave", "firstName": "Dave", "lastName": "Nogroup", "email": "dave@localtest.me", "emailVerified": true, "enabled": true,
+          "credentials": [ { "type": "password", "value": "retro", "temporary": false } ],
+          "groups": [] }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  labels: { app: keycloak }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: keycloak }
+  template:
+    metadata:
+      labels: { app: keycloak }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.0
+          args: ["start-dev", "--import-realm", "--http-port=8080"]
+          env:
+            - name: KC_HOSTNAME
+              value: http://auth.localtest.me:8089
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: admin
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              value: admin
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /realms/retro, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { memory: 1Gi }
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+      volumes:
+        - name: realm
+          configMap: { name: keycloak-realm }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+spec:
+  selector: { app: keycloak }
+  ports:
+    # 8089, like the browser's URL, so the app pod can use the issuer as-is.
+    - name: http
+      port: 8089
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+spec:
+  rules:
+    - host: auth.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: keycloak, port: { number: 8089 } }

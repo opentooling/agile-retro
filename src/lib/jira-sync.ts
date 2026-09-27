@@ -86,10 +86,15 @@ async function reconcile(actions: ActionItemWithRetro[]): Promise<void> {
   }
 }
 
-/** Reconcile linked actions for a single retrospective (called on board open). */
+/**
+ * Reconcile linked actions for a single retrospective (called on board open).
+ * Unscoped by design — it runs as the server, not as the viewer — so callers
+ * must only invoke it after confirming the viewer can see the board: it makes
+ * outbound calls with the team's Jira credentials.
+ */
 export async function reconcileActionsForRetro(retrospectiveId: string): Promise<void> {
   try {
-    const actions = await db.listActionItems({ retrospectiveId });
+    const actions = await db.listActionItems({ scope: { kind: "all" }, retrospectiveId });
     await reconcile(actions);
   } catch (err) {
     console.error("reconcileActionsForRetro failed:", err);

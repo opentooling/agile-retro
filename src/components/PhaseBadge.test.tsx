@@ -20,11 +20,15 @@ describe('PhaseBadge', () => {
     expect(screen.queryByText('VOTING')).toBeNull()
   })
 
-  it('carries a dark-mode variant for every phase', () => {
+  it('adapts to dark mode for every phase', () => {
     // The old dashboard pills were light-mode only and glared in dark mode.
+    // They now take their fill and ink from tone tokens, which carry a dark
+    // value each — so the check is that no phase falls back to a fixed colour.
     for (const status of ['INPUT', 'VOTING', 'REVIEW', 'ACTIONS', 'CLOSED']) {
       const { container, unmount } = render(<PhaseBadge status={status} />)
-      expect(container.firstElementChild!.className).toMatch(/dark:/)
+      const className = container.firstElementChild!.className
+      expect(className).toMatch(/bg-\[hsl\(var\(--tone-[a-z]+-soft\)\)\]/)
+      expect(className).toMatch(/text-\[hsl\(var\(--tone-[a-z]+-ink\)\)\]/)
       unmount()
     }
   })

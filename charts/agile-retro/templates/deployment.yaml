@@ -19,25 +19,48 @@ spec:
       {{- include "agile-retro.appSelectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
       annotations:
+        {{- /*
+          Roll the pods when a generated secret changes, but not on every chart
+          upgrade: only the Secret's contents are hashed, not its labels.
+        */}}
+        {{- if not .Values.secrets.existingSecret }}
+        checksum/secrets: {{ include "agile-retro.contentChecksum" (dict "ctx" $ "template" "/secrets.yaml") }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
       labels:
         {{- include "agile-retro.appSelectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "agile-retro.serviceAccountName" . }}
+      {{- with .Values.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- /*
+          The image is a UBI Node.js image: it runs as UID 1001 with its files
+          owned 1001:0, so the group is the image's own and only the user and
+          the volume's group are set here.
+        */}}
+        {{- include "agile-retro.podSecurityContext" (dict "ctx" $ "runAsUser" 1001 "fsGroup" 1001) | nindent 8 }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+            {{- /*
+              Not readOnlyRootFilesystem: Next.js writes its own cache under
+              /app/.next/cache at runtime.
+            */}}
+            {{- include "agile-retro.containerSecurityContext" dict | nindent 12 }}
+          image: {{ include "agile-retro.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           # The Postgres schema is created automatically on first connection by
           # src/lib/db.ts, so no migration step is required at startup.
@@ -55,10 +78,6 @@ spec:
                 name: {{ .Values.envFromSecret }}
           {{- end }}
           env:
-            {{- range $key, $value := .Values.env }}
-            - name: {{ $key }}
-              value: {{ $value | quote }}
-            {{- end }}
             # Database connection. src/lib/db.ts picks the backend from the scheme.
             {{- include "agile-retro.databaseUrlEnv" . | nindent 12 }}
             {{- if and .Values.migration.enabled .Values.migration.skipAppBootstrap (not .Values.sqlite.enabled) }}
@@ -81,28 +100,24 @@ spec:
               value: {{ .description | quote }}
             {{- end }}
             {{- end }}
-            {{- if .Values.app.url }}
-            # Public URL of the app, so Auth.js builds correct OAuth redirect URIs
-            # (e.g. <app.url>/api/auth/callback/keycloak) behind a proxy/route.
+            # Public URL of the app, so Auth.js builds OAuth redirect URIs that
+            # match what is registered with the provider
+            # (<app.url>/api/auth/callback/keycloak). Derived from the Route or
+            # the Ingress when app.url is not set.
             - name: AUTH_URL
-              value: {{ .Values.app.url | quote }}
-            {{- end }}
+              value: {{ include "agile-retro.appUrl" . | quote }}
             {{- if .Values.app.trustHost }}
             # Trust X-Forwarded-Proto/Host from the ingress/route (TLS terminated upstream).
             - name: AUTH_TRUST_HOST
               value: "true"
             {{- end }}
-            {{- if or .Values.auth.secret .Values.auth.existingSecret }}
+            # Never a literal: a secret in a Deployment is readable by anyone
+            # who can read Deployments, and shows up in `helm get manifest`.
             - name: AUTH_SECRET
-              {{- if .Values.auth.existingSecret }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.auth.existingSecret }}
+                  name: {{ .Values.auth.existingSecret | default (include "agile-retro.secretName" .) }}
                   key: {{ .Values.auth.existingSecretKey | default "auth-secret" }}
-              {{- else }}
-              value: {{ .Values.auth.secret | quote }}
-              {{- end }}
-            {{- end }}
             {{- if .Values.auth.groupsClaim }}
             - name: GROUPS_CLAIM
               value: {{ .Values.auth.groupsClaim | quote }}
@@ -115,58 +130,77 @@ spec:
             - name: AUTH_GOOGLE_ID
               value: {{ .Values.auth.google.clientId | quote }}
             - name: AUTH_GOOGLE_SECRET
-              {{- if .Values.auth.google.existingSecret }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.auth.google.existingSecret }}
+                  name: {{ .Values.auth.google.existingSecret | default (include "agile-retro.secretName" .) }}
                   key: {{ .Values.auth.google.existingSecretKey | default "google-client-secret" }}
-              {{- else }}
-              value: {{ .Values.auth.google.clientSecret | quote }}
-              {{- end }}
             {{- end }}
             {{- if .Values.auth.keycloak.enabled }}
             - name: AUTH_KEYCLOAK_ID
               value: {{ .Values.auth.keycloak.clientId | quote }}
             - name: AUTH_KEYCLOAK_SECRET
-              {{- if .Values.auth.keycloak.existingSecret }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.auth.keycloak.existingSecret }}
+                  name: {{ .Values.auth.keycloak.existingSecret | default (include "agile-retro.secretName" .) }}
                   key: {{ .Values.auth.keycloak.existingSecretKey | default "keycloak-client-secret" }}
-              {{- else }}
-              value: {{ .Values.auth.keycloak.clientSecret | quote }}
-              {{- end }}
             - name: AUTH_KEYCLOAK_ISSUER
               value: {{ .Values.auth.keycloak.issuer | quote }}
             {{- if .Values.auth.keycloak.adminClientId }}
             - name: KEYCLOAK_ADMIN_CLIENT_ID
               value: {{ .Values.auth.keycloak.adminClientId | quote }}
             - name: KEYCLOAK_ADMIN_CLIENT_SECRET
-              {{- if .Values.auth.keycloak.adminExistingSecret }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.auth.keycloak.adminExistingSecret }}
+                  name: {{ .Values.auth.keycloak.adminExistingSecret | default (include "agile-retro.secretName" .) }}
                   key: {{ .Values.auth.keycloak.adminExistingSecretKey | default "keycloak-admin-client-secret" }}
-              {{- else }}
-              value: {{ .Values.auth.keycloak.adminClientSecret | quote }}
-              {{- end }}
             {{- end }}
             {{- end }}
+            {{- if include "agile-retro.extraCaCerts.enabled" . }}
+            # Node reads one extra CA bundle from this path, on top of its
+            # built-in roots: an identity provider behind an internal CA would
+            # otherwise fail sign-in with a certificate error.
+            - name: NODE_EXTRA_CA_CERTS
+              value: {{ include "agile-retro.extraCaCerts.path" . | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            # Until this passes, the other two are not run: a slow start is not
+            # a failure, and restarting a pod that is merely starting turns a
+            # contended node into a crash loop.
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: {{ .Values.startupProbe.periodSeconds }}
+            failureThreshold: {{ .Values.startupProbe.failureThreshold }}
           livenessProbe:
+            # Liveness asks only whether this process still serves HTTP.
+            # Failing it on a database outage would restart every pod, which
+            # fixes nothing and turns a degraded service into none.
             httpGet:
-              path: /
+              path: /api/health
               port: http
+            periodSeconds: 20
           readinessProbe:
+            # Readiness includes the database: a pod that cannot reach it is
+            # taken out of the Service until it can.
             httpGet:
-              path: /
+              path: /api/ready
               port: http
+            periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if .Values.sqlite.enabled }}
           volumeMounts:
+            {{- if .Values.sqlite.enabled }}
             - name: sqlite-data
               mountPath: {{ .Values.sqlite.mountPath | quote }}
-          {{- end }}
+            {{- end }}
+            {{- if include "agile-retro.extraCaCerts.enabled" . }}
+            - name: extra-ca
+              mountPath: /etc/agile-retro/ca
+              readOnly: true
+            {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -179,13 +213,28 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.sqlite.enabled }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
+        {{- if .Values.sqlite.enabled }}
         - name: sqlite-data
-        {{- if .Values.sqlite.persistence.enabled }}
+          {{- if .Values.sqlite.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ .Values.sqlite.persistence.existingClaim | default (printf "%s-sqlite" (include "agile-retro.fullname" .)) }}
-        {{- else }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         {{- end }}
-      {{- end }}
+        {{- with .Values.extraCaCerts }}
+        {{- if .configMap }}
+        - name: extra-ca
+          configMap:
+            name: {{ .configMap }}
+        {{- else if .secret }}
+        - name: extra-ca
+          secret:
+            secretName: {{ .secret }}
+        {{- end }}
+        {{- end }}

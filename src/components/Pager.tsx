@@ -49,21 +49,21 @@ export function Pager({
         href={href(target)}
         rel={label === 'Previous' ? 'prev' : 'next'}
         aria-label={label}
-        className="flex items-center gap-1 rounded-md border px-2.5 py-1 text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex items-center gap-1 rounded-full border bg-card px-3 py-1.5 text-sm font-medium shadow-[var(--shadow-card)] transition-colors hover:bg-accent"
       >
         {icon}
       </Link>
     ) : (
       <span
         aria-disabled="true"
-        className={cn('flex items-center gap-1 rounded-md border px-2.5 py-1 text-sm opacity-40')}
+        className={cn('flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm text-muted-foreground opacity-60')}
       >
         {icon}
       </span>
     )
 
   return (
-    <nav className="mt-3 flex items-center justify-between gap-3" aria-label="Pagination">
+    <nav className="mt-6 flex items-center justify-between gap-3 border-t pt-4" aria-label="Pagination">
       <p className="text-xs text-muted-foreground tabular-nums">
         {first}–{last} of {total}
       </p>

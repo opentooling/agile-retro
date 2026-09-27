@@ -66,6 +66,8 @@ export const teamAnalytics = bind("teamAnalytics");
 export const listRetrospectives = bind("listRetrospectives");
 export const countRetrospectives = bind("countRetrospectives");
 export const getAllTagStrings = bind("getAllTagStrings");
+export const ping = bind("ping");
+export const listFilterFacets = bind("listFilterFacets");
 
 // Items
 export const itemMaxOrder = bind("itemMaxOrder");
@@ -76,6 +78,8 @@ export const updateItemContent = bind("updateItemContent");
 export const updateItemSummary = bind("updateItemSummary");
 export const updateItemColumn = bind("updateItemColumn");
 export const reorderItems = bind("reorderItems");
+export const setReviewOrder = bind("setReviewOrder");
+export const clearReviewOrder = bind("clearReviewOrder");
 export const countItems = bind("countItems");
 
 // Votes
@@ -93,6 +97,10 @@ export const deleteReaction = bind("deleteReaction");
 export const createActionItem = bind("createActionItem");
 export const getActionItem = bind("getActionItem");
 export const updateActionCompleted = bind("updateActionCompleted");
+export const updateActionItem = bind("updateActionItem");
+export const deleteActionItem = bind("deleteActionItem");
+export const deleteItem = bind("deleteItem");
+export const userActivity = bind("userActivity");
 export const setActionExternalLink = bind("setActionExternalLink");
 export const listActionItems = bind("listActionItems");
 export const countActionItems = bind("countActionItems");

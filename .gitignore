@@ -47,3 +47,14 @@ next-env.d.ts
 /data/*.db*
 
 .expo
+
+# Claude Code agent worktrees (full checkouts of other branches)
+.claude/worktrees/
+
+# Playwright
+/e2e/.data/
+/playwright-report/
+/test-results/
+
+# k6 fixtures: contain signed session tokens for the target deployment
+/loadtest/data.json

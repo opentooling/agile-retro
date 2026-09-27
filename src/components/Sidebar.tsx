@@ -1,23 +1,30 @@
 'use client'
 
-import { Button } from "@/components/ui/button"
-import { ModeToggle } from "@/components/mode-toggle"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import { LayoutDashboard, History, Filter, Tag, LogOut, LogIn, ChevronLeft, ChevronRight, Users, CheckSquare, HelpCircle, Coins, TrendingUp, type LucideIcon } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
-import { getPopularTags } from "@/app/actions"
-import { useSession, signIn, signOut } from "next-auth/react"
+import { useSession, signOut } from "next-auth/react"
+import { useTheme } from "next-themes"
+import { Home, History, LogOut, LogIn, PanelLeftClose, PanelLeftOpen, Users, CheckSquare, HelpCircle, TrendingUp, Sun, Moon, Monitor, MoreHorizontal, type LucideIcon, UserRound } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { LogoMark } from "@/components/visual/Logo"
+import { Identicon } from "@/components/visual/Identicon"
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 interface SidebarProps {
   user?: {
@@ -31,55 +38,35 @@ interface SidebarProps {
   appName: string
 }
 
-interface NavItemProps {
-  href: string
-  icon: LucideIcon
-  label: string
-  isActive: boolean
-  isCollapsed: boolean
-}
+type NavEntry = { href: string; icon: LucideIcon; label: string; match: (p: string) => boolean; carryFilters: boolean }
 
-function NavItem({ href, icon: Icon, label, isActive, isCollapsed }: NavItemProps) {
-  if (isCollapsed) {
-    return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant={isActive ? 'secondary' : 'ghost'} size="icon" className="w-full" asChild>
-              <Link href={href}>
-                <Icon className="w-5 h-5" />
-                <span className="sr-only">{label}</span>
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">
-            {label}
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    )
-  }
+const NAV: NavEntry[] = [
+  { href: '/', icon: Home, label: 'Home', match: (p) => p === '/', carryFilters: true },
+  { href: '/actions', icon: CheckSquare, label: 'Actions', match: (p) => p === '/actions', carryFilters: true },
+  { href: '/history', icon: History, label: 'History', match: (p) => p === '/history', carryFilters: true },
+  { href: '/insights', icon: TrendingUp, label: 'Insights', match: (p) => p === '/insights', carryFilters: false },
+  { href: '/teams', icon: Users, label: 'Teams', match: (p) => p === '/teams', carryFilters: true },
+  { href: '/help', icon: HelpCircle, label: 'Help', match: (p) => p === '/help', carryFilters: false },
+]
 
-  return (
-    <Button variant={isActive ? 'secondary' : 'ghost'} className="justify-start w-full" asChild>
-      <Link href={href}>
-        <Icon className="w-5 h-5 mr-2" />
-        {label}
-      </Link>
-    </Button>
-  )
-}
-
-
+/**
+ * The rail: navigation and who you are, nothing else.
+ *
+ * Ink-dark in both themes so it recedes behind the page. It used to carry the
+ * filter inputs too, which put them 256px from the list they changed and on
+ * screens they did nothing to; they now sit on the pages (see ScopeBar), and the
+ * rail only carries their values from page to page.
+ *
+ * Below 768px of window the rail becomes a bottom tab bar — except on a board,
+ * which is a full-screen stage with its own way back.
+ */
 export function Sidebar({ user, keycloakIssuer, keycloakClientId, appName }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [popularTags, setPopularTags] = useState<{tag: string, count: number}[]>([])
   const { data: session } = useSession()
-  // On a board the rail is pure overhead: its Filters block is already hidden
-  // there, so it contributes a nav strip and a duplicate ModeToggle while taking
-  // 256px from the screen that needs it most. Start collapsed there.
+  // On a board the rail is pure overhead: start collapsed there, so the stage
+  // gets the width.
   const isBoardRoute = pathname.startsWith('/retro/')
   const [isCollapsed, setIsCollapsed] = useState(isBoardRoute)
   // Re-apply the default when crossing into or out of a board, without
@@ -91,19 +78,6 @@ export function Sidebar({ user, keycloakIssuer, keycloakClientId, appName }: Sid
       setIsCollapsed(isBoardRoute)
     }
   }, [isBoardRoute])
-
-  useEffect(() => {
-    getPopularTags().then(setPopularTags)
-
-    const handleRetroCreated = () => {
-        getPopularTags().then(setPopularTags)
-    }
-
-    window.addEventListener('retro-created', handleRetroCreated)
-    return () => {
-        window.removeEventListener('retro-created', handleRetroCreated)
-    }
-  }, [])
 
   // Carry the active filters along when navigating between screens, so they
   // aren't cleared just because the user switched pages. Only cross-cutting
@@ -117,20 +91,7 @@ export function Sidebar({ user, keycloakIssuer, keycloakClientId, appName }: Sid
     const qs = preserved.toString()
     return qs ? `?${qs}` : ''
   })()
-
-  const handleFilterChange = (key: string, value: string) => {
-    const params = new URLSearchParams(searchParams)
-    if (value) {
-      if (key === 'tag' && params.get('tag') === value) {
-        params.delete(key)
-      } else {
-        params.set(key, value)
-      }
-    } else {
-      params.delete(key)
-    }
-    router.push(`${pathname}?${params.toString()}`)
-  }
+  const hrefFor = (entry: NavEntry) => (entry.carryFilters ? `${entry.href}${preservedFilters}` : entry.href)
 
   const handleSignOut = async () => {
     const customSession = session as any
@@ -158,157 +119,277 @@ export function Sidebar({ user, keycloakIssuer, keycloakClientId, appName }: Sid
   }
 
   return (
-    <div className={cn(
-      "border-r bg-muted/20 h-screen sticky top-0 flex flex-col transition-all duration-300",
-      isCollapsed ? "w-16 p-2" : "w-64 p-6"
-    )}>
-      <div className={cn("flex mb-4", isCollapsed ? "justify-center" : "items-center justify-between")}>
-        {!isCollapsed && (
-          <div className="flex items-center gap-2 min-w-0">
-            <Coins className="w-6 h-6 text-primary shrink-0" />
-            <span className="text-lg font-bold tracking-tight truncate">{appName}</span>
-          </div>
+    <>
+      {/* Desktop rail */}
+      {/* The outer column paints the rail the full height of the page; the
+          inner one sticks, so navigation stays in view while the page scrolls. */}
+      <div className="hidden shrink-0 bg-rail md:block">
+      <div
+        className={cn(
+          "sticky top-0 flex h-dvh flex-col text-rail-foreground transition-[width] duration-200 ease-out",
+          isCollapsed ? "w-16" : "w-56",
         )}
-        <Button variant="ghost" size="icon" onClick={() => setIsCollapsed(!isCollapsed)}>
-          {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-        </Button>
-      </div>
-
-      <div className="flex-1 space-y-8 overflow-y-auto">
-        <div>
-            <nav className="flex flex-col gap-1">
-            <NavItem href={`/${preservedFilters}`} icon={LayoutDashboard} label="Dashboard" isActive={pathname === "/"} isCollapsed={isCollapsed} />
-            <NavItem href={`/teams${preservedFilters}`} icon={Users} label="Teams" isActive={pathname === "/teams"} isCollapsed={isCollapsed} />
-            <NavItem href={`/actions${preservedFilters}`} icon={CheckSquare} label="Actions" isActive={pathname === "/actions"} isCollapsed={isCollapsed} />
-            <NavItem href={`/history${preservedFilters}`} icon={History} label="History" isActive={pathname === "/history"} isCollapsed={isCollapsed} />
-            <NavItem href="/insights" icon={TrendingUp} label="Insights" isActive={pathname === "/insights"} isCollapsed={isCollapsed} />
-            <NavItem href="/help" icon={HelpCircle} label="Help" isActive={pathname === "/help"} isCollapsed={isCollapsed} />
-          </nav>
+      >
+        <div className={cn("flex h-16 items-center gap-2.5", isCollapsed ? "justify-center px-2" : "px-4")}>
+          <Link href="/" className="flex min-w-0 items-center gap-2.5 rounded-lg" aria-label={`${appName} home`}>
+            <LogoMark className="h-8 w-8" />
+            {!isCollapsed && <span className="truncate text-[15px] font-semibold tracking-tight">{appName}</span>}
+          </Link>
         </div>
 
-        {!isCollapsed && !pathname.startsWith('/retro/') && (
-          <div>
-            <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <Filter className="w-3.5 h-3.5" />
-              Filters
-            </h2>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Team</Label>
-                <Input 
-                  placeholder="Filter by team..." 
-                  value={searchParams.get('teamId') || ''}
-                  onChange={(e) => handleFilterChange('teamId', e.target.value)}
-                />
-              </div>
-              {pathname !== '/teams' && (
-                <>
-                  <div className="space-y-2">
-                    <Label>Creator</Label>
-                    <Input 
-                      placeholder="Filter by creator..." 
-                      defaultValue={searchParams.get('creator') || ''}
-                      onChange={(e) => handleFilterChange('creator', e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Tags</Label>
-                    <Input 
-                      placeholder="Filter by tag..." 
-                      value={searchParams.get('tag') || ''}
-                      onChange={(e) => handleFilterChange('tag', e.target.value)}
-                    />
-                  </div>
-                  
-                  {popularTags.length > 0 && (
-                    <div className="space-y-2">
-                      <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                        <Tag className="w-3 h-3" />
-                        Popular tags
-                      </span>
-                      <div className="flex flex-wrap gap-2">
-                        {popularTags.map(({ tag, count }) => (
-                          <button
-                            key={tag}
-                            type="button"
-                            onClick={() => handleFilterChange('tag', tag)}
-                            className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            aria-pressed={searchParams.get('tag') === tag}
-                          >
-                            <Badge
-                              variant={searchParams.get('tag') === tag ? "default" : "secondary"}
-                              className="cursor-pointer hover:opacity-80"
-                            >
-                              {tag} ({count})
-                            </Badge>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+        <TooltipProvider delayDuration={200}>
+          <nav aria-label="Main" className={cn("flex flex-1 flex-col gap-0.5 overflow-y-auto", isCollapsed ? "px-2" : "px-3")}>
+            {NAV.map((entry) => (
+              <RailLink key={entry.href} entry={entry} href={hrefFor(entry)} active={entry.match(pathname)} collapsed={isCollapsed} />
+            ))}
+          </nav>
+
+          <div className={cn("flex flex-col gap-1 border-t border-rail-border py-3", isCollapsed ? "items-center px-2" : "px-3")}>
+            {/* Who you are, the theme, and signing out — each its own visible
+                control. They used to share one menu behind your name, with
+                nothing to say it was a menu, and people could not find them. */}
+            {user ? (
+              <>
+                <ProfileLink user={user} collapsed={isCollapsed} active={pathname === '/profile'} />
+                <ThemeRailButton collapsed={isCollapsed} />
+                <RailButton icon={LogOut} label="Sign out" collapsed={isCollapsed} onClick={handleSignOut} />
+              </>
+            ) : (
+              // To the sign-in page, which lists whichever providers are
+              // configured — not straight to one provider, which may not exist.
+              <RailButton icon={LogIn} label="Sign in" collapsed={isCollapsed} onClick={() => router.push("/login")} />
+            )}
+            <RailButton
+              icon={isCollapsed ? PanelLeftOpen : PanelLeftClose}
+              label={isCollapsed ? "Expand navigation" : "Collapse navigation"}
+              collapsed={isCollapsed}
+              onClick={() => setIsCollapsed((c) => !c)}
+              ariaExpanded={!isCollapsed}
+            />
           </div>
-        )}
+        </TooltipProvider>
+      </div>
       </div>
 
-      <div className="border-t pt-3 mt-auto">
-        {user ? (
-          <div>
-            <div className={cn("flex items-center mb-3", isCollapsed ? "justify-center flex-col gap-2" : "justify-between")}>
-                {!isCollapsed && (
-                  <div className="flex items-center gap-3 overflow-hidden">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-600 to-amber-600 flex items-center justify-center text-white font-bold shrink-0">
-                          {user?.name?.[0] || 'U'}
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                          <span className="text-sm font-medium truncate">{user?.name || 'Guest'}</span>
-                          <span className="text-xs text-muted-foreground truncate">{user?.email || 'No email'}</span>
-                      </div>
-                  </div>
+      {/* Phone: a bottom tab bar. The board has its own back link and a
+          console docked where this would sit, so it is left out there. */}
+      {!isBoardRoute && (
+        <nav
+          aria-label="Main"
+          className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-stretch border-t border-rail-border bg-rail px-1 pb-[env(safe-area-inset-bottom)] text-rail-foreground md:hidden"
+        >
+          {NAV.filter((n) => n.href !== '/help').map((entry) => {
+            const active = entry.match(pathname)
+            const Icon = entry.icon
+            return (
+              <Link
+                key={entry.href}
+                href={hrefFor(entry)}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  "flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-medium",
+                  active ? "text-rail-active" : "text-rail-muted",
                 )}
-                <ModeToggle />
-            </div>
-            
-            {isCollapsed ? (
-               <TooltipProvider>
-               <Tooltip>
-                 <TooltipTrigger asChild>
-                    <Button variant="outline" size="icon" className="w-full" onClick={handleSignOut}>
-                      <LogOut className="w-4 h-4" />
-                    </Button>
-                 </TooltipTrigger>
-                 <TooltipContent side="right">Sign Out</TooltipContent>
-               </Tooltip>
-             </TooltipProvider>
+              >
+                <Icon className="h-5 w-5" aria-hidden />
+                <span className="truncate">{entry.label}</span>
+              </Link>
+            )
+          })}
+          <div className="flex min-w-0 flex-1 items-center justify-center">
+            {user ? (
+              <UserMenu user={user} collapsed compact onSignOut={handleSignOut} />
             ) : (
-              <Button variant="outline" className="w-full justify-start gap-2" onClick={handleSignOut}>
-                <LogOut className="w-4 h-4" />
-                Sign Out
-              </Button>
+              <button type="button" onClick={() => router.push("/login")} className="flex flex-col items-center gap-1 text-[11px] font-medium text-rail-muted">
+                <LogIn className="h-5 w-5" aria-hidden /> Sign in
+              </button>
             )}
           </div>
-        ) : (
-          isCollapsed ? (
-             <TooltipProvider>
-             <Tooltip>
-               <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="w-full" onClick={() => signIn("google")}>
-                    <LogIn className="w-4 h-4" />
-                  </Button>
-               </TooltipTrigger>
-               <TooltipContent side="right">Sign In</TooltipContent>
-             </Tooltip>
-           </TooltipProvider>
-          ) : (
-            <Button className="w-full gap-2" onClick={() => signIn("google")}>
-              <LogIn className="w-4 h-4" />
-              Sign In with Google
-            </Button>
-          )
+        </nav>
+      )}
+    </>
+  )
+}
+
+function RailLink({ entry, href, active, collapsed }: { entry: NavEntry; href: string; active: boolean; collapsed: boolean }) {
+  const Icon = entry.icon
+  const link = (
+    <Link
+      href={href}
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        "flex h-10 items-center gap-3 rounded-lg text-sm font-medium transition-colors focus-visible:outline-rail-active",
+        collapsed ? "justify-center" : "px-3",
+        active
+          ? "bg-rail-active text-rail-active-foreground"
+          : "text-rail-muted hover:bg-rail-hover hover:text-rail-foreground",
+      )}
+    >
+      <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
+      {collapsed ? <span className="sr-only">{entry.label}</span> : entry.label}
+    </Link>
+  )
+  if (!collapsed) return link
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{link}</TooltipTrigger>
+      <TooltipContent side="right">{entry.label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function RailButton({
+  icon: Icon, label, collapsed, onClick, ariaExpanded,
+}: { icon: LucideIcon; label: string; collapsed: boolean; onClick: () => void; ariaExpanded?: boolean }) {
+  const button = (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={ariaExpanded}
+      aria-label={collapsed ? label : undefined}
+      className={cn(
+        "flex h-10 items-center gap-3 rounded-lg text-sm font-medium text-rail-muted transition-colors hover:bg-rail-hover hover:text-rail-foreground focus-visible:outline-rail-active",
+        collapsed ? "w-10 justify-center" : "w-full px-3",
+      )}
+    >
+      <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden />
+      {!collapsed && label}
+    </button>
+  )
+  if (!collapsed) return button
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** Your name and face, linking to your profile. */
+function ProfileLink({ user, collapsed, active }: { user: NonNullable<SidebarProps['user']>; collapsed: boolean; active: boolean }) {
+  const name = user.name || 'Guest'
+  const link = (
+    <Link
+      href="/profile"
+      aria-current={active ? 'page' : undefined}
+      aria-label={collapsed ? `Your profile — ${name}` : undefined}
+      className={cn(
+        "flex items-center gap-2.5 rounded-lg transition-colors focus-visible:outline-rail-active",
+        collapsed ? "h-10 w-10 justify-center" : "w-full px-2 py-1.5",
+        active ? "bg-rail-active text-rail-active-foreground" : "hover:bg-rail-hover",
+      )}
+    >
+      <Identicon name={name} size={collapsed ? 30 : 32} />
+      {!collapsed && (
+        <span className="flex min-w-0 flex-col text-left">
+          <span className={cn("truncate text-sm font-medium", active ? "" : "text-rail-foreground")}>{name}</span>
+          <span className={cn("truncate text-xs", active ? "opacity-80" : "text-rail-muted")}>View your profile</span>
+        </span>
+      )}
+    </Link>
+  )
+  if (!collapsed) return link
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{link}</TooltipTrigger>
+      <TooltipContent side="right">Your profile</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/**
+ * Light / dark, one press. The label says what pressing it will do. "System"
+ * stays available in the phone menu; on the rail a two-way switch is what
+ * people reach for.
+ */
+function ThemeRailButton({ collapsed }: { collapsed: boolean }) {
+  const { resolvedTheme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  const dark = mounted && resolvedTheme === 'dark'
+  return (
+    <RailButton
+      icon={dark ? Sun : Moon}
+      label={!mounted ? 'Theme' : dark ? 'Light mode' : 'Dark mode'}
+      collapsed={collapsed}
+      onClick={() => setTheme(dark ? 'light' : 'dark')}
+    />
+  )
+}
+
+/** The phone tab bar's "More": profile, theme, help and signing out. */
+function UserMenu({
+  user, collapsed, compact, onSignOut,
+}: {
+  user: NonNullable<SidebarProps['user']>
+  collapsed: boolean
+  /** The phone tab bar: an icon-and-label cell like its neighbours. */
+  compact?: boolean
+  onSignOut: () => void
+}) {
+  const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  const name = user.name || 'Guest'
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`Account and theme — ${name}`}
+        className={cn(
+          "flex items-center gap-2.5 rounded-lg text-left transition-colors focus-visible:outline-rail-active",
+          compact
+            ? "flex-col gap-1 text-[11px] font-medium text-rail-muted"
+            : collapsed
+              ? "h-10 w-10 justify-center hover:bg-rail-hover"
+              : "w-full px-2 py-1.5 hover:bg-rail-hover",
         )}
-      </div>
-    </div>
+      >
+        {compact ? (
+          <>
+            <MoreHorizontal className="h-5 w-5" aria-hidden />
+            <span>More</span>
+          </>
+        ) : (
+          <>
+            <Identicon name={name} size={collapsed ? 30 : 32} />
+            {!collapsed && (
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate text-sm font-medium text-rail-foreground">{name}</span>
+                <span className="truncate text-xs text-rail-muted">{user.email || 'No email'}</span>
+              </span>
+            )}
+          </>
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side={compact ? 'top' : 'right'} align="end" className="w-60">
+        <DropdownMenuLabel className="flex items-center gap-2.5 py-2">
+          <Identicon name={name} size={28} />
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate text-sm font-medium">{name}</span>
+            <span className="truncate text-xs font-normal text-muted-foreground">{user.email || 'No email'}</span>
+          </span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="eyebrow py-1">Theme</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={mounted ? theme : undefined} onValueChange={setTheme}>
+          <DropdownMenuRadioItem value="light"><Sun className="h-4 w-4" /> Light</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="dark"><Moon className="h-4 w-4" /> Dark</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="system"><Monitor className="h-4 w-4" /> System</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link href="/profile"><UserRound className="h-4 w-4" /> Your profile</Link>
+        </DropdownMenuItem>
+        {compact && (
+          <DropdownMenuItem asChild>
+            <Link href="/help"><HelpCircle className="h-4 w-4" /> Help</Link>
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem onSelect={onSignOut}>
+          <LogOut className="h-4 w-4" /> Sign out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

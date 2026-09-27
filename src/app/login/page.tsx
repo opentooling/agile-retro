@@ -1,6 +1,9 @@
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { LogIn, KeyRound, Coins } from "lucide-react"
+import Link from "next/link"
+import { LogIn, KeyRound, HelpCircle } from "lucide-react"
+import { StageScene } from "@/components/visual/Illustration"
+import { LogoMark } from "@/components/visual/Logo"
+import { ModeToggle } from "@/components/mode-toggle"
 import { signIn, providerMap } from "@/auth"
 import { branding } from "@/lib/branding"
 
@@ -47,39 +50,73 @@ function getProviderIcon(id: string) {
 export default function LoginPage() {
   const { name, tagline } = branding()
   return (
-    <div className="flex items-center justify-center min-h-screen bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-2">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-              <Coins className="h-7 w-7 text-primary" />
-            </div>
-          </div>
-          <CardTitle className="text-2xl font-bold">Welcome to {name}</CardTitle>
-          <CardDescription>{tagline}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {Object.values(providerMap).map((provider) => (
-            <form
-              key={provider.id}
-              action={async () => {
-                "use server"
-                await signIn(provider.id, { redirectTo: "/" })
-              }}
-            >
-              <Button 
-                className="w-full gap-2" 
-                size="lg"
-                type="submit"
-                variant="outline"
-              >
-                {getProviderIcon(provider.id)}
-                Sign in with {provider.name}
-              </Button>
-            </form>
+    <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1.15fr)_minmax(26rem,1fr)]">
+      {/* Left: the product, on ink — the same stage the board is. Hidden on
+          small screens, where the sign-in is the whole page. */}
+      <aside className="relative hidden flex-col justify-between overflow-hidden bg-rail p-12 text-rail-foreground lg:flex">
+        <div className="flex items-center gap-3">
+          <LogoMark className="h-9 w-9" />
+          <span className="text-lg font-semibold tracking-tight">{name}</span>
+        </div>
+        <div className="max-w-xl">
+          <p className="eyebrow !text-rail-muted">Team retrospectives</p>
+          <h2 className="mt-4 text-5xl font-semibold leading-[1.05] tracking-[-0.03em]">
+            Look back together.<br />
+            <span className="text-rail-active">Then follow through.</span>
+          </h2>
+          <StageScene className="mt-12 w-full max-w-lg" />
+        </div>
+        <ol className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-rail-muted" aria-label="How a session runs">
+          {['Input', 'Voting', 'Review', 'Actions'].map((phase, i) => (
+            <li key={phase} className="flex items-center gap-2">
+              <span className="font-mono text-xs tabular-nums">0{i + 1}</span>
+              {phase}
+            </li>
           ))}
-        </CardContent>
-      </Card>
+        </ol>
+      </aside>
+
+      {/* Right: the sign-in itself. */}
+      <main className="relative flex items-center justify-center bg-background px-6 py-12">
+        <div className="absolute right-4 top-4">
+          <ModeToggle />
+        </div>
+        <div className="w-full max-w-sm">
+          <div className="flex items-center gap-3 lg:hidden">
+            <span className="rounded-xl bg-rail p-1.5"><LogoMark className="h-8 w-8" /></span>
+            <span className="text-lg font-semibold tracking-tight">{name}</span>
+          </div>
+          <h1 className="mt-8 text-3xl font-semibold tracking-tight lg:mt-0">Sign in</h1>
+          <p className="mt-2 text-muted-foreground">{tagline}</p>
+          <div className="mt-8 space-y-3">
+            {Object.values(providerMap).map((provider) => (
+              <form
+                key={provider.id}
+                action={async () => {
+                  "use server"
+                  await signIn(provider.id, { redirectTo: "/" })
+                }}
+              >
+                <Button className="h-12 w-full justify-start gap-3 bg-card px-4 text-base shadow-[var(--shadow-card)]" size="lg" type="submit" variant="outline">
+                  {getProviderIcon(provider.id)}
+                  Continue with {provider.name}
+                </Button>
+              </form>
+            ))}
+            {Object.values(providerMap).length === 0 && (
+              <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                No sign-in provider is configured for this deployment.
+              </p>
+            )}
+          </div>
+          <p className="mt-10 border-t pt-4 text-xs text-muted-foreground">
+            Your team&apos;s boards are visible to you through your identity provider&apos;s groups.{' '}
+            <Link href="/help" className="inline-flex items-center gap-1 font-medium text-primary hover:underline">
+              <HelpCircle className="h-3.5 w-3.5" aria-hidden /> How it works
+            </Link>
+          </p>
+        </div>
+      </main>
     </div>
   )
 }

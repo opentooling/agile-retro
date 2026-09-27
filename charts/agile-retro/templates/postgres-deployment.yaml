@@ -21,48 +21,83 @@ spec:
         {{- include "agile-retro.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: postgres
     spec:
-      {{- with .Values.postgresql.podSecurityContext }}
       securityContext:
+        {{- if .Values.postgresql.podSecurityContext }}
+        {{- toYaml .Values.postgresql.podSecurityContext | nindent 8 }}
+        {{- else }}
+        {{- /*
+          Run as the image's own postgres user (UID 70 in the alpine image)
+          rather than letting the entrypoint start as root and drop down to it.
+          Started as root it wants CHOWN and SETUID to do that, which a pod
+          dropping every capability cannot give it — and on a cluster that
+          enforces the restricted Pod Security Standard, root is refused
+          outright. fsGroup makes the volume writable to that same user.
+        */}}
+        {{- if eq (include "agile-retro.postgres.flavor" .) "rhel" }}
+        {{- /* The SCL image's own postgres user is 26; on OpenShift none is set. */}}
+        {{- include "agile-retro.podSecurityContext" (dict "ctx" $ "runAsUser" 26 "fsGroup" 26) | nindent 8 }}
+        {{- else }}
+        {{- include "agile-retro.podSecurityContext" (dict "ctx" $ "runAsUser" 70 "runAsGroup" 70 "fsGroup" 70) | nindent 8 }}
+        {{- end }}
+        {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
         - name: postgres
-          image: {{ .Values.postgresql.image | quote }}
+          image: {{ include "agile-retro.postgres.image" . | quote }}
           imagePullPolicy: {{ .Values.postgresql.imagePullPolicy | default "IfNotPresent" }}
+          securityContext:
+            {{- /*
+              Not readOnlyRootFilesystem: the postgres image writes its runtime
+              socket and configuration outside the data volume.
+            */}}
+            {{- include "agile-retro.containerSecurityContext" dict | nindent 12 }}
           ports:
             - name: postgres
               containerPort: 5432
+          {{- $secret := printf "%s-postgres" (include "agile-retro.fullname" .) }}
+          {{- $rhel := eq (include "agile-retro.postgres.flavor" .) "rhel" }}
           env:
-            - name: POSTGRES_USER
+            {{- /*
+              The two image families spell the same three settings differently,
+              and keep their data in different places.
+            */}}
+            - name: {{ ternary "POSTGRESQL_USER" "POSTGRES_USER" $rhel }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "agile-retro.fullname" . }}-postgres
+                  name: {{ $secret }}
                   key: postgres-user
-            - name: POSTGRES_PASSWORD
+            - name: {{ ternary "POSTGRESQL_PASSWORD" "POSTGRES_PASSWORD" $rhel }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "agile-retro.fullname" . }}-postgres
+                  name: {{ $secret }}
                   key: postgres-password
-            - name: POSTGRES_DB
+            - name: {{ ternary "POSTGRESQL_DATABASE" "POSTGRES_DB" $rhel }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "agile-retro.fullname" . }}-postgres
+                  name: {{ $secret }}
                   key: postgres-database
-            # Use a subdirectory so the image doesn't choke on a volume root
-            # that may contain lost+found.
+            {{- if not $rhel }}
+            # A subdirectory, so the image does not choke on a volume root
+            # that holds lost+found. (The SCL image does this itself.)
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+            {{- end }}
           volumeMounts:
             - name: data
-              mountPath: /var/lib/postgresql/data
+              mountPath: {{ ternary "/var/lib/pgsql/data" "/var/lib/postgresql/data" $rhel }}
+          # Over TCP to localhost, which both image families answer alike;
+          # the Unix socket lives in a different directory in each.
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", {{ .Values.postgresql.auth.username | quote }}, "-d", {{ .Values.postgresql.auth.database | quote }}]
+              command: ["pg_isready", "-h", "127.0.0.1", "-p", "5432"]
             initialDelaySeconds: 15
             periodSeconds: 10
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", {{ .Values.postgresql.auth.username | quote }}, "-d", {{ .Values.postgresql.auth.database | quote }}]
+              command: ["pg_isready", "-h", "127.0.0.1", "-p", "5432"]
             initialDelaySeconds: 5
             periodSeconds: 5
           resources:

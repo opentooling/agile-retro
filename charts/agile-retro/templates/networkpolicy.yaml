@@ -1,0 +1,81 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- /*
+What the app may talk to. DNS and its own database are always allowed —
+without them nothing works at all — and everything else is yours to list.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agile-retro.fullname" . }}
+  labels:
+    {{- include "agile-retro.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agile-retro.appSelectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - {{- if .Values.networkPolicy.ingressFrom }}
+      from:
+        {{- toYaml .Values.networkPolicy.ingressFrom | nindent 8 }}
+      {{- end }}
+      ports:
+        - port: {{ .Values.service.port }}
+          protocol: TCP
+  egress:
+    # DNS. Defaulted here rather than in values.yaml, where a map could only be
+    # added to, never replaced.
+    - to:
+        {{- $dns := .Values.networkPolicy.dns }}
+        {{- if or $dns.namespaceSelector $dns.podSelector }}
+        - namespaceSelector:
+            {{- if $dns.namespaceSelector }}
+            matchLabels:
+              {{- toYaml $dns.namespaceSelector | nindent 14 }}
+            {{- end }}
+          {{- with $dns.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+        {{- else if include "agile-retro.openshift" . }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+        {{- else }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+        {{- end }}
+      ports:
+        {{- if .Values.networkPolicy.dns.ports }}
+        {{- toYaml .Values.networkPolicy.dns.ports | nindent 8 }}
+        {{- else if include "agile-retro.openshift" . }}
+        - port: 5353
+          protocol: UDP
+        - port: 5353
+          protocol: TCP
+        {{- else }}
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+        {{- end }}
+    {{- if and .Values.postgresql.enabled (not .Values.sqlite.enabled) }}
+    # The database this release deploys.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "agile-retro.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.egressTo }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

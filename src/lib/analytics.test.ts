@@ -10,6 +10,8 @@ const raw = (over: Partial<TeamAnalyticsRaw> = {}): TeamAnalyticsRaw => ({
   actions: { open: 0, done: 0, overdue: 0, daysToClose: [] },
   engagement: { totalItems: 0, itemsWithSummary: 0, retrosWithItems: 0, voteSpread: [], contributorsPerRetro: [] },
   phaseDurations: [],
+  perRetro: [],
+  actionTimeline: [],
   ...over,
 })
 

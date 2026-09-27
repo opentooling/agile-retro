@@ -1,0 +1,30 @@
+# CI render check: OpenShift's restricted-v2 SCC, a Route instead of an
+# Ingress, an external database, and a private certificate authority — the
+# shape a locked-down cluster actually installs.
+openshift:
+  enabled: true
+  route:
+    enabled: true
+    host: agile-retro.apps.example.com
+ingress:
+  enabled: false
+postgresql:
+  enabled: false
+externalDatabase:
+  existingSecret: agile-retro-db
+  existingSecretKey: database-url
+extraCaCerts:
+  configMap: trusted-ca
+  key: ca-bundle.crt
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          policy-group.network.openshift.io/ingress: ""
+auth:
+  keycloak:
+    enabled: true
+    clientId: agile-retro
+    issuer: https://keycloak.example.com/realms/corp
+    existingSecret: agile-retro-oidc

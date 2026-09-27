@@ -16,13 +16,18 @@
  * below, which is the single definition of the schema.
  */
 import { Pool, type PoolClient } from "pg";
-import { engagementFromRows, phaseDurationsFromRows } from "./aggregate";
+import { engagementFromRows, phaseDurationsFromRows, perRetroFromRows, actionTimelineFromRows } from "./aggregate";
 import { randomUUID } from "node:crypto";
 import type {
   Team, TeamJiraConfig, TeamGroups, TeamCreateOptions, Retrospective, Column, Vote, Reaction, Item, ActionItem,
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro, TeamAnalyticsRaw,
+  UserActivityRaw,
+  RetroDurations,
+  FilterFacets,
 } from "./types";
+import type { BoardScope } from "../authz";
+import { splitTags } from "./facets";
 
 // ---------------------------------------------------------------------------
 // Connection + schema bootstrap
@@ -143,6 +148,8 @@ ALTER TABLE "Retrospective" ADD COLUMN IF NOT EXISTS "expiresAt" TIMESTAMPTZ;
 -- are simply unknown, rather than being invented.
 ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "completedAt" TIMESTAMPTZ;
+-- The facilitator's own order for the review queue; null means "by votes".
+ALTER TABLE "Item" ADD COLUMN IF NOT EXISTS "reviewOrder" INTEGER;
 `;
 
 // Cache the pool and the one-time schema init on globalThis so dev/HMR and
@@ -343,6 +350,7 @@ const mapItem = (r: Row): Item => ({
   username: r.username,
   columnId: r.columnId,
   order: r.order,
+  reviewOrder: r.reviewOrder ?? null,
   createdAt: r.createdAt,
   votes: [],
   reactions: [],
@@ -363,10 +371,24 @@ const COLUMN_ORDER_SQL = `ORDER BY "order", CASE "type"
 
 type WhereBuild = { clauses: string[]; params: unknown[]; needsTeamJoin: boolean };
 
+/**
+ * Access scope as SQL: open boards and/or the listed teams. No scope, or
+ * `all`, adds nothing; an empty scope matches no rows at all.
+ */
+function scopeClause(scope: BoardScope | undefined, col: string, params: unknown[]): string | null {
+  if (!scope || scope.kind === "all") return null;
+  const parts: string[] = [];
+  if (scope.openBoards) parts.push(`${col} IS NULL`);
+  if (scope.teamIds.length) parts.push(`${col} = ANY($${params.push(scope.teamIds)})`);
+  return parts.length ? `(${parts.join(" OR ")})` : "FALSE";
+}
+
 function buildRetroWhere(f: RetroFilter, ra: string, ta: string, params: unknown[]): WhereBuild {
   const clauses: string[] = [];
   let needsTeamJoin = false;
 
+  const scoped = scopeClause(f.scope, `${ra}."teamId"`, params);
+  if (scoped) clauses.push(scoped);
   if (f.creatorEquals != null) {
     clauses.push(`${ra}."creator" = $${params.push(f.creatorEquals)}`);
   } else if (f.creatorContains) {
@@ -590,7 +612,7 @@ export async function updateRetroStatus(
 /** Update timer durations. Returns full nested retro. */
 export async function updateRetroDurations(
   id: string,
-  durations: { inputDuration?: number; votingDuration?: number; reviewDuration?: number }
+  durations: RetroDurations
 ): Promise<RetroFull | null> {
   const sets: string[] = [];
   const params: unknown[] = [id];
@@ -602,6 +624,9 @@ export async function updateRetroDurations(
   }
   if (durations.reviewDuration !== undefined) {
     sets.push(`"reviewDuration" = $${params.push(durations.reviewDuration)}`);
+  }
+  if (durations.phaseStartTime !== undefined) {
+    sets.push(`"phaseStartTime" = $${params.push(durations.phaseStartTime)}`);
   }
   if (sets.length > 0) {
     await query(`UPDATE "Retrospective" SET ${sets.join(", ")} WHERE "id" = $1`, params);
@@ -643,6 +668,45 @@ export async function countRetrospectives(filter: RetroFilter): Promise<number> 
 }
 
 /** Raw `tags` strings of every retrospective (used to derive unique/popular tags). */
+/** Distinct values across the boards in scope, for the filter's suggestions. */
+export async function listFilterFacets(scope: BoardScope): Promise<FilterFacets> {
+  // Each statement needs its own parameter list: the scope clause pushes into
+  // whichever array it is given.
+  const where = (params: unknown[]) => {
+    const clause = scopeClause(scope, `r."teamId"`, params);
+    return clause ? `WHERE ${clause}` : "";
+  };
+
+  const creatorParams: unknown[] = [];
+  const creatorWhere = where(creatorParams);
+  const creators = (
+    await query(`SELECT DISTINCT r."creator" AS v FROM "Retrospective" r ${creatorWhere} ORDER BY v`, creatorParams)
+  ).map((r) => r.v as string).filter(Boolean);
+
+  const teamParams: unknown[] = [];
+  const teamWhere = where(teamParams);
+  const teamNames = (
+    await query(
+      `SELECT DISTINCT t."name" AS v FROM "Retrospective" r
+         JOIN "Team" t ON t."id" = r."teamId" ${teamWhere} ORDER BY v`,
+      teamParams
+    )
+  ).map((r) => r.v as string).filter(Boolean);
+
+  const tagParams: unknown[] = [];
+  const tagWhere = where(tagParams);
+  const tagStrings = (
+    await query(`SELECT r."tags" AS v FROM "Retrospective" r ${tagWhere}`, tagParams)
+  ).map((r) => r.v as string);
+
+  return { creators, teamNames, tags: splitTags(tagStrings) };
+}
+
+/** Cheapest possible round trip, for the readiness probe. */
+export async function ping(): Promise<void> {
+  await query(`SELECT 1`);
+}
+
 export async function getAllTagStrings(): Promise<string[]> {
   return (await query(`SELECT "tags" FROM "Retrospective"`)).map((r) => r.tags as string);
 }
@@ -705,6 +769,25 @@ export async function reorderItems(orderedIds: string[]): Promise<void> {
       await client.query(`UPDATE "Item" SET "order" = $2 WHERE "id" = $1`, [orderedIds[i], i]);
     }
   });
+}
+
+/** Arrange the review queue: positions follow the given id sequence. */
+export async function setReviewOrder(orderedIds: string[]): Promise<void> {
+  if (orderedIds.length === 0) return;
+  await withTransaction(async (client) => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await client.query(`UPDATE "Item" SET "reviewOrder" = $2 WHERE "id" = $1`, [orderedIds[i], i]);
+    }
+  });
+}
+
+/** Forget a board's arranged queue, returning it to the vote ranking. */
+export async function clearReviewOrder(retroId: string): Promise<void> {
+  await query(
+    `UPDATE "Item" SET "reviewOrder" = NULL WHERE "columnId" IN
+       (SELECT "id" FROM "Column" WHERE "retrospectiveId" = $1)`,
+    [retroId]
+  );
 }
 
 export async function countItems(): Promise<number> {
@@ -801,6 +884,29 @@ export async function getActionItem(id: string): Promise<ActionItem | null> {
   return row ? mapActionItem(row as Row) : null;
 }
 
+export async function deleteItem(id: string): Promise<void> {
+  // No cascades in the schema, so the card's votes and reactions go first.
+  await withTransaction(async (client) => {
+    await client.query(`DELETE FROM "Reaction" WHERE "itemId" = $1`, [id]);
+    await client.query(`DELETE FROM "Vote" WHERE "itemId" = $1`, [id]);
+    await client.query(`DELETE FROM "Item" WHERE "id" = $1`, [id]);
+  });
+}
+
+export async function updateActionItem(
+  id: string,
+  data: { content: string; assignee: string | null; dueDate: Date | null }
+): Promise<void> {
+  await query(
+    `UPDATE "ActionItem" SET "content" = $2, "assignee" = $3, "dueDate" = $4 WHERE "id" = $1`,
+    [id, data.content, data.assignee, data.dueDate]
+  );
+}
+
+export async function deleteActionItem(id: string): Promise<void> {
+  await query(`DELETE FROM "ActionItem" WHERE "id" = $1`, [id]);
+}
+
 export async function updateActionCompleted(id: string, completed: boolean): Promise<void> {
   // Record when it closed, and clear it again if the action is reopened, so
   // "time to close" always reflects the completion it belongs to.
@@ -835,6 +941,8 @@ function buildActionWhere(
   const clauses: string[] = [];
   let needsTeamJoin = false;
 
+  const scoped = scopeClause(filter.scope, `r."teamId"`, params);
+  if (scoped) clauses.push(scoped);
   if (filter.completed !== undefined) {
     clauses.push(`a."completed" = $${params.push(filter.completed)}`);
   }
@@ -846,6 +954,10 @@ function buildActionWhere(
   }
   if (filter.assigneeContains) {
     clauses.push(`a."assignee" ILIKE $${params.push(`%${filter.assigneeContains}%`)}`);
+  }
+  if (filter.assigneeIn) {
+    const names = filter.assigneeIn.map((n) => n.trim().toLowerCase()).filter(Boolean);
+    clauses.push(names.length ? `LOWER(a."assignee") = ANY($${params.push(names)})` : "FALSE");
   }
   if (filter.teamNameContains) {
     needsTeamJoin = true;
@@ -892,6 +1004,56 @@ export async function listActionItems(filter: ActionFilter): Promise<ActionItemW
     ...mapActionItem(row),
     retrospective: retroById.get(row.retrospectiveId)!,
   }));
+}
+
+export async function userActivity(userId: string, creatorNames: string[]): Promise<UserActivityRaw> {
+  const creators = creatorNames.filter(Boolean);
+  const facilitated = creators.length
+    ? await query(
+        `SELECT "id", "title", "status", "createdAt", "teamId" FROM "Retrospective"
+          WHERE "creator" = ANY($1) ORDER BY "createdAt" DESC`,
+        [creators]
+      )
+    : [];
+  const cards = await query(
+    `SELECT i."id", i."content", i."createdAt", c."title" AS "columnTitle", c."type" AS "columnType",
+            r."id" AS "retroId", r."title" AS "retroTitle", r."teamId", r."isAnonymous"
+       FROM "Item" i
+       JOIN "Column" c ON c."id" = i."columnId"
+       JOIN "Retrospective" r ON r."id" = c."retrospectiveId"
+      WHERE i."userId" = $1
+      ORDER BY i."createdAt" DESC`,
+    [userId]
+  );
+  const perBoard = (table: "Vote" | "Reaction", measure: string) =>
+    query(
+      `SELECT r."id" AS "retroId", r."teamId", ${measure} AS "count"
+         FROM "${table}" x
+         JOIN "Item" i ON i."id" = x."itemId"
+         JOIN "Column" c ON c."id" = i."columnId"
+         JOIN "Retrospective" r ON r."id" = c."retrospectiveId"
+        WHERE x."userId" = $1
+        GROUP BY r."id", r."teamId"`,
+      [userId]
+    );
+  const [votes, reactions] = await Promise.all([
+    perBoard("Vote", `COALESCE(SUM(x."count"), 0)::int`),
+    perBoard("Reaction", `COUNT(*)::int`),
+  ]);
+  return {
+    facilitated: facilitated.map((r) => ({
+      id: r.id as string, title: r.title as string, status: r.status as string,
+      createdAt: r.createdAt as Date, teamId: (r.teamId as string | null) ?? null,
+    })),
+    cards: cards.map((r) => ({
+      id: r.id as string, content: r.content as string, createdAt: r.createdAt as Date,
+      columnTitle: r.columnTitle as string, columnType: r.columnType as string,
+      retroId: r.retroId as string, retroTitle: r.retroTitle as string,
+      teamId: (r.teamId as string | null) ?? null, isAnonymous: Boolean(r.isAnonymous),
+    })),
+    votes: votes.map((r) => ({ retroId: r.retroId as string, teamId: (r.teamId as string | null) ?? null, count: Number(r.count) })),
+    reactions: reactions.map((r) => ({ retroId: r.retroId as string, teamId: (r.teamId as string | null) ?? null, count: Number(r.count) })),
+  };
 }
 
 export async function countOpenActions(retroFilter: RetroFilter): Promise<number> {
@@ -947,7 +1109,7 @@ export async function listExpiredRetroIds(now: Date): Promise<string[]> {
  */
 export async function teamAnalytics(teamId: string): Promise<TeamAnalyticsRaw> {
   const retros = await query(
-    `SELECT "id", "createdAt", "isAnonymous" FROM "Retrospective" WHERE "teamId" = $1 ORDER BY "createdAt"`,
+    `SELECT "id", "title", "createdAt", "isAnonymous" FROM "Retrospective" WHERE "teamId" = $1 ORDER BY "createdAt"`,
     [teamId]
   );
   const retroIds = retros.map((r) => r.id as string);
@@ -957,6 +1119,8 @@ export async function teamAnalytics(teamId: string): Promise<TeamAnalyticsRaw> {
     actions: { open: 0, done: 0, overdue: 0, daysToClose: [] },
     engagement: { totalItems: 0, itemsWithSummary: 0, retrosWithItems: 0, voteSpread: [], contributorsPerRetro: [] },
     phaseDurations: [],
+    perRetro: [],
+    actionTimeline: [],
   };
   if (retroIds.length === 0) return empty;
 
@@ -971,7 +1135,7 @@ export async function teamAnalytics(teamId: string): Promise<TeamAnalyticsRaw> {
   ).map((r) => ({ type: r.type as string, items: Number(r.items) }));
 
   const actionRows = await query(
-    `SELECT "completed", "dueDate", "createdAt", "completedAt"
+    `SELECT "retrospectiveId" AS retro, "completed", "dueDate", "createdAt", "completedAt"
        FROM "ActionItem" WHERE "retrospectiveId" = ANY($1)`,
     [retroIds]
   );
@@ -1017,6 +1181,8 @@ export async function teamAnalytics(teamId: string): Promise<TeamAnalyticsRaw> {
     actions,
     engagement: engagementFromRows(retros, itemRows, voteRows),
     phaseDurations: phaseDurationsFromRows(phaseRows),
+    perRetro: perRetroFromRows(retros, itemRows),
+    actionTimeline: actionTimelineFromRows(retros, actionRows),
   };
 }
 

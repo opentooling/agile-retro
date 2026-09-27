@@ -13,12 +13,17 @@
  */
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { engagementFromRows, phaseDurationsFromRows } from "./aggregate";
+import { engagementFromRows, phaseDurationsFromRows, perRetroFromRows, actionTimelineFromRows } from "./aggregate";
 import type {
   Team, TeamJiraConfig, TeamGroups, TeamCreateOptions, Retrospective, Column, Vote, Reaction, Item, ActionItem,
   ColumnWithItems, RetroFull, RetroFilter, ActionFilter,
   CreateColumnInput, CreateRetroInput, ActionItemWithRetro, TeamAnalyticsRaw,
+  UserActivityRaw,
+  RetroDurations,
+  FilterFacets,
 } from "./types";
+import type { BoardScope } from "../authz";
+import { splitTags } from "./facets";
 import path from "node:path";
 import fs from "node:fs";
 
@@ -88,6 +93,7 @@ CREATE TABLE IF NOT EXISTS "Item" (
     "username" TEXT NOT NULL DEFAULT 'Anonymous',
     "columnId" TEXT NOT NULL,
     "order" INTEGER NOT NULL DEFAULT 0,
+    "reviewOrder" INTEGER,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "Item_columnId_fkey" FOREIGN KEY ("columnId") REFERENCES "Column" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
@@ -156,6 +162,7 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE "Retrospective" ADD COLUMN "expiresAt" DATETIME`,
   `ALTER TABLE "ActionItem" ADD COLUMN "createdAt" DATETIME`,
   `ALTER TABLE "ActionItem" ADD COLUMN "completedAt" DATETIME`,
+  `ALTER TABLE "Item" ADD COLUMN "reviewOrder" INTEGER`,
 ];
 
 function applyMigrations(db: DatabaseSync): void {
@@ -233,6 +240,15 @@ function getDb(): DatabaseSync {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     const db = new DatabaseSync(dbPath);
     db.exec("PRAGMA foreign_keys = ON;");
+    // Wait for another connection's lock rather than failing at once. The
+    // server is not the only thing that opens this file — the migration Job,
+    // `npm run db:purge` and anything inspecting the database all do — and
+    // without a timeout a write that meets their lock fails immediately with
+    // "database is locked", which reaches a user as a card that never saved.
+    // (Not WAL, which would avoid most waits: it needs shared memory, and does
+    // not work on the network filesystems many clusters back their volumes
+    // with.)
+    db.exec("PRAGMA busy_timeout = 5000;");
     db.exec(SCHEMA_SQL);
     applyMigrations(db);
     globalForDb.__sqlite = db;
@@ -339,6 +355,7 @@ const mapItem = (r: Row): Item => ({
   username: r.username,
   columnId: r.columnId,
   order: r.order,
+  reviewOrder: r.reviewOrder ?? null,
   createdAt: toDate(r.createdAt),
   votes: [],
   reactions: [],
@@ -348,11 +365,28 @@ const mapItem = (r: Row): Item => ({
 // Where-clause builders
 // ---------------------------------------------------------------------------
 
+/**
+ * Access scope as SQL: open boards and/or the listed teams. No scope, or
+ * `all`, adds nothing; an empty scope matches no rows at all.
+ */
+function scopeClause(scope: BoardScope | undefined, col: string, params: any[]): string | null {
+  if (!scope || scope.kind === "all") return null;
+  const parts: string[] = [];
+  if (scope.openBoards) parts.push(`${col} IS NULL`);
+  if (scope.teamIds.length) {
+    parts.push(`${col} IN (${scope.teamIds.map(() => "?").join(",")})`);
+    params.push(...scope.teamIds);
+  }
+  return parts.length ? `(${parts.join(" OR ")})` : "0";
+}
+
 function buildRetroWhere(f: RetroFilter, ra: string, ta: string) {
   const clauses: string[] = [];
   const params: any[] = [];
   let needsTeamJoin = false;
 
+  const scoped = scopeClause(f.scope, `${ra}."teamId"`, params);
+  if (scoped) clauses.push(scoped);
   if (f.creatorEquals != null) {
     clauses.push(`${ra}.creator = ?`);
     params.push(f.creatorEquals);
@@ -557,7 +591,7 @@ export function updateRetroStatus(id: string, status: string, phaseStartTime: Da
 /** Update timer durations. Returns full nested retro. */
 export function updateRetroDurations(
   id: string,
-  durations: { inputDuration?: number; votingDuration?: number; reviewDuration?: number }
+  durations: RetroDurations
 ): RetroFull | null {
   const sets: string[] = [];
   const params: any[] = [];
@@ -572,6 +606,10 @@ export function updateRetroDurations(
   if (durations.reviewDuration !== undefined) {
     sets.push(`"reviewDuration" = ?`);
     params.push(durations.reviewDuration);
+  }
+  if (durations.phaseStartTime !== undefined) {
+    sets.push(`"phaseStartTime" = ?`);
+    params.push(dateToDb(durations.phaseStartTime));
   }
   if (sets.length > 0) {
     params.push(id);
@@ -610,6 +648,50 @@ export function countRetrospectives(filter: RetroFilter): number {
 }
 
 /** Raw `tags` strings of every retrospective (used to derive unique/popular tags). */
+/** Distinct values across the boards in scope, for the filter's suggestions. */
+export function listFilterFacets(scope: BoardScope): FilterFacets {
+  const db = getDb();
+  // Each statement needs its own parameter list: the scope clause pushes into
+  // whichever array it is given.
+  const scoped = (alias: string, params: any[]) => {
+    const clause = scopeClause(scope, `${alias}."teamId"`, params);
+    return clause ? `WHERE ${clause}` : "";
+  };
+
+  const creatorParams: any[] = [];
+  const creatorWhere = scoped("r", creatorParams);
+  const creators = db
+    .prepare(`SELECT DISTINCT r."creator" AS v FROM "Retrospective" r ${creatorWhere} ORDER BY v`)
+    .all(...creatorParams)
+    .map((row: Row) => row.v as string)
+    .filter(Boolean);
+
+  const teamParams: any[] = [];
+  const teamWhere = scoped("r", teamParams);
+  const teamNames = db
+    .prepare(
+      `SELECT DISTINCT t."name" AS v FROM "Retrospective" r
+         JOIN "Team" t ON t."id" = r."teamId" ${teamWhere} ORDER BY v`
+    )
+    .all(...teamParams)
+    .map((row: Row) => row.v as string)
+    .filter(Boolean);
+
+  const tagParams: any[] = [];
+  const tagWhere = scoped("r", tagParams);
+  const tagStrings = db
+    .prepare(`SELECT r."tags" AS v FROM "Retrospective" r ${tagWhere}`)
+    .all(...tagParams)
+    .map((row: Row) => row.v as string);
+
+  return { creators, teamNames, tags: splitTags(tagStrings) };
+}
+
+/** Cheapest possible round trip, for the readiness probe. */
+export function ping(): void {
+  getDb().prepare(`SELECT 1`).get();
+}
+
 export function getAllTagStrings(): string[] {
   return getDb()
     .prepare(`SELECT "tags" FROM "Retrospective"`)
@@ -679,6 +761,25 @@ export function reorderItems(orderedIds: string[]): void {
   transaction(() => {
     orderedIds.forEach((id, index) => updateItemOrder(id, index));
   });
+}
+
+/** Arrange the review queue: positions follow the given id sequence. */
+export function setReviewOrder(orderedIds: string[]): void {
+  if (orderedIds.length === 0) return;
+  const stmt = getDb().prepare(`UPDATE "Item" SET "reviewOrder" = ? WHERE "id" = ?`);
+  transaction(() => {
+    orderedIds.forEach((id, index) => stmt.run(index, id));
+  });
+}
+
+/** Forget a board's arranged queue, returning it to the vote ranking. */
+export function clearReviewOrder(retroId: string): void {
+  getDb()
+    .prepare(
+      `UPDATE "Item" SET "reviewOrder" = NULL WHERE "columnId" IN
+         (SELECT "id" FROM "Column" WHERE "retrospectiveId" = ?)`
+    )
+    .run(retroId);
 }
 
 export function countItems(): number {
@@ -779,6 +880,29 @@ export function getActionItem(id: string): ActionItem | null {
   return r ? mapActionItem(r) : null;
 }
 
+export function deleteItem(id: string): void {
+  // No cascades in the schema, so the card's votes and reactions go first.
+  const db = getDb();
+  transaction(() => {
+    db.prepare(`DELETE FROM "Reaction" WHERE "itemId" = ?`).run(id);
+    db.prepare(`DELETE FROM "Vote" WHERE "itemId" = ?`).run(id);
+    db.prepare(`DELETE FROM "Item" WHERE "id" = ?`).run(id);
+  });
+}
+
+export function updateActionItem(
+  id: string,
+  data: { content: string; assignee: string | null; dueDate: Date | null }
+): void {
+  getDb()
+    .prepare(`UPDATE "ActionItem" SET "content" = ?, "assignee" = ?, "dueDate" = ? WHERE "id" = ?`)
+    .run(data.content, data.assignee, dateToDb(data.dueDate), id);
+}
+
+export function deleteActionItem(id: string): void {
+  getDb().prepare(`DELETE FROM "ActionItem" WHERE "id" = ?`).run(id);
+}
+
 export function updateActionCompleted(id: string, completed: boolean): void {
   // Record when it closed, and clear it again if the action is reopened.
   getDb()
@@ -796,6 +920,8 @@ function buildActionWhere(filter: ActionFilter): { clauses: string[]; params: an
   const params: any[] = [];
   let needsTeamJoin = false;
 
+  const scoped = scopeClause(filter.scope, `r."teamId"`, params);
+  if (scoped) clauses.push(scoped);
   if (filter.completed !== undefined) {
     clauses.push(`a."completed" = ?`);
     params.push(filter.completed ? 1 : 0);
@@ -811,6 +937,15 @@ function buildActionWhere(filter: ActionFilter): { clauses: string[]; params: an
   if (filter.assigneeContains) {
     clauses.push(`a."assignee" LIKE ?`);
     params.push(`%${filter.assigneeContains}%`);
+  }
+  if (filter.assigneeIn) {
+    const names = filter.assigneeIn.map((n) => n.trim().toLowerCase()).filter(Boolean);
+    if (names.length) {
+      clauses.push(`LOWER(a."assignee") IN (${names.map(() => "?").join(",")})`);
+      params.push(...names);
+    } else {
+      clauses.push("0");
+    }
   }
   if (filter.teamNameContains) {
     needsTeamJoin = true;
@@ -867,6 +1002,56 @@ export function listActionItems(filter: ActionFilter): ActionItemWithRetro[] {
   });
 }
 
+export function userActivity(userId: string, creatorNames: string[]): UserActivityRaw {
+  const db = getDb();
+  const creators = creatorNames.filter(Boolean);
+  const facilitated = creators.length
+    ? (db
+        .prepare(
+          `SELECT "id", "title", "status", "createdAt", "teamId" FROM "Retrospective"
+            WHERE "creator" IN (${creators.map(() => "?").join(",")}) ORDER BY "createdAt" DESC`
+        )
+        .all(...creators) as Row[])
+    : [];
+  const cards = db
+    .prepare(
+      `SELECT i."id", i."content", i."createdAt", c."title" AS columnTitle, c."type" AS columnType,
+              r."id" AS retroId, r."title" AS retroTitle, r."teamId" AS teamId, r."isAnonymous" AS isAnonymous
+         FROM "Item" i
+         JOIN "Column" c ON c."id" = i."columnId"
+         JOIN "Retrospective" r ON r."id" = c."retrospectiveId"
+        WHERE i."userId" = ?
+        ORDER BY i."createdAt" DESC`
+    )
+    .all(userId) as Row[];
+  const perBoard = (table: "Vote" | "Reaction", measure: string) =>
+    db
+      .prepare(
+        `SELECT r."id" AS retroId, r."teamId" AS teamId, ${measure} AS count
+           FROM "${table}" x
+           JOIN "Item" i ON i."id" = x."itemId"
+           JOIN "Column" c ON c."id" = i."columnId"
+           JOIN "Retrospective" r ON r."id" = c."retrospectiveId"
+          WHERE x."userId" = ?
+          GROUP BY r."id", r."teamId"`
+      )
+      .all(userId) as Row[];
+  return {
+    facilitated: facilitated.map((r) => ({
+      id: r.id as string, title: r.title as string, status: r.status as string,
+      createdAt: toDate(r.createdAt), teamId: (r.teamId as string | null) ?? null,
+    })),
+    cards: cards.map((r) => ({
+      id: r.id as string, content: r.content as string, createdAt: toDate(r.createdAt),
+      columnTitle: r.columnTitle as string, columnType: r.columnType as string,
+      retroId: r.retroId as string, retroTitle: r.retroTitle as string,
+      teamId: (r.teamId as string | null) ?? null, isAnonymous: toBool(r.isAnonymous),
+    })),
+    votes: perBoard("Vote", `COALESCE(SUM(x."count"), 0)`).map((r) => ({ retroId: r.retroId as string, teamId: (r.teamId as string | null) ?? null, count: Number(r.count) })),
+    reactions: perBoard("Reaction", `COUNT(*)`).map((r) => ({ retroId: r.retroId as string, teamId: (r.teamId as string | null) ?? null, count: Number(r.count) })),
+  };
+}
+
 export function countOpenActions(retroFilter: RetroFilter): number {
   const { clauses, params, needsTeamJoin } = buildRetroWhere(retroFilter, "r", "t");
   const teamJoin = needsTeamJoin ? `JOIN "Team" t ON t."id" = r."teamId"` : "";
@@ -919,7 +1104,7 @@ export function listExpiredRetroIds(now: Date): string[] {
 export function teamAnalytics(teamId: string): TeamAnalyticsRaw {
   const db = getDb();
   const retros = db
-    .prepare(`SELECT "id", "createdAt", "isAnonymous" FROM "Retrospective" WHERE "teamId" = ? ORDER BY "createdAt"`)
+    .prepare(`SELECT "id", "title", "createdAt", "isAnonymous" FROM "Retrospective" WHERE "teamId" = ? ORDER BY "createdAt"`)
     .all(teamId) as Row[];
 
   const empty: TeamAnalyticsRaw = {
@@ -928,6 +1113,8 @@ export function teamAnalytics(teamId: string): TeamAnalyticsRaw {
     actions: { open: 0, done: 0, overdue: 0, daysToClose: [] },
     engagement: { totalItems: 0, itemsWithSummary: 0, retrosWithItems: 0, voteSpread: [], contributorsPerRetro: [] },
     phaseDurations: [],
+    perRetro: [],
+    actionTimeline: [],
   };
   if (retros.length === 0) return empty;
 
@@ -948,7 +1135,7 @@ export function teamAnalytics(teamId: string): TeamAnalyticsRaw {
   ).map((r) => ({ type: r.type as string, items: Number(r.items) }));
 
   const actionRows = db
-    .prepare(`SELECT "completed", "dueDate", "createdAt", "completedAt" FROM "ActionItem" WHERE "retrospectiveId" IN (${holes})`)
+    .prepare(`SELECT "retrospectiveId" AS retro, "completed", "dueDate", "createdAt", "completedAt" FROM "ActionItem" WHERE "retrospectiveId" IN (${holes})`)
     .all(...ids) as Row[];
   const now = Date.now();
   const actions = { open: 0, done: 0, overdue: 0, daysToClose: [] as number[] };
@@ -998,6 +1185,8 @@ export function teamAnalytics(teamId: string): TeamAnalyticsRaw {
       voteRows
     ),
     phaseDurations: phaseDurationsFromRows(phaseRows),
+    perRetro: perRetroFromRows(retros, itemRows),
+    actionTimeline: actionTimelineFromRows(retros, actionRows),
   };
 }
 

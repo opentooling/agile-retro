@@ -11,8 +11,12 @@
  *   npm run audit -- --level moderate
  *   npm run audit -- --production   runtime dependencies only
  *
- * Exit codes: 0 clean (at the chosen level) · 1 vulnerabilities found or the
- * audit could not run.
+ * Exit codes: 0 clean (at the chosen level) · 1 vulnerabilities found ·
+ * 2 the audit could not run (usually no route to the registry).
+ *
+ * 1 and 2 are kept apart for the pre-commit hook: it blocks a commit on 1 but
+ * only warns on 2, so working offline doesn't turn every commit into a
+ * `--no-verify`. CI treats any non-zero exit as a failure, so it is unaffected.
  */
 import { execFileSync } from 'node:child_process'
 
@@ -47,8 +51,22 @@ function runAudit(): Record<string, unknown> {
     }
 }
 
+/**
+ * npm prints JSON even when the audit itself fails — an unreachable registry
+ * comes back as `{"message": "...", "error": {...}}` with a non-zero exit. Read
+ * naively that has no `vulnerabilities` key and passes as clean, so an outage
+ * would report "found: nothing". A real report always carries the counts.
+ */
+function assertRealReport(report: Record<string, unknown>): void {
+    const counts = (report.metadata as { vulnerabilities?: unknown } | undefined)?.vulnerabilities
+    if (report.vulnerabilities && counts && typeof counts === 'object') return
+    const why = typeof report.message === 'string' ? report.message : 'npm returned no audit report'
+    throw new Error(`could not run npm audit: ${why}`)
+}
+
 function main(): number {
     const report = runAudit()
+    assertRealReport(report)
     const vulns = (report.vulnerabilities ?? {}) as Record<string, {
         severity: Severity
         via: (string | { title?: string; url?: string })[]
@@ -94,5 +112,5 @@ try {
     process.exit(main())
 } catch (err) {
     console.error(`[audit] ERROR: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
+    process.exit(2)
 }

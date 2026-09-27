@@ -1,6 +1,19 @@
 apiVersion: v2
 name: agile-retro
-description: A Helm chart for Agile Retro Tool
+description: Timed team retrospectives — input, voting, review and actions — with team access through your identity provider.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.5.0
+appVersion: "0.5.0"
+home: https://github.com/opentooling/agile-retro
+sources:
+  - https://github.com/opentooling/agile-retro
+keywords:
+  - retrospective
+  - agile
+  - teams
+maintainers:
+  - name: opentooling
+# Ingress is networking.k8s.io/v1 and the HPA is autoscaling/v2.
+kubeVersion: ">=1.23.0-0"
+annotations:
+  artifacthub.io/license: MIT

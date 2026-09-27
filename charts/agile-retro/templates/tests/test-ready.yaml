@@ -1,0 +1,47 @@
+{{- if .Values.tests.enabled }}
+{{- /*
+`helm test`: does the Service answer, and can the pod behind it reach its
+database? That is what readiness means here, so the test asks the readiness
+endpoint rather than a page, and fails on anything but 200.
+
+It runs in the application's own image, with Node's fetch: pinned to the
+release's tag, already non-root with a numeric user (so runAsNonRoot holds
+without choosing a UID, which restricted-v2 would reject), and nothing extra
+to pull or to mirror into an air-gapped registry.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "agile-retro.fullname" . }}-test-ready
+  labels:
+    {{- include "agile-retro.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    {{- include "agile-retro.podSecurityContext" (dict "ctx" $ "runAsUser" 1001) | nindent 4 }}
+  containers:
+    - name: ready
+      image: {{ include "agile-retro.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command:
+        - node
+        - -e
+        - |
+          const url = 'http://{{ include "agile-retro.fullname" . }}:{{ .Values.service.port }}/api/ready'
+          fetch(url)
+            .then((r) => { console.log(url, r.status); process.exit(r.ok ? 0 : 1) })
+            .catch((e) => { console.error(url, e.message); process.exit(1) })
+      securityContext:
+        {{- include "agile-retro.containerSecurityContext" (dict "readOnlyRootFilesystem" true) | nindent 8 }}
+      resources:
+        requests: { cpu: 10m, memory: 64Mi }
+        limits: { memory: 128Mi }
+{{- end }}

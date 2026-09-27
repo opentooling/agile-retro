@@ -1,19 +1,37 @@
-{{- if .Values.openshift.route.enabled -}}
+{{- if .Values.openshift.route.enabled }}
+{{- /*
+An OpenShift Route. Off unless asked for: a cluster without the
+route.openshift.io API cannot install a chart that renders one, which is why
+this is not simply always present.
+*/}}
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: {{ include "agile-retro.fullname" . }}
   labels:
     {{- include "agile-retro.labels" . | nindent 4 }}
+  annotations:
+    {{- /*
+      A board holds its WebSocket open for the whole session. The router's
+      default idle timeout is 30 seconds, after which the live board silently
+      stops updating and everyone is looking at a stale page.
+    */}}
+    {{- with .Values.openshift.route.timeout }}
+    haproxy.router.openshift.io/timeout: {{ . | quote }}
+    {{- end }}
+    {{- with .Values.openshift.route.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
-  host: {{ .Values.openshift.route.host }}
+  host: {{ .Values.openshift.route.host | quote }}
   to:
     kind: Service
     name: {{ include "agile-retro.fullname" . }}
     weight: 100
   port:
     targetPort: http
+  {{- with .Values.openshift.route.tls }}
   tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- end }}

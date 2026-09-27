@@ -9,12 +9,18 @@ import * as db from "./src/lib/db";
 import { redactRetroFull, applyBlindInput } from "./src/lib/sanitize";
 import { pushActionDoneState } from "./src/lib/jira-sync";
 import { purgeExpiredRetros } from "./src/lib/purge";
+import { placeBefore } from "./src/lib/board-order";
+import { moveInReview, placeInReview } from "./src/lib/review-order";
+import { snoozePhase } from "./src/lib/phase-timer";
+import { acceptText } from "./src/lib/text-limits";
 import {
     authUserFromToken,
     canViewBoard,
     canContributeToBoard,
     canManageBoard,
     canEditItem,
+    canRearrangeItem,
+    canChangeActionItems,
     type AuthUser,
     type RetroRef,
 } from "./src/lib/authz";
@@ -132,6 +138,15 @@ app.prepare().then(() => {
         const user = socket.data.user as AuthUser;
         console.log("Client connected", socket.id, user.id);
 
+        // The phase clock counts against the server's clock, not the device's.
+        // Phase starts are stamped here, so a browser whose clock disagrees —
+        // or a server whose own has drifted — otherwise reads the timer wrong,
+        // by exactly the difference. The client times the round trip and
+        // corrects for it (lib/phase-timer clockOffset).
+        socket.on("time-check", (payload: { sentAt?: number } | undefined) => {
+            socket.emit("time-reply", { sentAt: payload?.sentAt, serverTime: Date.now() });
+        });
+
         socket.on("join-retro", async ({ retroId }) => {
             try {
                 const ref = await loadRetroRef(retroId);
@@ -147,6 +162,19 @@ app.prepare().then(() => {
 
                 socket.join(retroId);
                 console.log(`Socket ${socket.id} joined retro ${retroId} as ${user.name ?? user.id}`);
+
+                // Catch the newcomer up. Their page's board was read when the
+                // page rendered; anything that changed between then and joining
+                // this room was broadcast to a room they were not yet in, and
+                // stayed invisible to them until the next change. Same
+                // redaction as a broadcast, including blind input.
+                const current = redactRetroFull(await db.getRetroFull(retroId));
+                if (current) {
+                    socket.emit(
+                        "retro-updated",
+                        current.blindInput && current.status === "INPUT" ? applyBlindInput(current, user.id) : current,
+                    );
+                }
 
                 const status = await db.getRetroStatus(retroId);
                 if (status?.status === 'CLOSED') {
@@ -213,14 +241,24 @@ app.prepare().then(() => {
 
         socket.on("add-item", async ({ retroId, columnId, content }) => {
             try {
-                if (!(await requireContribute(retroId))) return;
+                const ref = await requireContribute(retroId);
+                if (!ref) return;
+                // Cards are written during Input — the only phase that offers it.
+                if (ref.status !== "INPUT") return;
+                const text = acceptText(content);
+                if (!text) return;
+                // The column must be on the board named. The access check above
+                // is for that board; without this, contributing to any open
+                // board let you plant cards on another team's private board.
+                const retro = await db.getRetroFull(retroId);
+                if (!retro?.columns.some((c) => c.id === columnId)) return;
 
                 // Get max order in this column
                 const nextOrder = (await db.itemMaxOrder(columnId) ?? -1) + 1;
 
                 // Authorship is taken from the authenticated session, not the client.
                 await db.createItem({
-                    content,
+                    content: text,
                     columnId,
                     userId: user.id,
                     username: user.name ?? user.id,
@@ -247,7 +285,7 @@ app.prepare().then(() => {
                     socket.emit("access-denied", { retroId });
                     return;
                 }
-                const trimmed = String(content ?? "").trim();
+                const trimmed = acceptText(content);
                 if (!trimmed) return;
                 await db.updateItemContent(itemId, trimmed);
 
@@ -289,6 +327,9 @@ app.prepare().then(() => {
             try {
                 // Phase changes are a management action.
                 if (!(await requireManage(retroId))) return;
+                // Only phases the app knows. Anything else left the board in a
+                // state no screen could render.
+                if (!["INPUT", "VOTING", "REVIEW", "ACTIONS", "CLOSED"].includes(status)) return;
 
                 const updatedRetro = await db.updateRetroStatus(retroId, status, new Date());
 
@@ -328,11 +369,14 @@ app.prepare().then(() => {
         socket.on("add-action-item", async ({ retroId, content, assignee, dueDate }) => {
             try {
                 if (!(await requireContribute(retroId))) return;
+                const text = acceptText(content);
+                if (!text) return;
+                const due = dueDate ? new Date(dueDate) : null;
                 await db.createActionItem({
-                    content,
+                    content: text,
                     retrospectiveId: retroId,
                     assignee: assignee && String(assignee).trim() ? String(assignee).trim() : null,
-                    dueDate: dueDate ? new Date(dueDate) : null,
+                    dueDate: due && !Number.isNaN(due.getTime()) ? due : null,
                 });
 
                 const updatedRetro = await db.getRetroFull(retroId);
@@ -346,7 +390,10 @@ app.prepare().then(() => {
             try {
                 if (!(await requireView(retroId))) return;
                 const action = await db.getActionItem(actionId);
-                if (action) {
+                // The access check above is for the board the client *named*.
+                // Without this, access to any board — every open board counts —
+                // was enough to toggle an action from any other team's board.
+                if (action && action.retrospectiveId === retroId) {
                     const newCompleted = !action.completed;
                     await db.updateActionCompleted(actionId, newCompleted);
 
@@ -380,38 +427,192 @@ app.prepare().then(() => {
             }
         });
 
-        socket.on("move-item", async ({ retroId, itemId, targetColumnId, newIndex }) => {
+        /**
+         * Load a board and one of its cards, confirming the card is really on
+         * that board. Every handler that takes an item id checks this: the
+         * access check covers the board the client *named*, so without it,
+         * access to any board — every open board counts — reached any card.
+         */
+        const loadItemOnBoard = async (retroId: string, itemId: string) => {
+            const retro = await db.getRetroFull(retroId);
+            if (!retro) return null;
+            const column = retro.columns.find((c) => c.items.some((i) => i.id === itemId));
+            if (!column) return null;
+            const item = column.items.find((i) => i.id === itemId)!;
+            const ref: RetroRef = { teamId: retro.teamId, creator: retro.creator, team: retro.team, status: retro.status };
+            return { retro, column, item, ref };
+        };
+
+        /**
+         * Move a card within its column or into another one.
+         *
+         * The position is "before this card" rather than an index: with blind
+         * input a participant sees only their own cards, so an index they
+         * computed refers to a column they cannot see. Previously this handler
+         * trusted the item id, the target column and the index as given, let
+         * any contributor move anyone's card, and ran in every phase.
+         */
+        socket.on("move-item", async ({ retroId, itemId, targetColumnId, beforeItemId }) => {
             try {
-                if (!(await requireContribute(retroId))) return;
-
-                // 1. Get the item to verify it exists and get its current column
-                const itemToMove = await db.getItem(itemId);
-                if (!itemToMove) return;
-
-                // 2. Update the item's column immediately (if changed)
-                if (itemToMove.columnId !== targetColumnId) {
-                    await db.updateItemColumn(itemId, targetColumnId);
+                const found = await loadItemOnBoard(retroId, itemId);
+                if (!found) return;
+                const { retro, item, ref } = found;
+                const target = retro.columns.find((c) => c.id === targetColumnId);
+                if (!target) return; // a column on some other board
+                if (!canRearrangeItem(user, ref, item)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
                 }
 
-                // 3. Reorder items in the target column
-                // Fetch all items in the target column (including the moved one)
-                const itemsInColumn = await db.listItemsInColumn(targetColumnId);
+                if (item.columnId !== target.id) {
+                    await db.updateItemColumn(itemId, target.id);
+                }
+                const order = placeBefore(
+                    target.items.map((i) => i.id),
+                    itemId,
+                    typeof beforeItemId === "string" ? beforeItemId : null,
+                );
+                await db.reorderItems(order);
 
-                // Remove the moved item from the array (if it's there - it might be if we just updated columnId)
-                const otherItems = itemsInColumn.filter((i) => i.id !== itemId);
-
-                // Insert at new index
-                // Clamp index to valid range
-                const insertIndex = Math.max(0, Math.min(newIndex, otherItems.length));
-                otherItems.splice(insertIndex, 0, { ...itemToMove, columnId: targetColumnId });
-
-                // Update order for all items in the column, atomically.
-                await db.reorderItems(otherItems.map((item) => item.id));
-
-                const updatedRetro = await db.getRetroFull(retroId);
-                await broadcastRetro(io, retroId, updatedRetro);
+                await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
             } catch (error) {
                 console.error("Error moving item:", error);
+            }
+        });
+
+        /**
+         * Reorder the review queue, or put it back the way the votes had it.
+         *
+         * The queue is ranked by votes, but the facilitator running the session
+         * often knows better: two cards are really one conversation, or the
+         * quick win should go first. Only they can rearrange it — the queue is
+         * the room's agenda, not one person's view — and only while the board
+         * is in Review, where it is the thing on screen.
+         *
+         * The move is sent as an intent — a direction from the arrows, or "put
+         * it in front of that one" from a drag — never a finished order, so
+         * two people arranging at once cannot write a queue computed from a
+         * stale board: the server applies each move to the order it holds.
+         */
+        const reviewEntriesOf = (retro: db.RetroFull) =>
+            retro.columns.flatMap((c) =>
+                c.items.map((i) => ({
+                    id: i.id,
+                    total: i.votes.reduce((acc, v) => acc + v.count, 0),
+                    reviewOrder: i.reviewOrder,
+                })),
+            );
+
+        socket.on("reorder-review", async ({ retroId, itemId, delta, beforeItemId }) => {
+            try {
+                const stepped = delta === -1 || delta === 1;
+                const dropped = beforeItemId === null || typeof beforeItemId === "string";
+                if (!stepped && !dropped) return;
+                const found = await loadItemOnBoard(retroId, itemId);
+                if (!found) return;
+                const { retro, ref } = found;
+                if (!canManageBoard(user, ref)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
+                if (retro.status !== "REVIEW") return;
+
+                const entries = reviewEntriesOf(retro);
+                const order = stepped
+                    ? moveInReview(entries, itemId, delta)
+                    : placeInReview(entries, itemId, beforeItemId ?? null);
+                if (!order) return; // the move would leave the card's own group
+
+                await db.setReviewOrder(order);
+                await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
+            } catch (error) {
+                console.error("Error reordering the review queue:", error);
+            }
+        });
+
+        socket.on("reset-review-order", async ({ retroId }) => {
+            try {
+                const ref = await loadRetroRef(retroId);
+                if (!ref) return;
+                if (!canManageBoard(user, ref)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
+                if (ref.status !== "REVIEW") return;
+
+                await db.clearReviewOrder(retroId);
+                await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
+            } catch (error) {
+                console.error("Error resetting the review queue:", error);
+            }
+        });
+
+        /** Delete a card while cards are still being written. */
+        socket.on("delete-item", async ({ retroId, itemId }) => {
+            try {
+                const found = await loadItemOnBoard(retroId, itemId);
+                if (!found) return;
+                if (!canRearrangeItem(user, found.ref, found.item)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
+                await db.deleteItem(itemId);
+                await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
+            } catch (error) {
+                console.error("Error deleting item:", error);
+            }
+        });
+
+        /** Load an action and confirm it belongs to the board named. */
+        const loadActionOnBoard = async (retroId: string, actionId: string) => {
+            const ref = await loadRetroRef(retroId);
+            if (!ref) return null;
+            const action = await db.getActionItem(actionId);
+            if (!action || action.retrospectiveId !== retroId) return null;
+            return { ref, action };
+        };
+
+        /** Rewrite an action's text, assignee or due date during the Actions phase. */
+        socket.on("update-action-item", async ({ retroId, actionId, content, assignee, dueDate }) => {
+            try {
+                const found = await loadActionOnBoard(retroId, actionId);
+                if (!found) return;
+                if (!canChangeActionItems(user, found.ref)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
+                const text = acceptText(content);
+                if (!text) return;
+                const due = dueDate ? new Date(dueDate) : null;
+                await db.updateActionItem(actionId, {
+                    content: text,
+                    assignee: assignee && String(assignee).trim() ? String(assignee).trim() : null,
+                    dueDate: due && !Number.isNaN(due.getTime()) ? due : null,
+                });
+                await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
+            } catch (error) {
+                console.error("Error updating action item:", error);
+            }
+        });
+
+        /**
+         * Delete an action during the Actions phase. A linked Jira issue is left
+         * alone: the app created it, but it may have gathered history of its
+         * own, and deleting work in someone else's tracker is not this button's
+         * job.
+         */
+        socket.on("delete-action-item", async ({ retroId, actionId }) => {
+            try {
+                const found = await loadActionOnBoard(retroId, actionId);
+                if (!found) return;
+                if (!canChangeActionItems(user, found.ref)) {
+                    socket.emit("access-denied", { retroId });
+                    return;
+                }
+                await db.deleteActionItem(actionId);
+                await broadcastRetro(io, retroId, await db.getRetroFull(retroId));
+            } catch (error) {
+                console.error("Error deleting action item:", error);
             }
         });
 
@@ -423,18 +624,22 @@ app.prepare().then(() => {
                 const retro = await db.getRetro(retroId);
                 if (!retro) return;
 
-                const updateData: { inputDuration?: number; votingDuration?: number; reviewDuration?: number } = {};
-                if (retro.status === 'INPUT') {
-                    updateData.inputDuration = (retro.inputDuration || 0) + 5;
-                } else if (retro.status === 'VOTING') {
-                    updateData.votingDuration = (retro.votingDuration || 0) + 5;
-                } else if (retro.status === 'REVIEW') {
-                    updateData.reviewDuration = (retro.reviewDuration || 0) + 5;
-                } else {
-                    return; // No timer for other phases
-                }
+                const field = ({ INPUT: 'inputDuration', VOTING: 'votingDuration', REVIEW: 'reviewDuration' } as const)[
+                    retro.status as 'INPUT' | 'VOTING' | 'REVIEW'
+                ];
+                if (!field) return; // No timer for other phases
 
-                const updatedRetro = await db.updateRetroDurations(retroId, updateData);
+                // Five more minutes from the later of the deadline and now — in
+                // overtime, from now (see lib/phase-timer).
+                const snoozed = snoozePhase(
+                    retro.phaseStartTime ? new Date(retro.phaseStartTime) : null,
+                    retro[field] ?? null,
+                    new Date(),
+                );
+                const updatedRetro = await db.updateRetroDurations(retroId, {
+                    [field]: snoozed.durationMinutes,
+                    phaseStartTime: snoozed.phaseStart,
+                });
                 await broadcastRetro(io, retroId, updatedRetro);
             } catch (error) {
                 console.error("Error extending timer:", error);

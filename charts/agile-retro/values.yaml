@@ -1,73 +1,208 @@
-replicaCount: 1
+# Agile Retro — Helm values.
+#
+# The defaults install on any conformant cluster: one replica, the bundled
+# PostgreSQL, an Ingress you point at a host, and secrets generated on first
+# install and kept across upgrades. Everything an enterprise cluster tends to
+# need — a private certificate authority, OpenShift's restricted-v2 SCC, a
+# mirrored registry, an external database, extra objects of your own — is a
+# value here rather than a fork of the chart.
 
+# -- Image for the application. In an air-gapped or mirrored registry, set
+# repository to your copy; the tag defaults to the chart's appVersion, so a
+# chart version always names the image built with it.
 image:
-  repository: agile-retro
+  repository: ghcr.io/opentooling/agile-retro
+  tag: ""
   pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
-  tag: "latest"
 
+# -- Pull secrets for the registries above, e.g. [{ name: regcred }].
 imagePullSecrets: []
+
 nameOverride: ""
 fullnameOverride: ""
 
+# -- Replicas. Read `scaling` before raising this: board updates are broadcast
+# in-process, so a second pod splits every board.
+replicaCount: 1
+
+openshift:
+  # -- Run under OpenShift's restricted-v2 SCC. Pods then set no fixed
+  # runAsUser, runAsGroup or fsGroup, so OpenShift assigns them from the
+  # namespace's range and does not reject the pod. Everything else the
+  # restricted Pod Security Standard asks for is set either way.
+  enabled: false
+  # -- An OpenShift Route instead of an Ingress. Off by default: a cluster
+  # without the route.openshift.io API cannot install a chart that renders one.
+  route:
+    enabled: false
+    host: ""
+    # A board holds a WebSocket open for the length of the session. OpenShift's
+    # router closes an idle connection after 30s by default, which drops the
+    # live board and leaves people looking at a stale page.
+    timeout: 1h
+    tls:
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect
+    annotations: {}
+
+# -- Extra Kubernetes objects to deploy with the release: custom resources, a
+# Route with annotations of your own, an ExternalSecret, a ServiceMonitor.
+# Items can be YAML objects or strings; both are rendered with `tpl`, so
+# expressions such as {{ include "agile-retro.fullname" $ }} and
+# {{ .Release.Namespace }} work. Any CRDs must already exist in the cluster.
+extraObjects: []
+#  - apiVersion: route.openshift.io/v1
+#    kind: Route
+#    metadata:
+#      name: '{{ include "agile-retro.fullname" $ }}-custom'
+#    spec:
+#      host: retro.apps.example.com
+#      to: { kind: Service, name: '{{ include "agile-retro.fullname" $ }}' }
+#      port: { targetPort: http }
+#  - |
+#    apiVersion: v1
+#    kind: ConfigMap
+#    metadata:
+#      name: {{ include "agile-retro.fullname" $ }}-extra
+#    data:
+#      namespace: {{ .Release.Namespace }}
+
 serviceAccount:
-  # Specifies whether a service account should be created
-  create: true# Annotations to add to the service account
+  create: true
   annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template
   name: ""
-
-podAnnotations: {}
-
-podSecurityContext: {}
-  # fsGroup: 2000
-
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
 
 service:
   type: ClusterIP
   port: 3000
 
 ingress:
-  enabled: false
+  # On by default so a plain `helm install` is reachable: point `hosts` at a
+  # name your ingress controller serves. Turn it off for an OpenShift Route,
+  # or when a gateway outside the chart fronts the Service.
+  enabled: true
   className: ""
+  # The annotations below are examples, not defaults: which ones matter
+  # depends on your controller. A board is a WebSocket held open for the whole
+  # session, so whatever your controller calls its read timeout has to outlast
+  # a retrospective — an hour is a safe floor. With more than one replica you
+  # also need session affinity, so a reconnecting browser returns to the pod
+  # holding its board.
   annotations: {}
-    # kubernetes.io/ingress.class: nginx
-    # kubernetes.io/tls-acme: "true"
+    # ingress-nginx:
+    #   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    #   nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    #   nginx.ingress.kubernetes.io/affinity: "cookie"
+    # Traefik, via a Middleware in extraObjects, or:
+    #   traefik.ingress.kubernetes.io/router.middlewares: <ns>-<name>@kubernetescrd
   hosts:
-    - host: chart-example.local
+    - host: agile-retro.localtest.me
       paths:
         - path: /
-          pathType: ImplementationSpecific
+          pathType: Prefix
   tls: []
-  #  - secretName: chart-example-tls
+  #  - secretName: agile-retro-tls
   #    hosts:
-  #      - chart-example.local
+  #      - agile-retro.example.com
 
-resources: {}
+# -- A private certificate authority for the application to trust, as a PEM
+# bundle in a ConfigMap or a Secret in this namespace. Needed whenever the
+# identity provider, or anything else the app calls, presents a certificate
+# from an internal CA: without it sign-in fails with a certificate error that
+# looks like a misconfigured issuer. A CA bundle is public, so a ConfigMap is
+# as good a home as a Secret — and is where OpenShift's
+# config.openshift.io/inject-trusted-cabundle=true puts one. Set one, not both.
+extraCaCerts:
+  configMap: ""
+  secret: ""
+  key: ca.crt
 
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+# -- Requests are set because namespaces with a quota or a LimitRange reject
+# pods without them. Memory has a limit and CPU does not, deliberately: a CPU
+# limit throttles the event loop in bursts, which shows up as lag on a busy
+# board.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 768Mi
 
-# Horizontal autoscaling. Read the `scaling` block below first: more than one
-# replica is not supported yet, so enabling this alone will fail the render.
-# Ignored when sqlite.enabled (a file database cannot be shared between pods).
+# -- How long the app may take to start before the pod is considered broken,
+# as failureThreshold x periodSeconds. Generous: a cold start on a contended
+# node, with the schema being created on first connect, can take a while, and
+# killing a pod that is merely slow produces a crash loop that looks like a
+# broken image.
+startupProbe:
+  periodSeconds: 3
+  failureThreshold: 60
+
+podAnnotations: {}
+podLabels: {}
+
+# -- Extra environment variables for the app container, as a list of EnvVar
+# (so valueFrom works, not only literal values).
+extraEnv: []
+#  - name: LOG_LEVEL
+#    value: debug
+#  - name: SOMETHING
+#    valueFrom:
+#      secretKeyRef: { name: my-secret, key: something }
+
+# -- Every key of this Secret, as environment variables. For settings the chart
+# does not model.
+envFromSecret: ""
+
+# -- Extra host entries in the pod, e.g. to resolve a public identity-provider
+# hostname to an in-cluster address.
+hostAliases: []
+#  - ip: 10.0.0.10
+#    hostnames: [keycloak.example.com]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+# -- Network policy. Off by default, because it only does anything on a cluster
+# that enforces NetworkPolicy, and a wrong one is indistinguishable from an
+# outage. On, it bounds what a compromised pod could reach: DNS, its database,
+# and whatever you list below.
+networkPolicy:
+  enabled: false
+  # Where the cluster's DNS resolver runs. Empty means upstream Kubernetes'
+  # kube-dns on port 53, or with openshift.enabled, OpenShift's openshift-dns
+  # on 5353. (The defaults live in the template because Helm merges maps: a
+  # default selector here could only be added to, never replaced.)
+  dns:
+    namespaceSelector: {}
+    podSelector: {}
+    ports: []
+  # Who may reach the app. Empty allows every pod in the cluster, which is what
+  # an ingress controller in an unlabelled namespace needs.
+  ingressFrom: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: ingress-nginx
+  # Where the app may connect, beyond DNS and its own database: the identity
+  # provider, Jira, an SMTP relay.
+  egressTo: []
+  #  - to:
+  #      - namespaceSelector:
+  #          matchLabels:
+  #            kubernetes.io/metadata.name: keycloak
+  #    ports:
+  #      - port: 8080
+  #        protocol: TCP
+
+# -- Horizontal autoscaling. Read `scaling` first: more than one replica is not
+# supported yet, so enabling this alone fails the render. Ignored with SQLite,
+# where a file database cannot be shared between pods.
 autoscaling:
   enabled: false
   minReplicas: 1
   maxReplicas: 5
-  # CPU is a weak signal here — the app is I/O-bound on long-lived websockets
+  # CPU is a weak signal here — the app is I/O-bound on long-lived WebSockets
   # and idles cheaply even with a full room. Treat this as a safety valve.
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
@@ -80,150 +215,156 @@ scaling:
   #
   # Set true only if you understand that and still want to scale out.
   allowMultipleReplicas: false
-  # targetMemoryUtilizationPercentage: 80
 
-nodeSelector: {}
-
-tolerations: []
-
-affinity: {}
-
-# File-based SQLite (node:sqlite) — a single-replica fallback that needs no DB
-# container, just a small PVC for the database file. When enabled it takes
-# precedence: the bundled Postgres is not deployed and externalDatabase is ignored.
-sqlite:
-  enabled: false
-  mountPath: /data          # PVC is mounted here; the DB file lives in it
-  fileName: dev.db
-  persistence:
-    enabled: true
-    size: 1Gi
-    storageClassName: ""    # "" = cluster default
-    existingClaim: ""
-
-# Bundled PostgreSQL (runs as a separate container/Deployment in this release).
-postgresql:
-  enabled: true
-  image: postgres:16-alpine   # airgapped: point at your mirror or a RHEL postgresql image
-  imagePullPolicy: IfNotPresent
-  auth:
-    username: agile
-    password: change-me-in-production
-    database: agile_retro
-  persistence:
-    enabled: true
-    size: 5Gi
-    storageClassName: ""      # "" = cluster default
-    existingClaim: ""
-  # OpenShift note: the community `postgres` image does NOT run under the default
-  # restricted SCC (it needs a fixed UID). To run it here either:
-  #   - set a podSecurityContext below (e.g. fsGroup/runAsUser), or
-  #   - grant the postgres ServiceAccount the 'anyuid' SCC, or
-  #   - switch `image` to a RHEL postgresql image (and adjust env var names).
-  podSecurityContext: {}
-  resources: {}
-
-# Used only when postgresql.enabled is false — point the app at an external DB.
-externalDatabase:
-  url: ""                     # postgres://user:pass@host:5432/dbname
-  existingSecret: ""          # name of a Secret containing the connection string
-  existingSecretKey: "database-url"
-
-# Public-facing app configuration for Auth.js (NextAuth).
-app:
-  # Full public URL the app is served from (scheme + host, NO trailing slash).
-  # Auth.js uses this to build OAuth redirect URIs that match what you register
-  # in your IdP, e.g. <app.url>/api/auth/callback/keycloak.
-  # Leave empty only for local/dev where the host can be safely inferred.
-  url: ""  # e.g. https://agile-retro.apps.example.com
-  # Trust X-Forwarded-Proto/Host from the ingress/route (TLS terminated upstream).
-  # Required in most cluster deployments behind a proxy. Sets AUTH_TRUST_HOST=true.
-  trustHost: true
-
-  # Deployment branding. Read at runtime, so one image serves any organisation
-  # without a rebuild. Leave empty for the neutral defaults.
-  branding:
-    # Product name — browser tab, sidebar and login screen.
-    name: ""          # default: "Agile Retro"
-    # One line under the name on the login screen.
-    tagline: ""       # default: "Sign in to create or join retrospectives"
-    # Meta description. Defaults to one naming your app.
-    description: ""
-
-env:
-  # Define extra environment variables here. DATABASE_URL is injected
-  # automatically from the bundled Postgres secret (or externalDatabase).
-  []
-
-envFromSecret: ""
-# envFromSecret: "my-app-secret"
-
-# Database schema migration.
-#
-# The app applies its schema on first connect, so this is optional. Enable it to
-# make schema changes an explicit, auditable step: the Job runs the same DDL as
-# a Helm hook, so a failure fails the release instead of surfacing as errors on
-# the first request. Ignored when sqlite.enabled (SQLite migrates on open).
-migration:
-  enabled: false
-  # Also set DB_SKIP_SCHEMA_BOOTSTRAP=true on the app, so it never issues DDL
-  # itself. Lets the app run with a database user that has no DDL rights —
-  # but then the Job MUST succeed before the app can work.
-  skipAppBootstrap: false
-  # Report drift and fail without changing anything. Useful for gating an
-  # upgrade, or for a dry run before enabling the real thing.
-  checkOnly: false
-  # Seconds the Job waits for the database to accept connections.
-  waitSeconds: 60
-  backoffLimit: 3
-  activeDeadlineSeconds: 600
-  resources: {}
+# -- Secrets. Leave a value empty and the chart generates it on install and
+# keeps it across upgrades, by reading back what the Secret already holds.
+# Point existingSecret at your own Secret to manage them yourself — with the
+# keys auth-secret, and keycloak-client-secret /
+# keycloak-admin-client-secret / google-client-secret where those are enabled.
+secrets:
+  existingSecret: ""
 
 auth:
-  secret: "change-me-in-production" # AUTH_SECRET
-  existingSecret: "" # Optional: Name of existing secret for AUTH_SECRET
-  existingSecretKey: "auth-secret" # Key in the existing secret
+  # -- AUTH_SECRET: signs session cookies. Generated when empty. Changing it
+  # signs everyone out.
+  secret: ""
+  existingSecret: ""
+  existingSecretKey: "auth-secret"
 
   # Token claim the user's groups are read from. Defaults to `user_roles`
   # (falls back to `groups`). Set only if your IdP uses a different claim name.
-  # Rendered into the GROUPS_CLAIM env var. See docs/KEYCLOAK_GROUPS.md.
-  groupsClaim: ""   # e.g. "user_roles" or "groups"
+  # Rendered into GROUPS_CLAIM. See docs/KEYCLOAK_GROUPS.md.
+  groupsClaim: ""
 
-  # Global-admin (super-user) access via identity-provider groups. Members of
-  # any listed group are global admins, in addition to anyone holding the
-  # Keycloak `admin` realm role. Rendered into the ADMIN_GROUPS env var.
-  # Matched against the groups claim above. See docs/KEYCLOAK_GROUPS.md.
+  # Global-admin access via identity-provider groups. Members of any listed
+  # group are global admins, as is anyone holding the Keycloak `admin` realm
+  # role. Rendered into ADMIN_GROUPS and matched against the claim above.
   adminGroups: []
     # - /Eng/Retro-Admins
-    # - Platform-Admins
 
   google:
     enabled: false
     clientId: ""
     clientSecret: ""
-    existingSecret: "" # Optional: Name of existing secret for clientSecret
-    existingSecretKey: "google-client-secret" # Key in the existing secret
+    existingSecret: ""
+    existingSecretKey: "google-client-secret"
 
   keycloak:
     enabled: false
     clientId: ""
     clientSecret: ""
     issuer: ""
-    existingSecret: "" # Optional: Name of existing secret for clientSecret
-    existingSecretKey: "keycloak-client-secret" # Key in the existing secret
+    existingSecret: ""
+    existingSecretKey: "keycloak-client-secret"
 
-    # OPTIONAL — only needed to power the team "Access groups" picker with your
-    # real Keycloak groups. Requires a confidential client with a service account
-    # holding realm-management roles `query-groups` and `view-realm`.
-    # Access control itself does NOT need this: without it, the group fields fall
-    # back to free-text entry. See docs/KEYCLOAK_GROUPS.md.
-    adminClientId: ""                 # -> KEYCLOAK_ADMIN_CLIENT_ID (falls back to clientId)
-    adminClientSecret: ""             # -> KEYCLOAK_ADMIN_CLIENT_SECRET
-    adminExistingSecret: ""           # Optional: existing secret for adminClientSecret
+    # OPTIONAL — only to power the team "Access groups" picker with your real
+    # Keycloak groups. Needs a confidential client whose service account holds
+    # the realm-management roles `query-groups` and `view-realm`. Access
+    # control itself does not need this: without it the group fields fall back
+    # to free text. See docs/KEYCLOAK_GROUPS.md.
+    adminClientId: ""
+    adminClientSecret: ""
+    adminExistingSecret: ""
     adminExistingSecretKey: "keycloak-admin-client-secret"
 
-openshift:
-  route:
-    enabled: true
-    host: "" # Leave empty to auto-generate if supported, or specify host
+# Public-facing configuration for Auth.js (NextAuth).
+app:
+  # -- Full public URL the app is served from (scheme + host, no trailing
+  # slash). Auth.js builds OAuth redirect URIs from it, which must match what
+  # is registered with your identity provider —
+  # <app.url>/api/auth/callback/keycloak. Derived from the Ingress or Route
+  # host when empty.
+  url: ""
+  # -- Trust X-Forwarded-Proto/Host from the ingress or route (TLS terminated
+  # upstream). Needed in most clusters. Sets AUTH_TRUST_HOST.
+  trustHost: true
 
+  # Deployment branding, read at runtime, so one image serves any organisation
+  # without a rebuild. Empty gives the neutral defaults.
+  branding:
+    name: ""          # default: "Agile Retro"
+    tagline: ""       # default: "Sign in to create or join retrospectives"
+    description: ""
+
+# -- Bundled PostgreSQL: a Deployment and a PVC in this release. Convenient,
+# and enough for a team; point `externalDatabase` at a managed instance for
+# anything you would miss if the PVC were lost.
+postgresql:
+  enabled: true
+  # -- community (docker.io's postgres) or rhel (Red Hat's SCL PostgreSQL,
+  # built for OpenShift's arbitrary UIDs). Empty follows openshift.enabled,
+  # so an OpenShift install gets an image restricted-v2 will actually run.
+  flavor: ""
+  # -- Empty picks the flavour's image: docker.io/library/postgres:16-alpine,
+  # or quay.io/sclorg/postgresql-16-c9s. With a Red Hat subscription, set
+  # registry.redhat.io/rhel9/postgresql-16 (and an imagePullSecret). In an
+  # air-gapped cluster, your mirror of either.
+  image: ""
+  imagePullPolicy: IfNotPresent
+  auth:
+    username: agile
+    # Generated and kept across upgrades when empty, like the other secrets.
+    password: ""
+    database: agile_retro
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClassName: ""      # "" = cluster default
+    existingClaim: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  # Overrides the pod securityContext the flavour picks. Rarely needed.
+  podSecurityContext: {}
+
+# -- Used only when postgresql.enabled is false.
+externalDatabase:
+  url: ""                     # postgres://user:pass@host:5432/dbname
+  existingSecret: ""          # a Secret holding the connection string
+  existingSecretKey: "database-url"
+
+# -- File-based SQLite (node:sqlite): a single-replica fallback that needs no
+# database container, just a small PVC for the file. When enabled it takes
+# precedence: the bundled PostgreSQL is not deployed and externalDatabase is
+# ignored.
+sqlite:
+  enabled: false
+  mountPath: /data
+  fileName: dev.db
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClassName: ""
+    existingClaim: ""
+
+# -- Database schema migration.
+#
+# The app creates its schema on first connect, so this is optional. Enable it
+# to make schema changes an explicit, auditable step: the Job runs the same DDL
+# as a Helm hook, so a failure fails the release instead of surfacing as errors
+# on the first request. Ignored with SQLite, which migrates on open.
+migration:
+  enabled: false
+  # Also sets DB_SKIP_SCHEMA_BOOTSTRAP on the app, so it never issues DDL
+  # itself — which lets it run as a database user with no DDL rights. The Job
+  # must then succeed before the app can work.
+  skipAppBootstrap: false
+  # Report drift and fail without changing anything: a dry run, or a gate.
+  checkOnly: false
+  waitSeconds: 60
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# -- `helm test`: a pod, in the app's own image, that calls the readiness
+# endpoint through the Service.
+tests:
+  enabled: true

@@ -1,0 +1,36 @@
+# Values for the local k3d stack (deploy/local/deploy.sh). Everything here is
+# local-only: demo credentials, http, an in-cluster Keycloak.
+image:
+  # Built and imported into the cluster by deploy.sh; GHCR_TAG=... switches it
+  # to the image CI published instead.
+  repository: docker.io/library/agile-retro
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  hosts:
+    - host: retro.localtest.me
+      paths:
+        - path: /
+          pathType: Prefix
+
+app:
+  # The k3d load balancer listens on 8089 (ShoutOut holds 80, LogGate 8088).
+  url: http://retro.localtest.me:8089
+
+auth:
+  groupsClaim: user_roles
+  adminGroups:
+    - /Retro-Admins
+  keycloak:
+    enabled: true
+    clientId: agile-retro
+    clientSecret: agile-retro-local-secret
+    issuer: http://auth.localtest.me:8089/realms/retro
+    # Powers the team "Access groups" picker from the realm's real groups.
+    adminClientId: agile-retro
+    adminClientSecret: agile-retro-local-secret
+
+# Schema changes as an explicit step, the way a production install would run.
+migration:
+  enabled: true
