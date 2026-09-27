@@ -101,10 +101,18 @@ Two things worth knowing:
 - **The Route timeout is set to 1h on purpose.** A board holds a WebSocket open
   for the whole session; the router's default is 30 seconds, after which the
   board silently stops updating and everyone stares at a stale page.
-- **The bundled PostgreSQL will not start under restricted-v2** — the community
-  image wants a fixed UID. Use `externalDatabase`, point `postgresql.image` at
-  a RHEL postgresql image, or grant its ServiceAccount `anyuid`. The chart says
-  so in its install notes rather than letting you find out from a crash loop.
+- **The bundled PostgreSQL switches image family.** The community image wants a
+  fixed UID, which restricted-v2 will not grant, so with `openshift.enabled`
+  the chart uses Red Hat's SCL PostgreSQL (`quay.io/sclorg/postgresql-16-c9s`
+  by default), which runs under whatever UID it is given. With a Red Hat
+  subscription, point `postgresql.image` at `registry.redhat.io/rhel9/postgresql-16`.
+  `postgresql.flavor` overrides the choice either way.
+
+What was verified, rather than assumed: the chart installs into a namespace
+enforcing the restricted Pod Security Standard, with every pod forced to an
+OpenShift-style arbitrary UID in group 0, and `helm test` passes. CI starts
+the image the same way on every commit, so an image that only works as its own
+user never gets published.
 
 ## 6. Database
 
@@ -172,9 +180,9 @@ shared Socket.IO adapter, shared presence and session affinity at the ingress.
 
 ## 9. Air-gapped and mirrored registries
 
-Two images are pulled: the app, and — only with the bundled database —
-`postgres:16-alpine`. `helm test` pulls a third, busybox, and can be turned off
-with `tests.enabled=false`.
+Two images are pulled: the app, and — only with the bundled database — a
+PostgreSQL image (`postgres:16-alpine`, or the SCL image on OpenShift).
+`helm test` runs in the app's own image, so there is nothing else to mirror.
 
 ```yaml
 image:
@@ -182,9 +190,7 @@ image:
 imagePullSecrets:
   - name: regcred
 postgresql:
-  image: registry.internal/mirror/postgres:16-alpine
-tests:
-  image: registry.internal/mirror/busybox:1.37
+  image: registry.internal/mirror/postgres:16-alpine   # or your SCL mirror
 ```
 
 ## 10. Network policy
@@ -225,6 +231,35 @@ Preserved across upgrades: generated secrets, the database and its PVC, and the
 SQLite volume. The app pods roll when a secret's contents change — and only
 then, not on every chart bump.
 
+## 13. Installing from the published chart
+
+CI publishes both artifacts from every green commit on `main`: a multi-arch
+image (amd64 and arm64) and the chart as an OCI artifact whose appVersion is
+that same image.
+
+```bash
+helm install agile-retro oci://ghcr.io/opentooling/charts/agile-retro -n retro -f my-values.yaml
+```
+
+For an air-gapped cluster, mirror both — the chart with `helm pull` and
+`helm push` to your own OCI registry, the image with `skopeo copy --all` (so
+both architectures come along) — and set `image.repository`.
+
+## 14. Trying it locally
+
+`deploy/local/deploy.sh` builds the image and stands up the whole stack — the
+app, PostgreSQL and a seeded Keycloak — on its own k3d cluster, then runs
+`helm test`. It is idempotent, so re-run it after any change.
+
+```bash
+deploy/local/deploy.sh                 # build and deploy what is checked out
+GHCR_TAG=main deploy/local/deploy.sh   # deploy the image CI published instead
+```
+
+Then http://retro.localtest.me:8089, signing in as alice, bob, carol or dave
+(password `retro`). It uses port 8089 because the ShoutOut and LogGate local
+clusters hold 80 and 8088.
+
 ## Troubleshooting
 
 | Symptom | Cause |
@@ -233,6 +268,6 @@ then, not on every chart bump.
 | `unable to verify the first certificate` at sign-in | Internal CA not trusted — set `extraCaCerts`. |
 | Board stops updating after ~30s | Ingress or Route idle timeout; see §8 and the Route's `timeout`. |
 | Pod `CreateContainerConfigError` | A referenced `existingSecret` is missing a key. |
-| Postgres pod won't start on OpenShift | Community image needs a fixed UID; see §5. |
+| Postgres pod won't start on OpenShift | `postgresql.flavor=community` was forced; leave it empty. See §5. |
 | `helm test` fails but pages load | The pod cannot reach its database — check `/api/ready` and the DB Secret. |
 | Two people see different cards | More than one replica; see §8. |

@@ -72,8 +72,8 @@ Agile Retro {{ .Chart.AppVersion }} is installed as {{ .Release.Name }} in {{ .R
   {{- end }}
 
 4. Environment Configuration:
-  - AUTH_SECRET is {{ if .Values.auth.secret }}configured{{ else }}NOT SET - Please configure!{{ end }}
-  - AUTH_URL: {{ if .Values.app.url }}{{ .Values.app.url }}{{ else }}NOT SET - inferred from request host (set app.url for OAuth behind a proxy){{ end }}
+  - AUTH_SECRET: {{ if .Values.auth.existingSecret }}from Secret {{ .Values.auth.existingSecret }}{{ else if .Values.auth.secret }}as configured{{ else }}generated on install, kept across upgrades{{ end }}
+  - AUTH_URL: {{ include "agile-retro.appUrl" . }}{{ if not .Values.app.url }} (derived; set app.url if the browser uses a different URL){{ end }}
   - AUTH_TRUST_HOST: {{ .Values.app.trustHost }}
 
 5. Useful Commands:

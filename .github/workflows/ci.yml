@@ -173,6 +173,25 @@ jobs:
           print("The OpenShift example renders as documented.")
           PY
 
+      # On OpenShift the bundled database has to be an image that runs under
+      # an arbitrary UID, with that family's own settings and data path.
+      - name: Render OpenShift with the bundled database
+        run: |
+          helm template agile-retro charts/agile-retro -n retro --set openshift.enabled=true > ocp-db.yaml
+          python3 - <<'PY'
+          import yaml
+          docs = [d for d in yaml.safe_load_all(open("ocp-db.yaml")) if d]
+          pg = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"].endswith("-postgres"))
+          pod = pg["spec"]["template"]["spec"]
+          c = pod["containers"][0]
+          assert "sclorg/postgresql" in c["image"], c["image"]
+          env = {e["name"] for e in c["env"]}
+          assert {"POSTGRESQL_USER", "POSTGRESQL_PASSWORD", "POSTGRESQL_DATABASE"} <= env, env
+          assert c["volumeMounts"][0]["mountPath"] == "/var/lib/pgsql/data", c["volumeMounts"]
+          assert not {"runAsUser", "runAsGroup", "fsGroup"} & set(pod["securityContext"]), pod["securityContext"]
+          print("OpenShift gets a database image it can run.")
+          PY
+
       # The probes are what a cluster restarts and routes on, so they are
       # pinned: liveness must not depend on the database, readiness must.
       - name: Render the default install
