@@ -1,9 +1,9 @@
 # =============================================================================
 # Red Hat UBI 9 + Node.js 22 images.
 #   - UBI images are freely redistributable and run unprivileged as user 1001.
-#   - They follow the OpenShift "arbitrary UID / group 0" convention natively
-#     (/opt/app-root is owned by 1001:0 and group-writable), so no manual
-#     useradd / chgrp dance is needed.
+#   - They follow the OpenShift "arbitrary UID / group 0" convention: files are
+#     owned 1001:0 and the builder gives group 0 the owner's permissions (see
+#     the chmod below), so any UID OpenShift assigns can run the app.
 #   - Build on the full image (has npm + build tooling); run on the minimal one.
 #   - The app connects to an external PostgreSQL via DATABASE_URL (pg, pure JS),
 #     so no database engine binaries are fetched at build time.
@@ -34,9 +34,26 @@ COPY --chown=1001:0 . .
 # working if the environment's hard limit is already lower than this.
 RUN ulimit -n 65536 || true; npm run build
 
+# OpenShift runs the container as an arbitrary UID that is a member of group 0,
+# never as 1001. Every file must therefore give group 0 what it gives its owner:
+# read everywhere, and write where the app writes at runtime (.next/cache).
+# COPY keeps the permissions a file had in the build context, so a source file
+# that happened to be 0600 on someone's machine was unreadable on OpenShift and
+# the server crashed at startup with EACCES. Normalised here, in the builder,
+# so the runtime layers are not duplicated by a chmod after the fact.
+RUN chmod -R g=u /opt/app-root/src
+
 # ----- runner: minimal UBI 9 Node.js 22 runtime -----
 FROM registry.access.redhat.com/ubi9/nodejs-22-minimal AS runner
 WORKDIR /opt/app-root/src
+
+# Apply the OS errata published since the base image was built. The base tag
+# floats, but only as often as Red Hat rebuilds it; a fix for a library such as
+# libxml2 can sit in the repositories for weeks before then, and the image
+# scan in CI fails on anything fixable. Back to the unprivileged user below.
+USER 0
+RUN microdnf -y upgrade --refresh --nodocs --setopt=install_weak_deps=0 \
+ && microdnf clean all
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \

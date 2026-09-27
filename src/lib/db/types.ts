@@ -321,6 +321,8 @@ export interface DbApi {
   ): MaybePromise<(Retrospective & { team: Team | null })[]>;
   countRetrospectives(filter: RetroFilter): MaybePromise<number>;
   getAllTagStrings(): MaybePromise<string[]>;
+  /** Cheapest possible round trip, for the readiness probe. */
+  ping(): MaybePromise<void>;
   /**
    * The values that actually occur in the boards a viewer may see, for the
    * filter's suggestions: facilitator names, team names and tags. Scoped like

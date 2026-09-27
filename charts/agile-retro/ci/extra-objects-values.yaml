@@ -1,0 +1,16 @@
+# CI render check: extraObjects in both accepted forms, each resolving the
+# release's own helpers.
+extraObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: '{{ include "agile-retro.fullname" $ }}-ci-object'
+    data:
+      namespace: '{{ .Release.Namespace }}'
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: {{ include "agile-retro.fullname" $ }}-ci-string
+    data:
+      rendered: "yes"

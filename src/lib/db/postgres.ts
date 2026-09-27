@@ -702,6 +702,11 @@ export async function listFilterFacets(scope: BoardScope): Promise<FilterFacets>
   return { creators, teamNames, tags: splitTags(tagStrings) };
 }
 
+/** Cheapest possible round trip, for the readiness probe. */
+export async function ping(): Promise<void> {
+  await query(`SELECT 1`);
+}
+
 export async function getAllTagStrings(): Promise<string[]> {
   return (await query(`SELECT "tags" FROM "Retrospective"`)).map((r) => r.tags as string);
 }

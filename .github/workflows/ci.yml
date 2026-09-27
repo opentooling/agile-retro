@@ -29,9 +29,20 @@ on:
     - cron: '0 7 * * 1'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# A newer push to a pull request makes the older run pointless. On main every
+# commit keeps its own result, so a red build can be traced to the commit that
+# caused it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: ghcr.io/opentooling/agile-retro
+  CHART_REGISTRY: oci://ghcr.io/opentooling/charts
+  HELM_VERSION: v3.22.0
 
 jobs:
   test:
@@ -89,6 +100,119 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
+  chart:
+    name: Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Lint with the defaults and with the CI values
+        run: |
+          helm lint charts/agile-retro
+          helm lint charts/agile-retro -f charts/agile-retro/ci/openshift-values.yaml
+          helm lint charts/agile-retro -f charts/agile-retro/ci/extra-objects-values.yaml
+
+      # extraObjects is a feature, so it is proven to render rather than
+      # assumed: once as a YAML object and once as a templated string, each
+      # resolving the release's own helpers.
+      - name: Render extraObjects
+        run: |
+          helm template ci charts/agile-retro -n ci \
+            -f charts/agile-retro/ci/extra-objects-values.yaml > rendered.yaml
+          grep -q "agile-retro-ci-object" rendered.yaml
+          grep -q "agile-retro-ci-string" rendered.yaml
+          grep -qE "namespace: '?ci'?" rendered.yaml
+          grep -q 'rendered: "yes"' rendered.yaml
+
+      # The locked-down install, held to what it promises: a Route with a
+      # timeout long enough for a board's WebSocket, no Ingress, no fixed IDs
+      # for restricted-v2 to reject, the private CA mounted where Node reads
+      # it, and DNS allowed to OpenShift's own resolver.
+      - name: Render the OpenShift example
+        run: |
+          helm template agile-retro charts/agile-retro -n retro \
+            -f charts/agile-retro/ci/openshift-values.yaml > openshift.yaml
+          python3 - <<'PY'
+          import yaml
+          docs = [d for d in yaml.safe_load_all(open("openshift.yaml")) if d]
+          kinds = {d["kind"] for d in docs}
+          assert "Ingress" not in kinds, kinds
+          route = next(d for d in docs if d["kind"] == "Route")
+          assert route["metadata"]["annotations"]["haproxy.router.openshift.io/timeout"] == "1h", route
+          for d in docs:
+              spec = d.get("spec", {})
+              pod = spec if d["kind"] == "Pod" else spec.get("template", {}).get("spec")
+              if pod:
+                  fixed = {"runAsUser", "runAsGroup", "fsGroup"} & set(pod.get("securityContext", {}))
+                  assert not fixed, (d["kind"], d["metadata"]["name"], fixed)
+                  for c in pod.get("containers", []):
+                      sec = c["securityContext"]
+                      assert sec["allowPrivilegeEscalation"] is False, (d["metadata"]["name"], sec)
+                      assert sec["capabilities"]["drop"] == ["ALL"], (d["metadata"]["name"], sec)
+          app = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "agile-retro")
+          pod = app["spec"]["template"]["spec"]
+          env = {e["name"]: e.get("value") for e in pod["containers"][0]["env"]}
+          assert env["AUTH_URL"] == "https://agile-retro.apps.example.com", env
+          assert env["NODE_EXTRA_CA_CERTS"] == "/etc/agile-retro/ca/ca-bundle.crt", env
+          volumes = {v["name"]: v for v in pod["volumes"]}
+          assert volumes["extra-ca"]["configMap"]["name"] == "trusted-ca", volumes
+          mounts = {m["name"]: m["mountPath"] for m in pod["containers"][0]["volumeMounts"]}
+          assert mounts["extra-ca"] == "/etc/agile-retro/ca", mounts
+          # No secret is ever a literal in a Deployment.
+          for name in ("AUTH_SECRET", "AUTH_KEYCLOAK_SECRET"):
+              entry = next(e for e in pod["containers"][0]["env"] if e["name"] == name)
+              assert "value" not in entry, entry
+          policy = next(d for d in docs if d["kind"] == "NetworkPolicy")
+          assert any(5353 in [p["port"] for p in e.get("ports", [])] for e in policy["spec"]["egress"]), policy
+          print("The OpenShift example renders as documented.")
+          PY
+
+      # The probes are what a cluster restarts and routes on, so they are
+      # pinned: liveness must not depend on the database, readiness must.
+      - name: Render the default install
+        run: |
+          helm template agile-retro charts/agile-retro -n retro > default.yaml
+          python3 - <<'PY'
+          import yaml
+          docs = [d for d in yaml.safe_load_all(open("default.yaml")) if d]
+          app = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "agile-retro")
+          c = app["spec"]["template"]["spec"]["containers"][0]
+          assert c["startupProbe"]["httpGet"]["path"] == "/api/health", c["startupProbe"]
+          assert c["livenessProbe"]["httpGet"]["path"] == "/api/health", c["livenessProbe"]
+          assert c["readinessProbe"]["httpGet"]["path"] == "/api/ready", c["readinessProbe"]
+          assert c["resources"]["requests"]["cpu"], c["resources"]
+          ingress = next(d for d in docs if d["kind"] == "Ingress")
+          port = ingress["spec"]["rules"][0]["http"]["paths"][0]["backend"]["service"]["port"]["number"]
+          assert port == 3000, ingress
+          print("The default install renders as documented.")
+          PY
+
+      # Configurations that cannot work must not render at all.
+      - name: Refuse impossible configurations
+        run: |
+          refuse() {
+            if helm template t charts/agile-retro "$@" >/dev/null 2>&1; then
+              echo "rendered but should not have: $*"; exit 1
+            fi
+          }
+          # An Ingress and a Route would serve the app at two hosts, and only
+          # one can match the registered OAuth callback.
+          refuse --set openshift.route.enabled=true --set openshift.route.host=x.example.com
+          # A CA from two places at once.
+          refuse --set extraCaCerts.configMap=a --set extraCaCerts.secret=b
+          # Keycloak without an issuer, and no database at all.
+          refuse --set auth.keycloak.enabled=true --set auth.keycloak.clientId=x
+          refuse --set postgresql.enabled=false
+          # More than one replica splits every board (see scaling in values.yaml).
+          refuse --set replicaCount=2
+          echo "All refused."
+
   audit:
     name: Dependency Vulnerabilities
     runs-on: ubuntu-latest
@@ -110,80 +234,203 @@ jobs:
       - name: Audit dependencies
         run: npm run audit -- --level high
 
-  build-and-push-image:
-    name: Build and Push Docker Image
-    runs-on: ubuntu-latest
-    needs: [test, e2e, audit]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+  image:
+    name: Build, smoke-test and scan image (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            # A native Arm runner rather than QEMU: a Next.js build under
+            # emulation takes the better part of an hour.
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
-
+    env:
+      # Publish only from main (pull requests and the weekly re-scan just build,
+      # test and scan), and only with credentials that can write to the
+      # opentooling org.
+      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && (secrets.GHCR_TOKEN != '' || github.repository_owner == 'opentooling') }}
+    outputs:
+      publish: ${{ env.PUBLISH }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Image labels
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+          images: ${{ env.IMAGE_NAME }}
+      - name: Build image
+        uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: agile-retro:ci
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.arch }}
 
-  publish-helm-chart:
-    name: Publish Helm Chart
+      # OpenShift runs the container as an arbitrary UID in group 0, never as
+      # the image's own user. An image that only works as UID 1001 passes every
+      # other check here and then crashes on the first OpenShift cluster it
+      # meets — which is exactly what happened when a source file was 0600 —
+      # so it is started the way OpenShift starts it, and asked if it is up.
+      - name: Smoke-test as an arbitrary UID, the way OpenShift runs it
+        run: |
+          docker run -d --name smoke --user 1000650000:0 -p 3000:3000 \
+            -e DATABASE_URL=file:/tmp/smoke.db \
+            -e AUTH_SECRET=ci-smoke-test-only -e AUTH_URL=http://localhost:3000 \
+            agile-retro:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/api/ready; then echo; echo "Ready as an arbitrary UID."; exit 0; fi
+            sleep 2
+          done
+          docker logs smoke
+          exit 1
+
+      - name: Trivy vulnerability scan (fails on fixable high/critical)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: agile-retro:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+
+      - name: Explain skipped publish
+        if: env.PUBLISH != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: echo "::notice::Image not published to $IMAGE_NAME. Add a GHCR_TOKEN secret (and GHCR_USERNAME variable) or move the repo to the opentooling org."
+      - name: Log in to GitHub Container Registry
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          # GITHUB_TOKEN can only publish under this repo's owner. To publish to
+          # the opentooling org from elsewhere, set the GHCR_USERNAME variable and
+          # a GHCR_TOKEN secret (a token with write:packages).
+          username: ${{ vars.GHCR_USERNAME || github.actor }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+      # The same build, from cache, pushed by digest; the publish job joins the
+      # two architectures into one image index.
+      - name: Push the tested image by digest
+        if: env.PUBLISH == 'true'
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+      - name: Record digest
+        if: env.PUBLISH == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+      - uses: actions/upload-artifact@v4
+        if: env.PUBLISH == 'true'
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish multi-arch image to GHCR
+    if: needs.image.outputs.publish == 'true'
+    # Only a commit that passed every check.
+    needs: [test, e2e, chart, audit, image]
     runs-on: ubuntu-latest
-    needs: [test, e2e, audit]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     permissions:
       contents: read
       packages: write
-
+    outputs:
+      tag: ${{ steps.short.outputs.tag }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Helm
-        uses: azure/setup-helm@v4
+      - uses: actions/download-artifact@v4
         with:
-          version: '3.12.3'
-
-      - name: Log in to GitHub Container Registry
+          pattern: digest-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
+      - uses: docker/setup-buildx-action@v3
+      - name: Short tag
+        id: short
+        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=sha,format=long,prefix=sha-
+            type=raw,value=main
+            type=raw,value=latest
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ vars.GHCR_USERNAME || github.actor }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+      - name: Create manifest list (amd64 + arm64)
+        working-directory: ${{ runner.temp }}/digests
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} --username ${{ github.actor }} --password-stdin
-
-      - name: Package Helm chart
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.IMAGE_NAME }}@sha256:%s ' *)
+      - name: Show the published image
         run: |
-          helm package charts/agile-retro
+          docker buildx imagetools inspect "$IMAGE_NAME:${{ steps.short.outputs.tag }}"
+          echo "::notice::Published $IMAGE_NAME:${{ steps.short.outputs.tag }} (also sha-$GITHUB_SHA, main, latest)"
 
-      - name: Push Helm chart to OCI registry
+  publish-chart:
+    name: Publish Helm chart to GHCR
+    # After the image, so the chart's default image tag always resolves.
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      # Version: major.minor from Chart.yaml, patch = CI run number, so a plain
+      # `helm install` gets the newest. appVersion — the default image tag — is
+      # the image built from this commit.
+      - name: Package the chart
+        id: package
         run: |
-          helm push agile-retro-*.tgz oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/charts
+          base="$(sed -n 's/^version: *\([0-9]*\.[0-9]*\)\..*/\1/p' charts/agile-retro/Chart.yaml)"
+          version="$base.${{ github.run_number }}"
+          helm package charts/agile-retro --version "$version" \
+            --app-version "${{ needs.publish.outputs.tag }}" --destination "$RUNNER_TEMP"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Push the chart
+        env:
+          REGISTRY_USER: ${{ vars.GHCR_USERNAME || github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$REGISTRY_PASSWORD" | helm registry login ghcr.io -u "$REGISTRY_USER" --password-stdin
+          helm push "$RUNNER_TEMP/agile-retro-${{ steps.package.outputs.version }}.tgz" "$CHART_REGISTRY"
+
+      # Pulled back and rendered, to prove what was published installs the
+      # image published with it.
+      - name: Check the published chart
+        run: |
+          version="${{ steps.package.outputs.version }}"
+          helm show chart "$CHART_REGISTRY/agile-retro" --version "$version"
+          image="$(helm template agile-retro "$CHART_REGISTRY/agile-retro" --version "$version" \
+            | sed -n 's/^ *image: *//p' | tr -d '"' | sort -u | grep agile-retro)"
+          echo "$image"
+          test "$image" = "$IMAGE_NAME:${{ needs.publish.outputs.tag }}"
+          echo "::notice::Published $CHART_REGISTRY/agile-retro $version, installing $image"

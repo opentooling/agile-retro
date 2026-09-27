@@ -678,6 +678,11 @@ export function listFilterFacets(scope: BoardScope): FilterFacets {
   return { creators, teamNames, tags: splitTags(tagStrings) };
 }
 
+/** Cheapest possible round trip, for the readiness probe. */
+export function ping(): void {
+  getDb().prepare(`SELECT 1`).get();
+}
+
 export function getAllTagStrings(): string[] {
   return getDb()
     .prepare(`SELECT "tags" FROM "Retrospective"`)

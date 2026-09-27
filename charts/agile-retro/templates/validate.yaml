@@ -1,0 +1,32 @@
+{{- /*
+Configurations that cannot work are refused while the chart renders, rather
+than at three in the morning when a pod crash-loops with a message about
+something three layers down.
+*/}}
+{{- if and .Values.ingress.enabled .Values.openshift.route.enabled }}
+{{- fail "ingress.enabled and openshift.route.enabled are both set; choose one, or the app is served twice at two different hosts and the OAuth callback can only match one of them." }}
+{{- end }}
+{{- if and .Values.extraCaCerts.configMap .Values.extraCaCerts.secret }}
+{{- fail "extraCaCerts sets both configMap and secret; choose one." }}
+{{- end }}
+{{- if and .Values.openshift.route.enabled (not .Values.openshift.route.host) }}
+{{- fail "openshift.route.enabled needs openshift.route.host: OAuth redirect URIs are built from it, and a generated host cannot be known while the chart renders." }}
+{{- end }}
+{{- if and .Values.sqlite.enabled .Values.postgresql.enabled }}
+{{- fail "sqlite.enabled and postgresql.enabled are both set; SQLite would win and the PostgreSQL you deployed would sit unused. Set postgresql.enabled=false." }}
+{{- end }}
+{{- if and .Values.auth.keycloak.enabled (not .Values.auth.keycloak.issuer) }}
+{{- fail "auth.keycloak.enabled needs auth.keycloak.issuer, e.g. https://keycloak.example.com/realms/your-realm." }}
+{{- end }}
+{{- if and .Values.auth.keycloak.enabled (not .Values.auth.keycloak.clientId) }}
+{{- fail "auth.keycloak.enabled needs auth.keycloak.clientId." }}
+{{- end }}
+{{- if and .Values.auth.google.enabled (not .Values.auth.google.clientId) }}
+{{- fail "auth.google.enabled needs auth.google.clientId." }}
+{{- end }}
+{{- if not (or .Values.sqlite.enabled .Values.postgresql.enabled .Values.externalDatabase.url .Values.externalDatabase.existingSecret) }}
+{{- fail "No database: set postgresql.enabled=true, or sqlite.enabled=true, or externalDatabase.url / externalDatabase.existingSecret." }}
+{{- end }}
+{{- if and (not .Values.ingress.enabled) (not .Values.openshift.route.enabled) (not .Values.app.url) }}
+{{- fail "With neither an Ingress nor a Route, set app.url to the URL the browser will use, or sign-in redirects will point at the pod instead of your gateway. (Use --set app.url=http://localhost:3000 for a port-forwarded install.)" }}
+{{- end }}

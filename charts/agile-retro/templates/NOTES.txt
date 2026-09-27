@@ -1,17 +1,19 @@
+{{- $url := include "agile-retro.appUrl" . }}
+Agile Retro {{ .Chart.AppVersion }} is installed as {{ .Release.Name }} in {{ .Release.Namespace }}.
+
+1. Reach it:
 {{- if .Values.openshift.route.enabled }}
-1. Get the application URL by running these commands:
-  {{- if .Values.openshift.route.host }}
-  echo "https://{{ .Values.openshift.route.host }}"
-  {{- else }}
-  oc get route {{ include "agile-retro.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{"https://"}{.spec.host}{"\n"}'
-  {{- end }}
+  {{ $url }}
+{{- else if .Values.ingress.enabled }}
+  {{ $url }}
+  (through your ingress controller; until DNS points there, port-forward as below.)
 {{- else }}
-1. Get the application URL by running these commands:
-  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "agile-retro.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
-  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
-  echo "Visit http://127.0.0.1:8080 to use your application"
-  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "agile-retro.fullname" . }} 3000:{{ .Values.service.port }}
+  then {{ $url | default "http://localhost:3000" }}
 {{- end }}
+
+  Check it came up:
+  helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }}
 
 2. Database Information:
   {{- if .Values.sqlite.enabled }}
@@ -87,3 +89,20 @@
   {{- end }}
 
 For more information, visit: https://github.com/opentooling/agile-retro
+
+{{- if not (or .Values.auth.keycloak.enabled .Values.auth.google.enabled) }}
+
+NOTE: no identity provider is configured, so nobody can sign in. Set
+auth.keycloak.* (or auth.google.*) — see docs/DEPLOYMENT.md.
+{{- end }}
+{{- if and .Values.auth.keycloak.enabled (not (include "agile-retro.extraCaCerts.enabled" .)) }}
+
+If your Keycloak presents a certificate from an internal CA, sign-in will fail
+with a certificate error until you set extraCaCerts.configMap (or .secret).
+{{- end }}
+{{- if and .Values.postgresql.enabled (not .Values.sqlite.enabled) (include "agile-retro.openshift" .) (eq (include "agile-retro.postgres.flavor" .) "community") }}
+
+WARNING: openshift.enabled with postgresql.flavor=community. That image needs
+a fixed UID and will not start under restricted-v2. Leave postgresql.flavor
+empty (it then follows openshift.enabled), or use externalDatabase.
+{{- end }}
