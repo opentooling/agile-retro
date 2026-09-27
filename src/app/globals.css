@@ -111,23 +111,27 @@
 }
 
 .dark {
-  --background: 250 14% 10%;
-  --foreground: 40 30% 94%;
-  --card: 250 12% 14%;
-  --card-foreground: 40 30% 94%;
-  --popover: 250 12% 15%;
-  --popover-foreground: 40 30% 94%;
+  /* Night is navy, not black: the same paper-and-ink structure as the light
+     theme, lit by a deep blue rather than a neutral grey. Hue stays around
+     217–220 across every surface so the tint reads as one material and not as
+     a blue cast on top of grey; lightness carries the depth, as before. */
+  --background: 218 38% 10%;
+  --foreground: 210 30% 94%;
+  --card: 217 31% 15%;
+  --card-foreground: 210 30% 94%;
+  --popover: 217 31% 16%;
+  --popover-foreground: 210 30% 94%;
   --primary: 177 50% 56%;
-  --primary-foreground: 250 25% 9%;
-  --secondary: 250 11% 19%;
-  --secondary-foreground: 40 30% 94%;
-  --muted: 250 11% 17%;
-  --muted-foreground: 250 12% 70%;
-  --accent: 250 11% 21%;
-  --accent-foreground: 40 30% 94%;
+  --primary-foreground: 218 40% 9%;
+  --secondary: 217 26% 21%;
+  --secondary-foreground: 210 30% 94%;
+  --muted: 217 27% 19%;
+  --muted-foreground: 213 22% 73%;
+  --accent: 217 25% 24%;
+  --accent-foreground: 210 30% 94%;
   --destructive: 7 100% 74%;
-  --border: 250 10% 22%;
-  --input: 250 10% 30%;
+  --border: 217 22% 24%;
+  --input: 215 22% 45%;
   --ring: 177 50% 56%;
   --chart-1: 42 100% 68%;
   --chart-2: 9 75% 56%;
@@ -135,26 +139,28 @@
   --chart-4: 205 86% 73%;
   --chart-5: 248 100% 83%;
 
-  --rail: 250 18% 6%;
-  --rail-foreground: 40 30% 94%;
-  --rail-muted: 250 10% 68%;
-  --rail-hover: 250 14% 13%;
-  --rail-border: 250 12% 15%;
+  --rail: 220 45% 7%;
+  --rail-foreground: 210 30% 94%;
+  --rail-muted: 213 20% 70%;
+  --rail-hover: 219 34% 14%;
+  --rail-border: 218 28% 17%;
   --rail-active: 177 50% 56%;
-  --rail-active-foreground: 250 25% 9%;
+  --rail-active-foreground: 218 40% 9%;
 
-  --note: 250 12% 17%;
+  --note: 217 29% 17%;
   --vote: 42 100% 64%;
 
-  --tone-positive: 124 46% 66%;   --tone-positive-soft: 126 30% 17%;  --tone-positive-ink: 124 46% 70%;
-  --tone-negative: 7 100% 77%;    --tone-negative-soft: 6 37% 20%;    --tone-negative-ink: 7 100% 80%;
-  --tone-improve: 205 86% 73%;    --tone-improve-soft: 207 43% 19%;   --tone-improve-ink: 205 86% 76%;
-  --tone-risk: 42 100% 64%;       --tone-risk-soft: 42 53% 17%;       --tone-risk-ink: 42 100% 68%;
-  --tone-review: 248 100% 83%;    --tone-review-soft: 248 32% 22%;    --tone-review-ink: 248 100% 85%;
-  --tone-neutral: 255 14% 72%;    --tone-neutral-soft: 251 11% 19%;   --tone-neutral-ink: 255 14% 76%;
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.35), 0 6px 18px -12px rgb(0 0 0 / 0.6);
-  --shadow-lift: 0 1px 2px rgb(0 0 0 / 0.4), 0 18px 40px -18px rgb(0 0 0 / 0.8);
+  --tone-positive: 124 46% 66%;   --tone-positive-soft: 137 27% 18%;  --tone-positive-ink: 124 46% 70%;
+  --tone-negative: 7 100% 77%;    --tone-negative-soft: 3 34% 21%;    --tone-negative-ink: 7 100% 80%;
+  --tone-improve: 205 86% 73%;    --tone-improve-soft: 209 44% 21%;   --tone-improve-ink: 205 86% 76%;
+  --tone-risk: 42 100% 64%;       --tone-risk-soft: 39 42% 19%;       --tone-risk-ink: 42 100% 68%;
+  --tone-review: 248 100% 83%;    --tone-review-soft: 244 34% 24%;    --tone-review-ink: 248 100% 85%;
+  --tone-neutral: 214 18% 74%;    --tone-neutral-soft: 217 22% 21%;   --tone-neutral-ink: 214 18% 78%;
+  /* Shadows fall towards the same navy, so nothing sits on a grey halo. */
+  --shadow-card: 0 1px 2px rgb(2 6 20 / 0.4), 0 6px 18px -12px rgb(2 6 20 / 0.65);
+  --shadow-lift: 0 1px 2px rgb(2 6 20 / 0.45), 0 18px 40px -18px rgb(2 6 20 / 0.85);
 }
+
 
 @layer base {
   * {
