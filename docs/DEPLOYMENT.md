@@ -256,9 +256,12 @@ deploy/local/deploy.sh                 # build and deploy what is checked out
 GHCR_TAG=main deploy/local/deploy.sh   # deploy the image CI published instead
 ```
 
-Then http://retro.localtest.me:8089, signing in as alice, bob, carol or dave
-(password `retro`). It uses port 8089 because the ShoutOut and LogGate local
-clusters hold 80 and 8088.
+Then http://retro.localhost:8089, signing in as one of the demo users defined
+in `deploy/local/keycloak.yaml` (alice is a global admin; bob and carol are on
+different teams; dave is on none). It uses port 8089 because the ShoutOut and
+LogGate local clusters hold 80 and 8088, and `*.localhost` names because they
+resolve to loopback without DNS — some corporate resolvers block the public
+`localtest.me` wildcard.
 
 ## Troubleshooting
 

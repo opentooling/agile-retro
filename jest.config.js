@@ -19,7 +19,7 @@ const config = {
     // Agent worktrees live under .claude/worktrees/ — full copies of the repo on
     // other branches. Without this, jest runs their tests (and resolves their
     // modules) alongside this checkout's.
-    testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/', '<rootDir>/e2e/'],
+    testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/', '<rootDir>/e2e/', '<rootDir>/e2e-deployed/'],
     modulePathIgnorePatterns: ['<rootDir>/.claude/'],
     moduleNameMapper: {
         // Handle module aliases (mirrors tsconfig "paths").

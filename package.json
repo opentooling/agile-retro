@@ -16,6 +16,7 @@
     "test": "jest",
     "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
     "test:e2e": "playwright test",
+    "test:deployed": "playwright test -c playwright.deployed.config.ts",
     "loadtest": "loadtest/run.sh"
   },
   "dependencies": {

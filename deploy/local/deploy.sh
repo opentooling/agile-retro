@@ -8,6 +8,7 @@
 #                                        sha-<commit>)
 #   CHART=oci://ghcr.io/opentooling/charts/agile-retro GHCR_TAG=main ...
 #                                        ...and the chart CI published, too
+#   SKIP_E2E=1 deploy/local/deploy.sh    skip the end-to-end run against the stack
 set -euo pipefail
 
 CLUSTER="${CLUSTER:-agile-retro}"
@@ -96,7 +97,15 @@ fi
 # --- keycloak -----------------------------------------------------------------
 log "Deploying the local Keycloak"
 "${K[@]}" create namespace "$NAMESPACE" --dry-run=client -o yaml | "${K[@]}" apply -f - >/dev/null
+"${K[@]}" -n "$NAMESPACE" create configmap keycloak-realm \
+  --from-file=retro.json="$ROOT/deploy/local/keycloak-realm.json" --dry-run=client -o yaml \
+  | "${K[@]}" -n "$NAMESPACE" apply -f - >/dev/null
 "${K[@]}" -n "$NAMESPACE" apply -f "$ROOT/deploy/local/keycloak.yaml" >/dev/null
+# Dev-mode Keycloak imports the realm only when it starts, so a changed realm
+# file needs a restart — and only then: the hash annotation changes with it.
+REALM_HASH="$(shasum -a 256 "$ROOT/deploy/local/keycloak-realm.json" | cut -c1-16)"
+"${K[@]}" -n "$NAMESPACE" patch deploy/keycloak --type merge \
+  -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"agile-retro/realm-hash\":\"$REALM_HASH\"}}}}}" >/dev/null
 "${K[@]}" -n "$NAMESPACE" rollout status deploy/keycloak --timeout=5m >/dev/null
 # The app must reach the issuer at the same URL the browser uses, which
 # resolves to 127.0.0.1. Point that hostname at Keycloak's Service instead —
@@ -110,14 +119,22 @@ helm --kube-context "$CTX" upgrade --install "$RELEASE" "$CHART" \
   -f "$ROOT/deploy/local/values-local.yaml" \
   --set image.tag="$TAG" \
   --set "hostAliases[0].ip=$KC_IP" \
-  --set "hostAliases[0].hostnames[0]=auth.localtest.me" \
+  --set "hostAliases[0].hostnames[0]=auth.localhost" \
   ${IMAGE_ARGS[@]+"${IMAGE_ARGS[@]}"} \
   --wait --timeout 10m
 
 log "Running Helm tests"
 helm --kube-context "$CTX" test "$RELEASE" -n "$NAMESPACE"
 
+# helm test proves the pod is up and reaches its database. This proves the
+# pieces fit: a real sign-in through Keycloak, groups deciding team access,
+# and a whole retrospective over the Ingress's WebSocket.
+if [[ -z "${SKIP_E2E:-}" ]]; then
+  log "Running end-to-end tests against the deployed stack"
+  (cd "$ROOT" && DEPLOYED_URL="http://retro.localhost:$HOST_PORT" npx playwright test -c playwright.deployed.config.ts)
+fi
+
 "${K[@]}" -n "$NAMESPACE" get pods
-log "Agile Retro: http://retro.localtest.me:$HOST_PORT"
-log "Keycloak:    http://auth.localtest.me:$HOST_PORT  (admin / admin)"
+log "Agile Retro: http://retro.localhost:$HOST_PORT"
+log "Keycloak:    http://auth.localhost:$HOST_PORT  (admin / admin)"
 log "Demo users (password: retro): alice [global admin, Eng/Platform], bob [Eng/Platform], carol [Eng/Payments], dave [no groups]"

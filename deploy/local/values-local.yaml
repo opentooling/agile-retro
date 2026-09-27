@@ -9,14 +9,14 @@ image:
 ingress:
   enabled: true
   hosts:
-    - host: retro.localtest.me
+    - host: retro.localhost
       paths:
         - path: /
           pathType: Prefix
 
 app:
   # The k3d load balancer listens on 8089 (ShoutOut holds 80, LogGate 8088).
-  url: http://retro.localtest.me:8089
+  url: http://retro.localhost:8089
 
 auth:
   groupsClaim: user_roles
@@ -26,7 +26,7 @@ auth:
     enabled: true
     clientId: agile-retro
     clientSecret: agile-retro-local-secret
-    issuer: http://auth.localtest.me:8089/realms/retro
+    issuer: http://auth.localhost:8089/realms/retro
     # Powers the team "Access groups" picker from the realm's real groups.
     adminClientId: agile-retro
     adminClientSecret: agile-retro-local-secret

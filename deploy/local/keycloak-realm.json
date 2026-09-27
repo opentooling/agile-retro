@@ -1,0 +1,152 @@
+{
+  "realm": "retro",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "Agile Retro global admin"
+      }
+    ]
+  },
+  "groups": [
+    {
+      "name": "Eng",
+      "subGroups": [
+        {
+          "name": "Platform"
+        },
+        {
+          "name": "Payments"
+        }
+      ]
+    },
+    {
+      "name": "Retro-Admins"
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "agile-retro",
+      "name": "Agile Retro",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "agile-retro-local-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "redirectUris": [
+        "http://retro.localhost:8089/api/auth/callback/keycloak"
+      ],
+      "webOrigins": [
+        "http://retro.localhost:8089"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "http://retro.localhost:8089/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "user_roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "user_roles",
+            "full.path": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-agile-retro",
+      "enabled": true,
+      "serviceAccountClientId": "agile-retro",
+      "clientRoles": {
+        "realm-management": [
+          "query-groups",
+          "view-realm"
+        ]
+      }
+    },
+    {
+      "username": "alice",
+      "firstName": "Alice",
+      "lastName": "Admin",
+      "email": "alice@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "retro",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "admin"
+      ],
+      "groups": [
+        "/Eng/Platform",
+        "/Retro-Admins"
+      ]
+    },
+    {
+      "username": "bob",
+      "firstName": "Bob",
+      "lastName": "Platform",
+      "email": "bob@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "retro",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/Eng/Platform"
+      ]
+    },
+    {
+      "username": "carol",
+      "firstName": "Carol",
+      "lastName": "Payments",
+      "email": "carol@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "retro",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/Eng/Payments"
+      ]
+    },
+    {
+      "username": "dave",
+      "firstName": "Dave",
+      "lastName": "Nogroup",
+      "email": "dave@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "retro",
+          "temporary": false
+        }
+      ],
+      "groups": []
+    }
+  ]
+}
