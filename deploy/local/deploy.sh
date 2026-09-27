@@ -8,6 +8,7 @@
 #                                        sha-<commit>)
 #   CHART=oci://ghcr.io/opentooling/charts/agile-retro GHCR_TAG=main ...
 #                                        ...and the chart CI published, too
+#                                        (CHART_VERSION=0.5.36 pins one)
 #   SKIP_E2E=1 deploy/local/deploy.sh    skip the end-to-end run against the stack
 set -euo pipefail
 
@@ -18,6 +19,8 @@ RELEASE="${RELEASE:-agile-retro}"
 HOST_PORT="${HOST_PORT:-8089}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CHART="${CHART:-$ROOT/charts/agile-retro}"
+CHART_ARGS=()
+[[ -n "${CHART_VERSION:-}" ]] && CHART_ARGS=(--version "$CHART_VERSION")
 TAG_FILE="$ROOT/deploy/local/.last-tag"
 CTX="k3d-$CLUSTER"
 # Every command names the cluster explicitly rather than switching your
@@ -115,6 +118,7 @@ KC_IP="$("${K[@]}" -n "$NAMESPACE" get svc keycloak -o jsonpath='{.spec.clusterI
 # --- release ------------------------------------------------------------------
 log "Deploying Helm release '$RELEASE' to namespace '$NAMESPACE'"
 helm --kube-context "$CTX" upgrade --install "$RELEASE" "$CHART" \
+  ${CHART_ARGS[@]+"${CHART_ARGS[@]}"} \
   --namespace "$NAMESPACE" \
   -f "$ROOT/deploy/local/values-local.yaml" \
   --set image.tag="$TAG" \
