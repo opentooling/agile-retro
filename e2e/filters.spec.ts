@@ -39,6 +39,9 @@ test.describe('the history filter', () => {
     await page.goto('/history')
     const creator = field(page, 'Facilitator')
     await creator.click()
+    // The suggestions load after the page does; arrow keys before then have
+    // nothing to walk.
+    await expect(suggestions(page, 'Facilitator').getByRole('option', { name: 'fay' })).toBeVisible()
     await creator.press('ArrowDown')
     await creator.press('Enter')
     await expect(creator).toHaveValue('fay')

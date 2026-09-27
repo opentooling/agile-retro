@@ -240,6 +240,15 @@ function getDb(): DatabaseSync {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     const db = new DatabaseSync(dbPath);
     db.exec("PRAGMA foreign_keys = ON;");
+    // Wait for another connection's lock rather than failing at once. The
+    // server is not the only thing that opens this file — the migration Job,
+    // `npm run db:purge` and anything inspecting the database all do — and
+    // without a timeout a write that meets their lock fails immediately with
+    // "database is locked", which reaches a user as a card that never saved.
+    // (Not WAL, which would avoid most waits: it needs shared memory, and does
+    // not work on the network filesystems many clusters back their volumes
+    // with.)
+    db.exec("PRAGMA busy_timeout = 5000;");
     db.exec(SCHEMA_SQL);
     applyMigrations(db);
     globalForDb.__sqlite = db;

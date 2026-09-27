@@ -16,7 +16,7 @@ test.describe('the review queue', () => {
     test('starts ranked by votes and can be rearranged, then reset', async ({ page }) => {
       await openBoard(page, 'review')
       await expect(page.getByText('Queue · by votes')).toBeVisible()
-      expect(await queue(page)).toEqual(VOTE_ORDER)
+      await expect.poll(() => queue(page)).toEqual(VOTE_ORDER)
 
       // Lift the third topic above the second.
       await page.getByRole('button', { name: 'Move topic 3 up' }).click()
@@ -55,7 +55,7 @@ test.describe('the review queue', () => {
 
     test('a topic can be dragged to a new place in the queue', async ({ page }) => {
       await openBoard(page, 'drag-queue')
-      expect(await queue(page)).toEqual(VOTE_ORDER)
+      await expect.poll(() => queue(page)).toEqual(VOTE_ORDER)
 
       // Drag the third topic above the first.
       const handle = page.getByRole('button', { name: 'Drag to reorder topic 3' })
@@ -91,7 +91,7 @@ test.describe('the review queue', () => {
       await page.mouse.up()
 
       await page.waitForTimeout(1000)
-      expect(await queue(page)).toEqual(VOTE_ORDER)
+      await expect.poll(() => queue(page)).toEqual(VOTE_ORDER)
       await expect(page.getByText('Queue · by votes')).toBeVisible()
 
       // …while a drag that stays inside the ranked half lands, on the same
@@ -115,7 +115,7 @@ test.describe('the review queue', () => {
     const participant = await (await browser.newContext(as('ana'))).newPage()
     await openBoard(facilitator, 'live')
     await openBoard(participant, 'live')
-    expect(await queue(participant)).toEqual(VOTE_ORDER)
+    await expect.poll(() => queue(participant)).toEqual(VOTE_ORDER)
 
     await facilitator.getByRole('button', { name: 'Move topic 3 up' }).click()
     // No reload: the board tells everyone.
@@ -132,7 +132,7 @@ test.describe('the review queue', () => {
 
     test('sees the queue but cannot rearrange it', async ({ page }) => {
       await openBoard(page, 'review')
-      expect(await queue(page)).toEqual(VOTE_ORDER)
+      await expect.poll(() => queue(page)).toEqual(VOTE_ORDER)
       await expect(page.getByRole('button', { name: /^Move topic/ })).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Reset order' })).toHaveCount(0)
     })

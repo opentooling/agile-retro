@@ -17,13 +17,24 @@ const seed = () => JSON.parse(readFileSync('e2e/.data/seed.json', 'utf8')) as Se
 
 /** Which column a card with this text is in, or null if there is none. */
 function columnOf(content: string): string | null {
-  const db = new DatabaseSync('e2e/.data/e2e.db', { readOnly: true })
+  const db = readDb()
   try {
     const row = db.prepare('SELECT "columnId" FROM "Item" WHERE "content" = ?').get(content) as { columnId: string } | undefined
     return row?.columnId ?? null
   } finally {
     db.close()
   }
+}
+
+/**
+ * The server's database, read-only. With a busy timeout: the server may be
+ * mid-write, and a reader that fails instantly would fail the test for no
+ * reason of its own.
+ */
+function readDb() {
+  const db = new DatabaseSync('e2e/.data/e2e.db', { readOnly: true })
+  db.exec('PRAGMA busy_timeout = 5000')
+  return db
 }
 
 let socket: Socket
@@ -79,7 +90,7 @@ test.describe('moving cards', () => {
   test("cannot reach another board's card through one you can use", async () => {
     const { boards, columns } = seed()
     // Look the private card up by its text, then try to drag it across.
-    const db = new DatabaseSync('e2e/.data/e2e.db', { readOnly: true })
+    const db = readDb()
     const privateCard = db.prepare('SELECT "id" FROM "Item" WHERE "content" = ?').get('Private card') as { id: string }
     db.close()
     socket.emit('move-item', { retroId: boards.sockets, itemId: privateCard.id, targetColumnId: columns.sockets[0], beforeItemId: null })
@@ -89,7 +100,7 @@ test.describe('moving cards', () => {
 
   test("cannot push your card into another board's column", async () => {
     const { boards, columns } = seed()
-    const db = new DatabaseSync('e2e/.data/e2e.db', { readOnly: true })
+    const db = readDb()
     const mine = db.prepare('SELECT "id" FROM "Item" WHERE "content" = ?').get('Ana socket card') as { id: string }
     db.close()
     socket.emit('move-item', { retroId: boards.sockets, itemId: mine.id, targetColumnId: columns.private[0], beforeItemId: null })
@@ -105,7 +116,7 @@ test.describe('moving cards', () => {
 test.describe('arranging the review queue', () => {
   /** The queue as the board holds it: cards in their stored order. */
   function storedQueue(retroId: string) {
-    const db = new DatabaseSync('e2e/.data/e2e.db', { readOnly: true })
+    const db = readDb()
     try {
       return db
         .prepare(
@@ -123,7 +134,7 @@ test.describe('arranging the review queue', () => {
 
   /** A card's id on a board, by its text. */
   function cardOn(retroId: string, content: string) {
-    const db = new DatabaseSync('e2e/.data/e2e.db', { readOnly: true })
+    const db = readDb()
     try {
       return (db
         .prepare(
@@ -154,7 +165,7 @@ test.describe('arranging the review queue', () => {
     // Ana is a participant, not the facilitator: her move is refused.
     socket.emit('reorder-review', { retroId: boards.review, itemId: null, delta: 1 })
     const top = storedQueue(boards.review)[0]
-    const db = new DatabaseSync('e2e/.data/e2e.db', { readOnly: true })
+    const db = readDb()
     const card = db.prepare('SELECT "id" FROM "Item" WHERE "content" = ?').get('Queue middle') as { id: string }
     db.close()
     socket.emit('reorder-review', { retroId: boards.review, itemId: card.id, delta: -1 })
@@ -176,7 +187,7 @@ test.describe('arranging the review queue', () => {
 
   test('a drop that would cross the "Also raised" line is refused', async () => {
     const { boards } = seed()
-    const db = new DatabaseSync('e2e/.data/e2e.db', { readOnly: true })
+    const db = readDb()
     const card = (content: string) =>
       (db
         .prepare(
@@ -204,7 +215,7 @@ test.describe('arranging the review queue', () => {
 
   test('not on a board that has moved past review', async () => {
     const { boards } = seed()
-    const db = new DatabaseSync('e2e/.data/e2e.db', { readOnly: true })
+    const db = readDb()
     const card = db
       .prepare(
         `SELECT i."id" FROM "Item" i JOIN "Column" c ON c."id" = i."columnId"
