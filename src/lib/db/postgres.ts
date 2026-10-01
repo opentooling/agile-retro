@@ -5,15 +5,10 @@
  * stays airgapped/offline-build friendly. The connection string comes from
  * DATABASE_URL (postgres://user:pass@host:port/db).
  *
- * The schema is embedded below and applied with `CREATE TABLE IF NOT EXISTS` the
- * first time a connection is used, so no separate migration step is required.
- * This is safe to run concurrently across replicas (it takes an advisory lock).
- *
- * Deployments that would rather gate DDL behind a controlled step — a Helm
- * migration Job, or an app database user without DDL rights — can run
- * `scripts/migrate-postgres.ts` and set `DB_SKIP_SCHEMA_BOOTSTRAP=true` on the
- * app so it never issues DDL itself. Both paths execute the same `SCHEMA_SQL`
- * below, which is the single definition of the schema.
+ * The schema is not created here. It lives in versioned migrations,
+ * db/migrations/*.sql, applied in order by db/migrate.mjs — in Kubernetes by
+ * an init container before the app starts, locally with `npm run db:migrate` —
+ * as ShoutOut does. The application only reads and writes.
  */
 import { Pool, type PoolClient } from "pg";
 import { engagementFromRows, phaseDurationsFromRows, perRetroFromRows, actionTimelineFromRows } from "./aggregate";
@@ -33,139 +28,10 @@ import { splitTags } from "./facets";
 // Connection + schema bootstrap
 // ---------------------------------------------------------------------------
 
-export const SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS "Team" (
-    "id" TEXT PRIMARY KEY,
-    "name" TEXT NOT NULL,
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "createdBy" TEXT,
-    "memberGroups" JSONB NOT NULL DEFAULT '[]',
-    "adminGroups" JSONB NOT NULL DEFAULT '[]',
-    "imageData" TEXT,
-    "jiraBaseUrl" TEXT,
-    "jiraProjectKey" TEXT,
-    "jiraEmail" TEXT,
-    "jiraApiToken" TEXT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS "Team_name_key" ON "Team" ("name");
-
-CREATE TABLE IF NOT EXISTS "Retrospective" (
-    "id" TEXT PRIMARY KEY,
-    "title" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'INPUT',
-    "tags" TEXT NOT NULL DEFAULT '',
-    "creator" TEXT NOT NULL DEFAULT 'Anonymous',
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "isAnonymous" BOOLEAN NOT NULL DEFAULT false,
-    "blindInput" BOOLEAN NOT NULL DEFAULT false,
-    "expiresAt" TIMESTAMPTZ,
-    "inputDuration" INTEGER,
-    "votingDuration" INTEGER,
-    "reviewDuration" INTEGER,
-    "phaseStartTime" TIMESTAMPTZ,
-    "teamId" TEXT REFERENCES "Team" ("id")
-);
-
-CREATE TABLE IF NOT EXISTS "Column" (
-    "id" TEXT PRIMARY KEY,
-    "title" TEXT NOT NULL,
-    "type" TEXT NOT NULL,
-    "order" INTEGER NOT NULL DEFAULT 0,
-    "retrospectiveId" TEXT NOT NULL REFERENCES "Retrospective" ("id")
-);
-
-CREATE TABLE IF NOT EXISTS "Item" (
-    "id" TEXT PRIMARY KEY,
-    "content" TEXT NOT NULL,
-    "summary" TEXT,
-    "userId" TEXT NOT NULL DEFAULT 'anonymous',
-    "username" TEXT NOT NULL DEFAULT 'Anonymous',
-    "columnId" TEXT NOT NULL REFERENCES "Column" ("id"),
-    "order" INTEGER NOT NULL DEFAULT 0,
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS "Vote" (
-    "id" TEXT PRIMARY KEY,
-    "itemId" TEXT NOT NULL REFERENCES "Item" ("id"),
-    "userId" TEXT NOT NULL,
-    "count" INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS "Reaction" (
-    "id" TEXT PRIMARY KEY,
-    "emoji" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "itemId" TEXT NOT NULL REFERENCES "Item" ("id"),
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS "ActionItem" (
-    "id" TEXT PRIMARY KEY,
-    "content" TEXT NOT NULL,
-    "completed" BOOLEAN NOT NULL DEFAULT false,
-    "retrospectiveId" TEXT NOT NULL REFERENCES "Retrospective" ("id"),
-    "assignee" TEXT,
-    "dueDate" TIMESTAMPTZ,
-    "externalUrl" TEXT,
-    "externalKey" TEXT,
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "completedAt" TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS "PhaseEvent" (
-    "id" TEXT PRIMARY KEY,
-    "retrospectiveId" TEXT NOT NULL REFERENCES "Retrospective" ("id"),
-    "phase" TEXT NOT NULL,
-    "enteredAt" TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS "PhaseEvent_retro_idx" ON "PhaseEvent" ("retrospectiveId", "enteredAt");
-
--- Idempotent column additions for databases created before these columns
--- existed (CREATE TABLE IF NOT EXISTS never alters an existing table).
-ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "jiraBaseUrl" TEXT;
-ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "jiraProjectKey" TEXT;
-ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "jiraEmail" TEXT;
-ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "jiraApiToken" TEXT;
-ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "assignee" TEXT;
-ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "dueDate" TIMESTAMPTZ;
-ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "externalUrl" TEXT;
-ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "externalKey" TEXT;
--- Boards may now be created without a team ("open boards"), so teamId is nullable.
-ALTER TABLE "Retrospective" ALTER COLUMN "teamId" DROP NOT NULL;
--- Per-team access control via identity-provider groups.
-ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "createdBy" TEXT;
-ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "memberGroups" JSONB NOT NULL DEFAULT '[]';
-ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "adminGroups" JSONB NOT NULL DEFAULT '[]';
-ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "imageData" TEXT;
-ALTER TABLE "Retrospective" ADD COLUMN IF NOT EXISTS "blindInput" BOOLEAN NOT NULL DEFAULT false;
--- Board formats other than the classic three columns need an explicit order.
-ALTER TABLE "Column" ADD COLUMN IF NOT EXISTS "order" INTEGER NOT NULL DEFAULT 0;
--- Optional retention: boards are deleted once "expiresAt" passes.
-ALTER TABLE "Retrospective" ADD COLUMN IF NOT EXISTS "expiresAt" TIMESTAMPTZ;
--- Action follow-through over time needs both ends of an action's life.
--- Existing rows get a creation date but no completion date: their close times
--- are simply unknown, rather than being invented.
-ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now();
-ALTER TABLE "ActionItem" ADD COLUMN IF NOT EXISTS "completedAt" TIMESTAMPTZ;
--- The facilitator's own order for the review queue; null means "by votes".
-ALTER TABLE "Item" ADD COLUMN IF NOT EXISTS "reviewOrder" INTEGER;
-`;
-
-// Cache the pool and the one-time schema init on globalThis so dev/HMR and
-// multiple imports share a single pool.
+// Cache the pool on globalThis so dev/HMR and multiple imports share one.
 const globalForDb = globalThis as unknown as {
   __pgPool?: Pool;
-  __pgInit?: Promise<unknown>;
 };
-
-/**
- * Advisory-lock key that serialises schema application. Replicas starting
- * together (or a migration Job racing a rolling update) would otherwise run the
- * DDL concurrently, and not every statement here is safe under that —
- * `ALTER TABLE ... DROP NOT NULL` has no `IF EXISTS` guard.
- */
-const SCHEMA_LOCK_ID = 8274531;
 
 function getPool(): Pool {
   if (!globalForDb.__pgPool) {
@@ -180,56 +46,16 @@ function getPool(): Pool {
   return globalForDb.__pgPool;
 }
 
-/**
- * Create/upgrade the schema. Exported so the standalone migration script runs
- * exactly the SQL the app would have run — the DDL has one definition, not a
- * copy that can drift out of step with the code that depends on it.
- */
-export async function applySchema(): Promise<void> {
-  const client = await getPool().connect();
-  try {
-    await client.query("SELECT pg_advisory_lock($1)", [SCHEMA_LOCK_ID]);
-    await client.query(SCHEMA_SQL);
-  } finally {
-    try {
-      await client.query("SELECT pg_advisory_unlock($1)", [SCHEMA_LOCK_ID]);
-    } catch {
-      // A broken connection releases the lock on its own; don't mask the
-      // original failure with the unlock's.
-    }
-    client.release();
-  }
-}
-
 /** Close the pool so a short-lived script can exit. */
 export async function closePool(): Promise<void> {
   if (globalForDb.__pgPool) {
     await globalForDb.__pgPool.end();
     globalForDb.__pgPool = undefined;
-    globalForDb.__pgInit = undefined;
   }
 }
 
-/** Returns the pool, ensuring the schema has been created exactly once. */
 async function pool(): Promise<Pool> {
-  const p = getPool();
-  if (!globalForDb.__pgInit) {
-    // When a migration Job owns DDL, the app must not attempt it — its database
-    // user may not even be permitted to.
-    const init =
-      process.env.DB_SKIP_SCHEMA_BOOTSTRAP === "true" ? Promise.resolve() : applySchema();
-    // Never cache a *failed* init. The app and its database routinely start
-    // together, so the first query can land before Postgres is accepting
-    // connections; caching that rejection left the process permanently broken
-    // — every later query awaited the same rejected promise — until it was
-    // restarted. Clearing it lets the next caller try again.
-    globalForDb.__pgInit = init.catch((err) => {
-      globalForDb.__pgInit = undefined;
-      throw err;
-    });
-  }
-  await globalForDb.__pgInit;
-  return p;
+  return getPool();
 }
 
 async function query<T = Row>(text: string, params: unknown[] = []): Promise<T[]> {

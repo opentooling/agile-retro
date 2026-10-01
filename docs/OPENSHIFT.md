@@ -21,7 +21,7 @@ stays in step with the chart.
 | You need | Why | Usually from |
 |---|---|---|
 | A project (namespace) | Everything installs into one project; nothing is cluster-scoped. | Platform team |
-| Quota for about **250m CPU and 1.5 GiB memory** | The app requests 100m / 256Mi (768Mi limit); the migration Job and `helm test` briefly add a little. The bundled database adds 50m / 128Mi (512Mi limit) and a 5 GiB volume. | Platform team |
+| Quota for about **250m CPU and 1.5 GiB memory** | The app requests 100m / 256Mi (768Mi limit); the migration init container and `helm test` briefly add a little. The bundled database adds 50m / 128Mi (512Mi limit) and a 5 GiB volume. | Platform team |
 | A hostname under the cluster's apps domain | The Route's host. OAuth redirects are built from it, so it has to be settled first. | Platform team |
 | An OIDC client in Keycloak | Sign-in, and the groups that decide team access. See [§2](#2-register-the-app-with-keycloak). | Identity / IAM team |
 | A PostgreSQL database and user | Recommended over the bundled one for anything you would miss if it were lost. | Database team |
@@ -236,11 +236,10 @@ passes only when the pod is up **and** can reach its database.
 
 ## 8. Running it
 
-**Upgrades.** `helm upgrade` with the new `--version`. Schema changes apply as
-the app starts, or — with `migration.enabled: true` — as a Job that must
-succeed first, so a failed migration fails the upgrade instead of the app.
-`migration.checkOnly: true` reports drift without changing anything, which
-makes a usable pre-upgrade gate.
+**Upgrades.** `helm upgrade` with the new `--version`. Schema changes are
+versioned SQL migrations, applied by the pod's `migrate` init container before
+the app starts, each exactly once. A migration that fails rolls back and holds
+the new pod in `Init`, so the old pod goes on serving until it is fixed.
 
 **One replica.** Board updates are broadcast inside the process, so a second
 pod would split every board in two. The chart refuses more than one replica;
@@ -258,8 +257,8 @@ the bundled database's volume and its password Secret, so a reinstall under
 the same release name picks the data up again. Delete those two by hand only
 when you mean to lose the data.
 
-**Logs.** `oc logs deploy/agile-retro`; the migration Job's with
-`oc logs job/agile-retro-migrate`.
+**Logs.** `oc logs deploy/agile-retro`; the migrations' with
+`oc logs deploy/agile-retro -c migrate`.
 
 ## Troubleshooting
 
@@ -273,7 +272,7 @@ when you mean to lose the data.
 | Keycloak says `Invalid parameter: redirect_uri` | The client's redirect URI does not match the Route host exactly (§2). |
 | Signed in, but every team board says "You don't have access" | The groups mapper is missing, not in the ID token, or not named `user_roles` (§2). |
 | The board stops updating after about 30 seconds | Something overrode the Route's timeout annotation. The chart sets `haproxy.router.openshift.io/timeout: 1h`. |
-| `helm install` waits on the migration Job, then fails | The Job cannot reach the database. `oc logs job/agile-retro-migrate`. |
+| The new pod stays in `Init:0/1` | Its `migrate` init container cannot reach the database, or a migration failed and rolled back. `oc logs deploy/agile-retro -c migrate`. The old pod keeps serving meanwhile. |
 | Database TLS error | The database's CA is not in the bundle, or the URL lacks `sslmode=verify-full`. |
 | Two people on one board see different cards | More than one replica is running. Set it back to one (§8). |
 

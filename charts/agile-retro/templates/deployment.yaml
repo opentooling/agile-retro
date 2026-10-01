@@ -54,6 +54,35 @@ spec:
           the volume's group are set here.
         */}}
         {{- include "agile-retro.podSecurityContext" (dict "ctx" $ "runAsUser" 1001 "fsGroup" 1001) | nindent 8 }}
+      {{- if not .Values.sqlite.enabled }}
+      initContainers:
+        # Applies db/migrations/*.sql before the app starts — each once,
+        # recorded in schema_migrations, as ShoutOut does — and retries while
+        # the database is still starting. A migration that fails keeps the pod
+        # in Init, so the previous version goes on serving until it is fixed.
+        # (SQLite migrates itself when the file is opened.)
+        - name: migrate
+          image: {{ include "agile-retro.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node", "db/migrate.mjs"]
+          env:
+            {{- include "agile-retro.databaseUrlEnv" . | nindent 12 }}
+            {{- if include "agile-retro.extraCaCerts.enabled" . }}
+            # A database behind an internal CA needs it here too.
+            - name: NODE_EXTRA_CA_CERTS
+              value: {{ include "agile-retro.extraCaCerts.path" . | quote }}
+            {{- end }}
+          securityContext:
+            {{- include "agile-retro.containerSecurityContext" (dict "readOnlyRootFilesystem" true) | nindent 12 }}
+          {{- if include "agile-retro.extraCaCerts.enabled" . }}
+          volumeMounts:
+            - name: extra-ca
+              mountPath: /etc/agile-retro/ca
+              readOnly: true
+          {{- end }}
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
@@ -82,12 +111,6 @@ spec:
           env:
             # Database connection. src/lib/db.ts picks the backend from the scheme.
             {{- include "agile-retro.databaseUrlEnv" . | nindent 12 }}
-            {{- if and .Values.migration.enabled .Values.migration.skipAppBootstrap (not .Values.sqlite.enabled) }}
-            # The migration Job owns DDL, so the app must not issue any itself
-            # (its database user may not be permitted to).
-            - name: DB_SKIP_SCHEMA_BOOTSTRAP
-              value: "true"
-            {{- end }}
             {{- with .Values.app.branding }}
             {{- if .name }}
             - name: APP_NAME

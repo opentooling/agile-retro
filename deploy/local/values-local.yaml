@@ -31,6 +31,3 @@ auth:
     adminClientId: agile-retro
     adminClientSecret: agile-retro-local-secret
 
-# Schema changes as an explicit step, the way a production install would run.
-migration:
-  enabled: true

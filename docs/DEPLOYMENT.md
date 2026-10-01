@@ -131,19 +131,27 @@ externalDatabase:
   existingSecret: agile-retro-db     # key: database-url
 ```
 
-The app creates its schema on first connect. Where that is not allowed — a
-database user with no DDL rights, or a change-controlled schema — turn the
-migration Job on:
+**Schema migrations** work as in ShoutOut. The schema lives in versioned SQL
+files, `db/migrations/<timestamp>_<name>.sql`, and an init container in the
+app's pod applies the ones a database has not had yet, in order, before the
+app starts:
 
-```yaml
-migration:
-  enabled: true
-  skipAppBootstrap: true    # the app then never issues DDL itself
-```
+- Each migration runs in its own transaction and is recorded in the
+  `schema_migrations` table, so it runs exactly once.
+- A migration that fails rolls back and keeps the new pod in `Init`, so the
+  previous version goes on serving while you look:
+  `kubectl logs deploy/agile-retro -c migrate`.
+- An advisory lock makes pods starting together safe.
+- A database the application built before migrations were versioned takes the
+  first migration, the baseline, as a no-op and keeps its data.
 
-It runs as a Helm hook, so a failed migration fails the release instead of
-surfacing as errors on the first request. `migration.checkOnly: true` reports
-drift and changes nothing, which is a usable upgrade gate.
+The application itself never changes the schema, so its database user needs
+DDL rights only if the init container uses the same one — which, with a single
+`database-url`, it does. Outside Kubernetes, run `npm run db:migrate` before
+starting the app. SQLite migrates itself when the file is opened.
+
+To change the schema, add a new file with a later timestamp; never edit one
+that has shipped, since databases that already ran it will not run it again.
 
 ## 7. Secrets
 

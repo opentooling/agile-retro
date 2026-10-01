@@ -151,7 +151,7 @@ jobs:
               if pod:
                   fixed = {"runAsUser", "runAsGroup", "fsGroup"} & set(pod.get("securityContext", {}))
                   assert not fixed, (d["kind"], d["metadata"]["name"], fixed)
-                  for c in pod.get("containers", []):
+                  for c in pod.get("initContainers", []) + pod.get("containers", []):
                       sec = c["securityContext"]
                       assert sec["allowPrivilegeEscalation"] is False, (d["metadata"]["name"], sec)
                       assert sec["capabilities"]["drop"] == ["ALL"], (d["metadata"]["name"], sec)
@@ -265,12 +265,24 @@ jobs:
               pod = spec if d["kind"] == "Pod" else spec.get("template", {}).get("spec")
               if pod:
                   assert pod.get("automountServiceAccountToken") is False, (d["kind"], d["metadata"]["name"])
+          # Migrations run in an init container before the app, from its own
+          # image, as ShoutOut does.
+          init = app["spec"]["template"]["spec"]["initContainers"]
+          assert [i["name"] for i in init] == ["migrate"], init
+          assert init[0]["command"] == ["node", "db/migrate.mjs"], init[0]
+          assert init[0]["image"] == c["image"], (init[0]["image"], c["image"])
+          assert init[0]["securityContext"]["readOnlyRootFilesystem"] is True, init[0]
           # The data, and the password that opens it, outlive `helm uninstall`.
           kept = {(d["kind"], d["metadata"]["name"]) for d in docs
                   if (d["metadata"].get("annotations") or {}).get("helm.sh/resource-policy") == "keep"}
           assert kept == {("PersistentVolumeClaim", "agile-retro-postgres"), ("Secret", "agile-retro-postgres")}, kept
           print("The default install renders as documented.")
           PY
+
+      - name: SQLite needs no migration container
+        run: |
+          helm template t charts/agile-retro --set sqlite.enabled=true --set postgresql.enabled=false > sqlite.yaml
+          if grep -q "initContainers" sqlite.yaml; then echo "SQLite got a migration init container"; exit 1; fi
 
       # Configurations that cannot work must not render at all.
       - name: Refuse impossible configurations
@@ -291,6 +303,40 @@ jobs:
           # More than one replica splits every board (see scaling in values.yaml).
           refuse --set replicaCount=2
           echo "All refused."
+
+  migrations:
+    name: Migrations (PostgreSQL)
+    runs-on: ubuntu-latest
+    # The runner against a real PostgreSQL, as ShoutOut's CI does: order,
+    # once-only, rollback on failure, concurrent pods, building the schema
+    # from nothing, and taking over a database built before migrations were
+    # versioned.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Run the migration tests
+        env:
+          PG_TEST_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: npm run test:migrations
 
   audit:
     name: Dependency Vulnerabilities
@@ -425,7 +471,7 @@ jobs:
     name: Publish multi-arch image to GHCR
     if: needs.image.outputs.publish == 'true'
     # Only a commit that passed every check.
-    needs: [test, e2e, chart, audit, image]
+    needs: [test, e2e, chart, audit, migrations, image]
     runs-on: ubuntu-latest
     permissions:
       contents: read

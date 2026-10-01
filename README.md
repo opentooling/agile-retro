@@ -14,6 +14,18 @@ pnpm dev
 bun dev
 ```
 
+That uses a SQLite file, `./data/dev.db`, which creates its own schema. To use
+PostgreSQL instead, apply the migrations first — the app never changes the
+schema itself:
+
+```bash
+DATABASE_URL=postgres://user:pass@localhost:5432/agile_retro npm run db:migrate
+DATABASE_URL=postgres://user:pass@localhost:5432/agile_retro npm run dev
+```
+
+Schema changes are new files in `db/migrations/`, named `<timestamp>_<name>.sql`;
+never edit one that has shipped.
+
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
 > Note: the dev/start scripts run a custom `server.ts` (Next + Socket.IO) with

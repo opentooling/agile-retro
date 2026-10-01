@@ -68,9 +68,11 @@ COPY --from=builder --chown=1001:0 /opt/app-root/src/public ./public
 COPY --from=builder --chown=1001:0 /opt/app-root/src/package.json ./package.json
 COPY --from=builder --chown=1001:0 /opt/app-root/src/server.ts ./server.ts
 COPY --from=builder --chown=1001:0 /opt/app-root/src/src ./src
-# Operational scripts run from the image: the Helm migration Job invokes
-# `npm run db:migrate`, and `npm run db:purge` sweeps expired boards.
+# Operational scripts run from the image: `npm run db:purge` sweeps expired
+# boards. SQL migrations and their runner (node db/migrate.mjs), which the
+# chart's init container runs before the app starts, use the app's own `pg`.
 COPY --from=builder --chown=1001:0 /opt/app-root/src/scripts ./scripts
+COPY --from=builder --chown=1001:0 /opt/app-root/src/db ./db
 COPY --from=builder --chown=1001:0 /opt/app-root/src/.next ./.next
 COPY --from=builder --chown=1001:0 /opt/app-root/src/node_modules ./node_modules
 

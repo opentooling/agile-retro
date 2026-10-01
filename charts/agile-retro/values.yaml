@@ -343,23 +343,13 @@ sqlite:
     storageClassName: ""
     existingClaim: ""
 
-# -- Database schema migration.
-#
-# The app creates its schema on first connect, so this is optional. Enable it
-# to make schema changes an explicit, auditable step: the Job runs the same DDL
-# as a Helm hook, so a failure fails the release instead of surfacing as errors
-# on the first request. Ignored with SQLite, which migrates on open.
+# -- Database migrations, as ShoutOut does them: db/migrations/*.sql, applied
+# in filename order by an init container before the app starts, each exactly
+# once (recorded in the schema_migrations table), with an advisory lock so
+# pods starting together are safe. A failing migration rolls back and keeps
+# the new pod in Init, so the old one goes on serving. Not used with SQLite,
+# which migrates itself when the file is opened.
 migration:
-  enabled: false
-  # Also sets DB_SKIP_SCHEMA_BOOTSTRAP on the app, so it never issues DDL
-  # itself — which lets it run as a database user with no DDL rights. The Job
-  # must then succeed before the app can work.
-  skipAppBootstrap: false
-  # Report drift and fail without changing anything: a dry run, or a gate.
-  checkOnly: false
-  waitSeconds: 60
-  backoffLimit: 3
-  activeDeadlineSeconds: 600
   resources:
     requests:
       cpu: 50m
