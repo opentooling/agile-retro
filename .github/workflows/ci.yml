@@ -16,8 +16,17 @@ on:
       - 'public/**'
       - 'scripts/**'
       - '*.ts'
+      - '*.js'
       - '*.mjs'
       - '*.json'
+      # Migrations ship in the image: a commit that only adds one must still
+      # build and publish an image that contains it.
+      - 'db/**'
+      # What the test and chart jobs run against.
+      - 'e2e/**'
+      - 'e2e-deployed/**'
+      - 'deploy/**'
+      - '.trivyignore'
       - '.github/workflows/ci.yml'
       - 'charts/**'
   pull_request:
