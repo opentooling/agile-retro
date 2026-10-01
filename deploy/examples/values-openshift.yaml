@@ -66,12 +66,14 @@ externalDatabase:
   existingSecret: agile-retro-db
   existingSecretKey: database-url
 
-# Or the bundled database, on Red Hat's image. A subscribed cluster's global
-# pull secret already covers registry.redhat.io, so no imagePullSecrets are
-# needed for it. Swap this in for the two blocks above.
+# Or the bundled database: the alpine community image, as ShoutOut and
+# LogGate run, which works under restricted-v2. Swap this in for the two
+# blocks above. (For Red Hat's image instead, set
+# image: registry.redhat.io/rhel9/postgresql-16 — the chart reads the family
+# from the name, and a subscribed cluster's pull secret covers that registry.)
 # postgresql:
 #   enabled: true
-#   image: registry.redhat.io/rhel9/postgresql-16
+#   image: docker.io/library/postgres:16-alpine   # or your mirror of it
 #   persistence:
 #     size: 10Gi
 

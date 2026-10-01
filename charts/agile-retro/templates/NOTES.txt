@@ -100,9 +100,3 @@ auth.keycloak.* (or auth.google.*) — see docs/DEPLOYMENT.md.
 If your Keycloak presents a certificate from an internal CA, sign-in will fail
 with a certificate error until you set extraCaCerts.configMap (or .secret).
 {{- end }}
-{{- if and .Values.postgresql.enabled (not .Values.sqlite.enabled) (include "agile-retro.openshift" .) (eq (include "agile-retro.postgres.flavor" .) "community") }}
-
-WARNING: openshift.enabled with postgresql.flavor=community. That image needs
-a fixed UID and will not start under restricted-v2. Leave postgresql.flavor
-empty (it then follows openshift.enabled), or use externalDatabase.
-{{- end }}

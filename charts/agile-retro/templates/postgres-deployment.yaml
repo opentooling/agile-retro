@@ -90,21 +90,34 @@ spec:
           volumeMounts:
             - name: data
               mountPath: {{ ternary "/var/lib/pgsql/data" "/var/lib/postgresql/data" $rhel }}
-          # Over TCP to localhost, which both image families answer alike;
-          # the Unix socket lives in a different directory in each.
+            {{- if not $rhel }}
+            # The socket directory, writable whatever UID the pod is given — as
+            # ShoutOut does. In the image it belongs to the postgres user.
+            - name: run
+              mountPath: /var/run/postgresql
+            {{- end }}
+          # Over TCP to localhost, which both image families answer alike, and
+          # with the user named explicitly. Left to default, pg_isready asks the
+          # OS who it is running as — and an OpenShift-assigned UID is not in
+          # the alpine image's /etc/passwd, so it gives up ("no attempt"), the
+          # liveness probe fails, and a healthy database is killed in a loop.
           livenessProbe:
             exec:
-              command: ["pg_isready", "-h", "127.0.0.1", "-p", "5432"]
+              command: ["sh", "-c", 'pg_isready -h 127.0.0.1 -p 5432 -U "${POSTGRES_USER:-$POSTGRESQL_USER}" -d "${POSTGRES_DB:-$POSTGRESQL_DATABASE}"']
             initialDelaySeconds: 15
             periodSeconds: 10
           readinessProbe:
             exec:
-              command: ["pg_isready", "-h", "127.0.0.1", "-p", "5432"]
+              command: ["sh", "-c", 'pg_isready -h 127.0.0.1 -p 5432 -U "${POSTGRES_USER:-$POSTGRESQL_USER}" -d "${POSTGRES_DB:-$POSTGRESQL_DATABASE}"']
             initialDelaySeconds: 5
             periodSeconds: 5
           resources:
             {{- toYaml .Values.postgresql.resources | nindent 12 }}
       volumes:
+        {{- if ne (include "agile-retro.postgres.flavor" .) "rhel" }}
+        - name: run
+          emptyDir: {}
+        {{- end }}
         - name: data
         {{- if .Values.postgresql.persistence.enabled }}
           persistentVolumeClaim:

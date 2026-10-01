@@ -208,23 +208,38 @@ jobs:
           print("The company OpenShift example renders as documented.")
           PY
 
-      # On OpenShift the bundled database has to be an image that runs under
-      # an arbitrary UID, with that family's own settings and data path.
+      # On OpenShift the bundled database runs under an arbitrary UID. Each
+      # image family must get its own settings — the image's name decides —
+      # and the probes must name the user, which an assigned UID cannot look
+      # up in the alpine image's /etc/passwd.
       - name: Render OpenShift with the bundled database
         run: |
-          helm template agile-retro charts/agile-retro -n retro --set openshift.enabled=true > ocp-db.yaml
           python3 - <<'PY'
-          import yaml
-          docs = [d for d in yaml.safe_load_all(open("ocp-db.yaml")) if d]
-          pg = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"].endswith("-postgres"))
-          pod = pg["spec"]["template"]["spec"]
-          c = pod["containers"][0]
-          assert "sclorg/postgresql" in c["image"], c["image"]
+          import subprocess, yaml
+          def postgres(*sets):
+              args = ["helm", "template", "agile-retro", "charts/agile-retro", "-n", "retro", "--set", "openshift.enabled=true"]
+              for s in sets: args += ["--set", s]
+              docs = [d for d in yaml.safe_load_all(subprocess.check_output(args)) if d]
+              pg = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"].endswith("-postgres"))
+              pod = pg["spec"]["template"]["spec"]
+              return pod, pod["containers"][0]
+          for sets, image in [((), "docker.io/library/postgres:16-alpine"),
+                              (("postgresql.image=registry.example.com/mirror/postgres:16-alpine",), "registry.example.com/mirror/postgres:16-alpine")]:
+              pod, c = postgres(*sets)
+              assert c["image"] == image, c["image"]
+              env = {e["name"]: e.get("value") for e in c["env"]}
+              assert {"POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"} <= set(env), env
+              assert env["PGDATA"] == "/var/lib/postgresql/data/pgdata", env
+              mounts = {m["name"]: m["mountPath"] for m in c["volumeMounts"]}
+              assert mounts == {"data": "/var/lib/postgresql/data", "run": "/var/run/postgresql"}, mounts
+              assert not {"runAsUser", "runAsGroup", "fsGroup"} & set(pod["securityContext"]), pod["securityContext"]
+              probe = " ".join(c["livenessProbe"]["exec"]["command"])
+              assert "-U " in probe and "-d " in probe, probe
+          pod, c = postgres("postgresql.image=registry.redhat.io/rhel9/postgresql-16")
           env = {e["name"] for e in c["env"]}
           assert {"POSTGRESQL_USER", "POSTGRESQL_PASSWORD", "POSTGRESQL_DATABASE"} <= env, env
           assert c["volumeMounts"][0]["mountPath"] == "/var/lib/pgsql/data", c["volumeMounts"]
-          assert not {"runAsUser", "runAsGroup", "fsGroup"} & set(pod["securityContext"]), pod["securityContext"]
-          print("OpenShift gets a database image it can run.")
+          print("Each image family gets its own settings on OpenShift.")
           PY
 
       # The probes are what a cluster restarts and routes on, so they are

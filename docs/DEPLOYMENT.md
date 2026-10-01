@@ -105,12 +105,13 @@ Two things worth knowing:
 - **The Route timeout is set to 1h on purpose.** A board holds a WebSocket open
   for the whole session; the router's default is 30 seconds, after which the
   board silently stops updating and everyone stares at a stale page.
-- **The bundled PostgreSQL switches image family.** The community image wants a
-  fixed UID, which restricted-v2 will not grant, so with `openshift.enabled`
-  the chart uses Red Hat's SCL PostgreSQL (`quay.io/sclorg/postgresql-16-c9s`
-  by default), which runs under whatever UID it is given. With a Red Hat
-  subscription, point `postgresql.image` at `registry.redhat.io/rhel9/postgresql-16`.
-  `postgresql.flavor` overrides the choice either way.
+- **The bundled PostgreSQL is the alpine community image**, as in ShoutOut
+  and LogGate, and it runs under restricted-v2: OpenShift assigns its UID and
+  an fsGroup, its data lives in a subdirectory that UID creates, and its probes
+  name the database user rather than asking the OS for one the assigned UID
+  does not have. If your company requires Red Hat images, set
+  `postgresql.image: registry.redhat.io/rhel9/postgresql-16` — the chart reads
+  the image family from the name and applies that family's settings.
 
 What was verified, rather than assumed: the chart installs into a namespace
 enforcing the restricted Pod Security Standard, with every pod forced to an
@@ -275,6 +276,6 @@ resolve to loopback without DNS — some corporate resolvers block the public
 | `unable to verify the first certificate` at sign-in | Internal CA not trusted — set `extraCaCerts`. |
 | Board stops updating after ~30s | Ingress or Route idle timeout; see §8 and the Route's `timeout`. |
 | Pod `CreateContainerConfigError` | A referenced `existingSecret` is missing a key. |
-| Postgres pod won't start on OpenShift | `postgresql.flavor=community` was forced; leave it empty. See §5. |
+| Postgres pod won't start on OpenShift | An image whose name says neither family, with the wrong `postgresql.flavor`; set `flavor` to match the image. See §5. |
 | `helm test` fails but pages load | The pod cannot reach its database — check `/api/ready` and the DB Secret. |
 | Two people see different cards | More than one replica; see §8. |

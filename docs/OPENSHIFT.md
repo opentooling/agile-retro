@@ -145,11 +145,14 @@ so an upgrade never overwrites what OpenShift injected.
 
 **The database.** The example uses your own database through the
 `agile-retro-db` Secret. The alternative, commented out in the example, is the
-bundled database on `registry.redhat.io/rhel9/postgresql-16`, which is built
-to run under an arbitrary UID; a subscribed cluster's global pull secret
-already covers that registry. The community `postgres` image will not start
-under `restricted-v2`, which is why the chart switches image family on
-OpenShift.
+bundled database: the alpine community image `postgres:16-alpine` (or your
+mirror of it), as ShoutOut and LogGate run. It works under `restricted-v2` —
+OpenShift assigns its UID and an fsGroup that makes the volume writable, and
+its data lives in a subdirectory that UID creates for itself. If your company
+requires Red Hat images, use `registry.redhat.io/rhel9/postgresql-16` instead;
+the chart reads the image family from the name and applies that family's
+settings, and a subscribed cluster's global pull secret already covers that
+registry.
 
 **Network policy.** Only the OpenShift router may reach the app. The app may
 reach DNS (always allowed by the chart), port 443 for the identity provider
@@ -263,7 +266,7 @@ when you mean to lose the data.
 | Symptom | Cause, and what to do |
 |---|---|
 | `unable to validate against any security context constraint` | Something set a fixed UID — `postgresql.podSecurityContext`, or `openshift.enabled` left `false`. Remove it, or set `openshift.enabled: true`. |
-| Bundled PostgreSQL crash-loops with a permissions error | `postgresql.flavor: community` was forced. Leave `flavor` empty and it follows `openshift.enabled`. |
+| Bundled PostgreSQL crash-loops with `chmod: /var/lib/postgresql/data: Operation not permitted` | One image family was given the other's settings — a chart before 0.5.39 applied Red Hat's to an alpine image override on OpenShift. Upgrade the chart; for an image whose name says neither family, set `postgresql.flavor`. |
 | `ImagePullBackOff` | The cluster cannot reach `ghcr.io`: mirror the image (§4). For `registry.redhat.io`, the cluster's global pull secret may be missing. |
 | Route shows "Application is not available" | The pod is not ready. `oc get pods`, then the app's logs — usually the database is unreachable (§3 Secret, egress, TLS). |
 | Sign-in fails with `unable to verify the first certificate` or `self-signed certificate in certificate chain` | The company CA is not trusted. Check `oc get cm agile-retro-trusted-ca -o yaml` has `ca-bundle.crt`. If it was injected after the pod started, `oc rollout restart deploy/agile-retro`. |

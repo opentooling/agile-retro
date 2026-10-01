@@ -247,18 +247,33 @@ tls block for that host, http otherwise.
 Which PostgreSQL image family the bundled database uses, which decides its
 environment variables, data directory and user.
 
-  community  docker.io's postgres. Starts as, or runs as, a fixed UID (70 in
-             the alpine image), so it cannot run under OpenShift's
-             restricted-v2 SCC.
+  community  docker.io's postgres, alpine by default — what ShoutOut and
+             LogGate run. Runs under OpenShift's restricted-v2 too: with no
+             fixed UID, OpenShift assigns one and an fsGroup that makes the
+             volume writable, and PGDATA is a subdirectory the assigned user
+             creates and therefore owns.
   rhel       Red Hat's SCL PostgreSQL (registry.redhat.io/rhel9/postgresql-16,
-             or the public quay.io/sclorg builds of the same). Built for an
-             arbitrary UID in group 0, which is exactly what restricted-v2
-             assigns.
+             or the public quay.io/sclorg builds), for companies that require
+             Red Hat images.
 
-Left empty, it follows openshift.enabled.
+An explicit postgresql.flavor wins. Otherwise it is read from postgresql.image
+— an image named "postgres" is community, one named "postgresql-…" is Red
+Hat's — because the two spell their settings differently, and applying one
+family's settings to the other's image fails in ways that name neither: a
+community image given Red Hat's settings dies with "chmod
+/var/lib/postgresql/data: Operation not permitted". With no image set, it is
+community.
 */}}
 {{- define "agile-retro.postgres.flavor" -}}
-{{- $flavor := .Values.postgresql.flavor | default (ternary "rhel" "community" (eq (include "agile-retro.openshift" .) "true")) -}}
+{{- $flavor := .Values.postgresql.flavor -}}
+{{- if not $flavor -}}
+{{- $flavor = "community" -}}
+{{- with .Values.postgresql.image -}}
+{{- /* The repository's last path segment, without a tag or digest. */ -}}
+{{- $name := splitList "/" (splitList "@" . | first) | last | splitList ":" | first -}}
+{{- if hasPrefix "postgresql" $name -}}{{- $flavor = "rhel" -}}{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if not (has $flavor (list "community" "rhel")) -}}
 {{- fail (printf "postgresql.flavor must be community or rhel, not %q" $flavor) -}}
 {{- end -}}

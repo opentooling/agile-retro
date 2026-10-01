@@ -291,14 +291,17 @@ app:
 # anything you would miss if the PVC were lost.
 postgresql:
   enabled: true
-  # -- community (docker.io's postgres) or rhel (Red Hat's SCL PostgreSQL,
-  # built for OpenShift's arbitrary UIDs). Empty follows openshift.enabled,
-  # so an OpenShift install gets an image restricted-v2 will actually run.
+  # -- community (docker.io's postgres, alpine — what ShoutOut and LogGate run,
+  # and it runs under OpenShift's restricted-v2) or rhel (Red Hat's SCL
+  # PostgreSQL, for companies that require Red Hat images). Empty reads it from
+  # `image`: an image named postgres is community, one named postgresql-… is
+  # Red Hat's. Set it only for an image whose name says neither.
   flavor: ""
-  # -- Empty picks the flavour's image: docker.io/library/postgres:16-alpine,
-  # or quay.io/sclorg/postgresql-16-c9s. With a Red Hat subscription, set
-  # registry.redhat.io/rhel9/postgresql-16 (and an imagePullSecret). In an
-  # air-gapped cluster, your mirror of either.
+  # -- Empty is docker.io/library/postgres:16-alpine. A mirror of it, or a Red
+  # Hat image such as registry.redhat.io/rhel9/postgresql-16, works as-is: the
+  # flavour follows the image. (16, not 17 as ShoutOut and LogGate use: a new
+  # major version cannot open an existing data directory without a dump and
+  # restore.)
   image: ""
   imagePullPolicy: IfNotPresent
   auth:
