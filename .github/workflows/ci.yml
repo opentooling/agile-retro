@@ -148,7 +148,7 @@ jobs:
           if grep -e 'ci-flag-off' -e 'ci-flag-missing' -e 'ci-string-off' -e 'ci-dig-absent' rendered.yaml; then
             echo "::error::a conditional extraObjects item rendered with its condition off"; exit 1
           fi
-          echo "Both extraObjects forms rendered, conditional ones only when enabled.
+          echo "Both extraObjects forms rendered, conditional ones only when enabled."
 
       # The locked-down install, held to what it promises: a Route with a
       # timeout long enough for a board's WebSocket, no Ingress, no fixed IDs
