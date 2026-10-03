@@ -139,6 +139,16 @@ jobs:
           grep -q "agile-retro-ci-string" rendered.yaml
           grep -qE "namespace: '?ci'?" rendered.yaml
           grep -q 'rendered: "yes"' rendered.yaml
+          # Conditional items, as in LogGate: rendered when the condition
+          # holds — a flag set, true, or no condition at all — and only then.
+          grep -q 'agile-retro-ci-flag-on' rendered.yaml
+          grep -q 'agile-retro-ci-string-on' rendered.yaml
+          grep -q 'agile-retro-ci-no-when' rendered.yaml
+          grep -q 'agile-retro-ci-dig-on' rendered.yaml
+          if grep -e 'ci-flag-off' -e 'ci-flag-missing' -e 'ci-string-off' -e 'ci-dig-absent' rendered.yaml; then
+            echo "::error::a conditional extraObjects item rendered with its condition off"; exit 1
+          fi
+          echo "Both extraObjects forms rendered, conditional ones only when enabled.
 
       # The locked-down install, held to what it promises: a Route with a
       # timeout long enough for a board's WebSocket, no Ingress, no fixed IDs
@@ -312,6 +322,10 @@ jobs:
           refuse --set postgresql.enabled=false
           # More than one replica splits every board (see scaling in values.yaml).
           refuse --set replicaCount=2
+          # A conditional extraObjects item takes only when and object, and
+          # when must be a boolean or a template string.
+          refuse --set 'extraObjects[0].object.kind=ConfigMap' --set 'extraObjects[0].when=true' --set 'extraObjects[0].enabled=true'
+          refuse --set 'extraObjects[0].object.kind=ConfigMap' --set 'extraObjects[0].when=1'
           echo "All refused."
 
   migrations:

@@ -234,6 +234,37 @@ Use it for ExternalSecrets, a Route with annotations of your own, a
 ServiceMonitor, an AppProject — anything you would otherwise fork the chart to
 add. The CRDs must already exist in the cluster.
 
+To render an item only on a condition, wrap it as `{when, object}`, as in
+LogGate's chart. `when` is `true`, `false`, or a template string that counts as
+false when it renders empty, `false`, `0`, `no`, `off` or `null`. Without
+`when`, `{object}` always renders.
+
+```yaml
+features:
+  backups: true            # a flag of your own; any name but on, off, yes, no
+extraObjects:
+  - when: "{{ .Values.features.backups }}"
+    object:
+      apiVersion: velero.io/v1
+      kind: Schedule
+      metadata:
+        name: '{{ include "agile-retro.fullname" $ }}-nightly'
+      spec:
+        schedule: "0 2 * * *"
+```
+
+A flag left out of `features` is off. But if there may be no `features` map
+at all — a values file that never mentions it — `.Values.features.backups`
+fails the render, because Helm cannot look inside a map that is not there.
+For such a flag, `dig` reads it safely, off unless set:
+
+```yaml
+  - when: '{{ dig "features" "backups" false .Values.AsMap }}'
+```
+
+A wrapper with any other key, or a `when` that is neither a boolean nor a
+string, fails the render rather than being quietly ignored.
+
 ## 12. Upgrades
 
 ```bash
