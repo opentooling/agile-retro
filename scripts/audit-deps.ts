@@ -17,8 +17,13 @@
  * 1 and 2 are kept apart for the pre-commit hook: it blocks a commit on 1 but
  * only warns on 2, so working offline doesn't turn every commit into a
  * `--no-verify`. CI treats any non-zero exit as a failure, so it is unaffected.
+ *
+ * An advisory with no fix anywhere can be excepted, narrowly and for a while,
+ * in .audit-exceptions.json — see scripts/audit-exceptions.ts for the rules.
  */
 import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
+import { advisoryId, applyExceptions, type Exception } from './audit-exceptions'
 
 type Severity = 'info' | 'low' | 'moderate' | 'high' | 'critical'
 const ORDER: Severity[] = ['info', 'low', 'moderate', 'high', 'critical']
@@ -36,8 +41,8 @@ if (!ORDER.includes(level)) {
     process.exit(1)
 }
 
-function runAudit(): Record<string, unknown> {
-    const args = ['audit', '--json', ...(productionOnly ? ['--omit=dev'] : [])]
+function runAudit(runtimeOnly = productionOnly): Record<string, unknown> {
+    const args = ['audit', '--json', ...(runtimeOnly ? ['--omit=dev'] : [])]
     try {
         // npm exits non-zero when it finds anything, so the output is read from
         // the error too — an exception here does not mean the audit failed.
@@ -75,9 +80,25 @@ function main(): number {
     }>
 
     const threshold = ORDER.indexOf(level)
-    const failing = Object.entries(vulns)
+    const over = Object.entries(vulns)
         .filter(([, v]) => ORDER.indexOf(v.severity) >= threshold)
         .sort((a, b) => ORDER.indexOf(b[1].severity) - ORDER.indexOf(a[1].severity))
+
+    // Exceptions only ever narrow the result, and only for advisories that
+    // stay out of what the app runs — so the runtime audit is consulted too.
+    const exceptions: Exception[] = existsSync('.audit-exceptions.json')
+        ? JSON.parse(readFileSync('.audit-exceptions.json', 'utf8'))
+        : []
+    let runtime = new Set<string>()
+    if (exceptions.length > 0) {
+        const runtimeReport = productionOnly ? report : runAudit(true)
+        assertRealReport(runtimeReport)
+        const runtimeVulns = (runtimeReport.vulnerabilities ?? {}) as typeof vulns
+        runtime = new Set(Object.values(runtimeVulns).flatMap((v) =>
+            v.via.filter((x): x is { url?: string } => typeof x === 'object').map((x) => advisoryId(x.url))))
+    }
+    const verdict = applyExceptions(over.map(([name]) => name), vulns, exceptions, runtime, new Date().toISOString().slice(0, 10))
+    const failing = over.filter(([name]) => verdict.failing.includes(name))
 
     const counts = (report.metadata as { vulnerabilities?: Record<string, number> })?.vulnerabilities ?? {}
     const summary = ORDER.filter((s) => counts[s]).map((s) => `${counts[s]} ${s}`).join(', ')
@@ -86,10 +107,28 @@ function main(): number {
     console.log(`[audit] threshold: ${level} and above`)
     console.log(`[audit] found: ${summary || 'nothing'}`)
 
-    if (failing.length === 0) {
-        console.log('[audit] no vulnerabilities at or above the threshold')
+    // One line per exception, naming every package it lets through.
+    const byAdvisory = new Map<string, { exception: Exception; packages: string[] }>()
+    for (const { name, exceptions: used } of verdict.excepted) {
+        for (const e of used) {
+            const entry = byAdvisory.get(e.advisory) ?? { exception: e, packages: [] }
+            entry.packages.push(name)
+            byAdvisory.set(e.advisory, entry)
+        }
+    }
+    for (const { exception: e, packages } of byAdvisory.values()) {
+        console.log(`[audit] excepted until ${e.expires}: ${e.advisory} in ${packages.join(', ')}`)
+        console.log(`        ${e.reason}`)
+    }
+    for (const problem of verdict.problems) console.error(`[audit] ${problem}`)
+
+    if (failing.length === 0 && verdict.problems.length === 0) {
+        console.log(verdict.excepted.length
+            ? '[audit] nothing at or above the threshold beyond the exceptions above'
+            : '[audit] no vulnerabilities at or above the threshold')
         return 0
     }
+    if (failing.length === 0) return 1
 
     console.error(`\n[audit] ${failing.length} package(s) at or above ${level}:\n`)
     for (const [name, v] of failing) {

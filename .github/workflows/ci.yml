@@ -27,6 +27,7 @@ on:
       - 'e2e-deployed/**'
       - 'deploy/**'
       - '.trivyignore'
+      - '.audit-exceptions.json'
       - '.github/workflows/ci.yml'
       - 'charts/**'
   pull_request:

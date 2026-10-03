@@ -1,0 +1,8 @@
+[
+  {
+    "advisory": "GHSA-vfj7-8cjw-p6xm",
+    "package": "braces",
+    "reason": "No fixed version exists (every braces release up to 3.0.3, the latest, is affected). Reached only through lint tooling — eslint-config-next > @next/eslint-plugin-next > fast-glob > micromatch > braces — matching this repository's own patterns; nothing the app runs depends on it. npm's suggested fix is a downgrade to eslint-config-next 14, a mismatch with Next 16.",
+    "expires": "2026-11-03"
+  }
+]
