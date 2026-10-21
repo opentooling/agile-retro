@@ -125,6 +125,14 @@ describe("main", () => {
     assert.match(logged.at(-1), /SQLite backend migrates itself/);
   });
 
+  it("builds the URL from PG* variables when DATABASE_URL is not set", async () => {
+    let got;
+    const run = async ({ connectionString }) => { got = connectionString; return []; };
+    const env = { PGHOST: "db", PGPORT: "5432", PGUSER: "agile", PGPASSWORD: "p@ss", PGDATABASE: "agile_retro" };
+    assert.equal(await main({ env, run, attempts: 1, log: () => {} }), 0);
+    assert.equal(got, "postgres://agile:p%40ss@db:5432/agile_retro");
+  });
+
   it("retries while the database starts, then succeeds or gives up", async () => {
     const logged = [];
     const log = (l) => logged.push(l);

@@ -2,6 +2,7 @@
 // recording applied versions in schema_migrations — the same runner ShoutOut
 // uses. Safe to run from several pods at once (advisory lock).
 // Usage: DATABASE_URL=postgres://... node db/migrate.mjs
+//    or: PGHOST=... PGUSER=... PGPASSWORD=... PGDATABASE=... node db/migrate.mjs
 //
 // It holds the advisory lock the application's own schema bootstrap held
 // before migrations were versioned, so during a rolling upgrade it also waits
@@ -11,6 +12,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import pg from "pg";
+import { databaseUrl } from "./database-url.cjs";
 
 export const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations");
 const LOCK_ID = 8_274_531;
@@ -60,17 +62,18 @@ export async function main({
   run = migrate,
   log = console.log,
 } = {}) {
-  if (!env.DATABASE_URL) {
+  const connectionString = databaseUrl(env);
+  if (!connectionString) {
     log("DATABASE_URL is not set");
     return 1;
   }
-  if (!/^postgres(ql)?:\/\//.test(env.DATABASE_URL)) {
+  if (!/^postgres(ql)?:\/\//.test(connectionString)) {
     log("DATABASE_URL is not a postgres:// URL; the SQLite backend migrates itself and needs no migration");
     return 1;
   }
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      await run({ connectionString: env.DATABASE_URL, log });
+      await run({ connectionString, log });
       return 0;
     } catch (error) {
       log(`migration attempt ${attempt}/${attempts} failed: ${error.message}`);

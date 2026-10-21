@@ -15,6 +15,9 @@ something three layers down.
 {{- if and .Values.sqlite.enabled .Values.postgresql.enabled }}
 {{- fail "sqlite.enabled and postgresql.enabled are both set; SQLite would win and the PostgreSQL you deployed would sit unused. Set postgresql.enabled=false." }}
 {{- end }}
+{{- if and .Values.postgresql.auth.existingSecret .Values.postgresql.auth.password }}
+{{- fail "postgresql.auth sets both password and existingSecret; choose one. With existingSecret the password is read from that Secret and the chart stores none." }}
+{{- end }}
 {{- if and .Values.auth.keycloak.enabled (not .Values.auth.keycloak.issuer) }}
 {{- fail "auth.keycloak.enabled needs auth.keycloak.issuer, e.g. https://keycloak.example.com/realms/your-realm." }}
 {{- end }}

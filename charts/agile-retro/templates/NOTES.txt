@@ -28,7 +28,8 @@ Agile Retro {{ .Chart.AppVersion }} is installed as {{ .Release.Name }} in {{ .R
   {{- if .Values.postgresql.enabled }}
   - Bundled Postgres: deployment/{{ include "agile-retro.fullname" . }}-postgres
     (persistence {{ if .Values.postgresql.persistence.enabled }}enabled, {{ .Values.postgresql.persistence.size }}{{ else }}DISABLED — data lost on restart{{ end }})
-  - DATABASE_URL is injected from secret {{ include "agile-retro.fullname" . }}-postgres
+  - The app connects with PGHOST={{ include "agile-retro.fullname" . }}-postgres, PGUSER, PGDATABASE and PGPASSWORD
+  - Database password: {{ if .Values.postgresql.auth.existingSecret }}from Secret {{ .Values.postgresql.auth.existingSecret }} (key {{ .Values.postgresql.auth.existingSecretPasswordKey | default "postgres-password" }}){{ else if .Values.postgresql.auth.password }}as configured{{ else }}generated on install, kept across upgrades{{ end }}
   {{- else }}
   - External database: {{ if .Values.externalDatabase.existingSecret }}from secret {{ .Values.externalDatabase.existingSecret }}{{ else if .Values.externalDatabase.url }}configured via externalDatabase.url{{ else }}NOT SET — set externalDatabase.url or externalDatabase.existingSecret!{{ end }}
   {{- end }}

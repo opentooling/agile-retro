@@ -1,7 +1,9 @@
 /**
  * Data-access dispatcher.
  *
- * Selects a backend at runtime from DATABASE_URL and exposes a single async API
+ * Selects a backend at runtime from the database URL (DATABASE_URL, or one
+ * built from PGHOST and the other PG* variables — see db/database-url.cjs) and
+ * exposes a single async API
  * (every call site already `await`s these functions):
  *
  *   - postgres:// or postgresql://  -> ./db/postgres  (pg, external Postgres)
@@ -11,6 +13,7 @@
  * Postgres path never loads node:sqlite and the SQLite path never loads `pg`.
  */
 import type { DbApi } from "./db/types";
+import { databaseUrl } from "../../db/database-url.cjs";
 
 // Re-export the shared types so callers can keep using `db.RetroFilter`, etc.
 export * from "./db/types";
@@ -19,9 +22,9 @@ function isPostgresUrl(url: string): boolean {
   return /^postgres(ql)?:\/\//i.test(url);
 }
 
-/** Which backend the current DATABASE_URL selects. */
+/** Which backend the current database URL selects. */
 export function activeBackend(): "postgres" | "sqlite" {
-  return isPostgresUrl(process.env.DATABASE_URL ?? "") ? "postgres" : "sqlite";
+  return isPostgresUrl(databaseUrl() ?? "") ? "postgres" : "sqlite";
 }
 
 let backendPromise: Promise<DbApi> | undefined;

@@ -299,6 +299,39 @@ jobs:
           print("The default install renders as documented.")
           PY
 
+      # The bundled database's connection: no URL built in the chart, the app
+      # builds it from PG* variables, and the password comes only from a
+      # Secret — the generated one, or one of the user's own, which the chart
+      # then neither generates nor stores.
+      - name: Render the bundled database's connection
+        run: |
+          python3 - <<'PY'
+          import subprocess, yaml
+          def render(*sets):
+              args = ["helm", "template", "agile-retro", "charts/agile-retro", "-n", "retro"]
+              for s in sets: args += ["--set", s]
+              return [d for d in yaml.safe_load_all(subprocess.check_output(args)) if d]
+          for sets, ref in [((), {"name": "agile-retro-postgres", "key": "postgres-password"}),
+                            (("postgresql.auth.existingSecret=db-pass", "postgresql.auth.existingSecretPasswordKey=pw"),
+                             {"name": "db-pass", "key": "pw"})]:
+              docs = render(*sets)
+              secret = next(d for d in docs if d["kind"] == "Secret" and d["metadata"]["name"] == "agile-retro-postgres")
+              assert "database-url" not in secret["stringData"], secret
+              assert ("postgres-password" in secret["stringData"]) == (not sets), secret
+              pg = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "agile-retro-postgres")
+              env = {e["name"]: e for e in pg["spec"]["template"]["spec"]["containers"][0]["env"]}
+              assert env["POSTGRES_PASSWORD"]["valueFrom"]["secretKeyRef"] == ref, env["POSTGRES_PASSWORD"]
+              app = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "agile-retro")
+              pod = app["spec"]["template"]["spec"]
+              for c in pod["initContainers"] + pod["containers"]:
+                  env = {e["name"]: e for e in c["env"]}
+                  assert "DATABASE_URL" not in env, (c["name"], env["DATABASE_URL"])
+                  assert env["PGPASSWORD"]["valueFrom"]["secretKeyRef"] == ref, (c["name"], env.get("PGPASSWORD"))
+                  got = {k: env[k]["value"] for k in ("PGHOST", "PGPORT", "PGUSER", "PGDATABASE")}
+                  assert got == {"PGHOST": "agile-retro-postgres", "PGPORT": "5432", "PGUSER": "agile", "PGDATABASE": "agile_retro"}, got
+          print("The app builds its database URL; the password comes only from a Secret.")
+          PY
+
       - name: SQLite needs no migration container
         run: |
           helm template t charts/agile-retro --set sqlite.enabled=true --set postgresql.enabled=false > sqlite.yaml
@@ -320,6 +353,8 @@ jobs:
           # Keycloak without an issuer, and no database at all.
           refuse --set auth.keycloak.enabled=true --set auth.keycloak.clientId=x
           refuse --set postgresql.enabled=false
+          # A database password both configured and read from a Secret.
+          refuse --set postgresql.auth.password=x --set postgresql.auth.existingSecret=y
           # More than one replica splits every board (see scaling in values.yaml).
           refuse --set replicaCount=2
           # A conditional extraObjects item takes only when and object, and

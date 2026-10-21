@@ -168,6 +168,45 @@ secrets:
   existingSecret: agile-retro-secrets   # auth-secret, keycloak-client-secret, ...
 ```
 
+The bundled database's password can come from a Secret you manage too — one an
+External Secrets Operator `ExternalSecret`, Vault or a sealed secret writes.
+The chart then never generates or stores it: PostgreSQL reads it from your
+Secret, and so do the app and its migrations, as `PGPASSWORD`.
+
+The chart builds no connection string for the bundled database. It passes
+`PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE` and `PGPASSWORD`, and the app builds
+the URL itself, percent-encoding each part, so a password with `@`, `:` or `/`
+in it needs no escaping. The same works outside the chart: with `DATABASE_URL`
+unset and `PGHOST` set, the app and `npm run db:migrate` connect from the
+`PG*` variables. A `DATABASE_URL` that is set always wins.
+
+```yaml
+postgresql:
+  auth:
+    existingSecret: agile-retro-db-password
+    existingSecretPasswordKey: postgres-password
+# The ExternalSecret that writes it, deployed with the release:
+extraObjects:
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: agile-retro-db-password
+    spec:
+      refreshInterval: 1h
+      secretStoreRef: { kind: ClusterSecretStore, name: vault }
+      target: { name: agile-retro-db-password }
+      data:
+        - secretKey: postgres-password
+          remoteRef: { key: agile-retro/db, property: password }
+```
+
+PostgreSQL reads the password only when it creates its data directory. If you
+switch an existing release over, put the password it already has in your
+Secret first (`kubectl get secret <release>-postgres -o
+jsonpath='{.data.postgres-password}' | base64 -d`); rotating it later means
+`ALTER USER` in the database as well as changing the Secret, then restarting
+the app.
+
 No secret is ever rendered as a literal into the Deployment — everything comes
 through `secretKeyRef`, so `helm get manifest` and anyone who can read
 Deployments see nothing.

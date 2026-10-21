@@ -19,6 +19,7 @@
  */
 import * as db from '../src/lib/db'
 import { templateById } from '../src/lib/retro-templates'
+import { databaseUrl } from '../db/database-url.cjs'
 
 const DAY = 86_400_000
 const MIN = 60_000
@@ -40,7 +41,7 @@ const between = (lo: number, hi: number) => Math.floor(lo + rnd() * (hi - lo + 1
 // Backdating. Everything else goes through the data layer.
 // ---------------------------------------------------------------------------
 
-const isPostgres = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL ?? '')
+const isPostgres = /^postgres(ql)?:\/\//i.test(databaseUrl() ?? '')
 
 type Backdater = {
   set: (table: string, column: string, id: string, when: Date | null) => Promise<void>
@@ -48,7 +49,7 @@ type Backdater = {
 }
 
 async function backdater(): Promise<Backdater> {
-  const url = process.env.DATABASE_URL
+  const url = databaseUrl()
   if (!url) throw new Error('DATABASE_URL is not set')
 
   if (isPostgres) {
@@ -164,7 +165,7 @@ function scaleArg(): number {
 }
 
 async function main() {
-  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is not set')
+  if (!databaseUrl()) throw new Error('DATABASE_URL is not set')
   if (process.argv.includes('--reset')) await removeDemoData()
   const scale = scaleArg()
 

@@ -319,6 +319,14 @@ postgresql:
     username: agile
     # Generated and kept across upgrades when empty, like the other secrets.
     password: ""
+    # -- A Secret of your own holding the password, e.g. one an ExternalSecret,
+    # Vault or a sealed secret writes. The chart then neither generates nor
+    # stores the password: PostgreSQL reads it from this Secret, and so do the
+    # app and its migrations, as PGPASSWORD. (The chart never builds a
+    # connection string; the app builds it from PGHOST, PGUSER, PGPASSWORD...)
+    # Leave `password` empty when this is set.
+    existingSecret: ""
+    existingSecretPasswordKey: "postgres-password"
     database: agile_retro
   persistence:
     enabled: true

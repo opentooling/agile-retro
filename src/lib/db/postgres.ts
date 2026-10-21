@@ -3,7 +3,8 @@
  *
  * `pg` is pure JavaScript (no native build step — we don't use pg-native), so it
  * stays airgapped/offline-build friendly. The connection string comes from
- * DATABASE_URL (postgres://user:pass@host:port/db).
+ * DATABASE_URL (postgres://user:pass@host:port/db), or is built from PGHOST,
+ * PGPORT, PGUSER, PGPASSWORD and PGDATABASE (see db/database-url.cjs).
  *
  * The schema is not created here. It lives in versioned migrations,
  * db/migrations/*.sql, applied in order by db/migrate.mjs — in Kubernetes by
@@ -23,6 +24,7 @@ import type {
 } from "./types";
 import type { BoardScope } from "../authz";
 import { splitTags } from "./facets";
+import { databaseUrl } from "../../../db/database-url.cjs";
 
 // ---------------------------------------------------------------------------
 // Connection + schema bootstrap
@@ -35,11 +37,12 @@ const globalForDb = globalThis as unknown as {
 
 function getPool(): Pool {
   if (!globalForDb.__pgPool) {
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is not set (expected a postgres:// connection string)");
+    const connectionString = databaseUrl();
+    if (!connectionString) {
+      throw new Error("DATABASE_URL is not set (expected a postgres:// connection string, or PGHOST and the other PG* variables)");
     }
     globalForDb.__pgPool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString,
       max: Number(process.env.PGPOOL_MAX ?? 10),
     });
   }

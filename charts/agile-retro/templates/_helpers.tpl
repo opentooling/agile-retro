@@ -78,20 +78,32 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
-DATABASE_URL environment entry.
+The database connection's environment entries.
 
-Shared by the app Deployment and the migration Job so the two can never end up
-pointed at different databases.
+Shared by the app Deployment and the migration init container so the two can
+never end up pointed at different databases. For the bundled PostgreSQL the
+chart builds no URL: it passes libpq's PG* variables, with PGPASSWORD straight
+from the Secret that holds the password, and the app builds the URL from them
+(db/database-url.cjs).
 */}}
-{{- define "agile-retro.databaseUrlEnv" -}}
+{{- define "agile-retro.databaseEnv" -}}
+{{- if and .Values.postgresql.enabled (not .Values.sqlite.enabled) }}
+- name: PGHOST
+  value: {{ printf "%s-postgres" (include "agile-retro.fullname" .) | quote }}
+- name: PGPORT
+  value: "5432"
+- name: PGUSER
+  value: {{ .Values.postgresql.auth.username | quote }}
+- name: PGDATABASE
+  value: {{ .Values.postgresql.auth.database | quote }}
+- name: PGPASSWORD
+  valueFrom:
+    secretKeyRef:
+      {{- include "agile-retro.postgres.passwordRef" . | nindent 6 }}
+{{- else }}
 - name: DATABASE_URL
   {{- if .Values.sqlite.enabled }}
   value: "file:{{ .Values.sqlite.mountPath }}/{{ .Values.sqlite.fileName }}"
-  {{- else if .Values.postgresql.enabled }}
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "agile-retro.fullname" . }}-postgres
-      key: database-url
   {{- else if .Values.externalDatabase.existingSecret }}
   valueFrom:
     secretKeyRef:
@@ -100,6 +112,7 @@ pointed at different databases.
   {{- else }}
   value: {{ required "Set sqlite.enabled=true, or postgresql.enabled=true, or provide externalDatabase.url / externalDatabase.existingSecret" .Values.externalDatabase.url | quote }}
   {{- end }}
+{{- end }}
 {{- end }}
 
 {{/*
@@ -278,6 +291,21 @@ community.
 {{- fail (printf "postgresql.flavor must be community or rhel, not %q" $flavor) -}}
 {{- end -}}
 {{- $flavor -}}
+{{- end -}}
+
+{{/*
+Where the bundled database's password is read from, as the name and key of a
+secretKeyRef: the user's own Secret when postgresql.auth.existingSecret is set,
+else the one the chart generates.
+*/}}
+{{- define "agile-retro.postgres.passwordRef" -}}
+{{- with .Values.postgresql.auth.existingSecret -}}
+name: {{ . }}
+key: {{ $.Values.postgresql.auth.existingSecretPasswordKey | default "postgres-password" }}
+{{- else -}}
+name: {{ include "agile-retro.fullname" . }}-postgres
+key: postgres-password
+{{- end -}}
 {{- end -}}
 
 {{/* The bundled database's image: as configured, or the flavour's default. */}}
